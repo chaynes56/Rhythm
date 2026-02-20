@@ -1,0 +1,10 @@
+[project]
+name = "rhythm"
+version = "0.1.0"
+description = "Explore rhythm feedback possibilities"
+requires-python = ">=3.14"
+dependencies = [
+    "dash>=4.0.0",
+    "dash-bootstrap-components>=2.0.4",
+    "pandas>=3.0.1",
+]
