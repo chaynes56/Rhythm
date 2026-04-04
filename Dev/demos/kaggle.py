@@ -1,12 +1,7 @@
-# from https://github.com/plotly/tutorial-code/blob/main/Videos/DashIntro/app.py as part of
-# https://www.youtube.com/watch?v=0mfIK8zxUds&t=1s&ab_channel=Plotly tutorial on Dash by Plotly.
-# This code creates a Dash application that visualizes Airbnb listings in Mexico City.
-# It allows users to filter listings based on minimum nights and price range,
-# and displays the results on a scatter mapbox. The data is sourced from a CSV file hosted on GitHub,
-# which contains information about Airbnb listings in Mexico City. The application uses Plotly Express for visualization
-# and Dash Bootstrap Components for styling.
+#!/usr/bin/env python3
+# Copyright (C) Christopher T. Haynes - All Rights Reserved. See the project LICENSE file.
 
-from dash import Dash, dcc, html, Output, Input
+from dash import Dash, dcc, Output, Input
 import dash_bootstrap_components as dbc
 import plotly.express as px
 import pandas as pd

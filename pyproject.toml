@@ -7,4 +7,9 @@ dependencies = [
     "dash>=4.0.0",
     "dash-bootstrap-components>=2.0.4",
     "pandas>=3.0.1",
+    "numpy>=1.26.0",
+    "plotly>=5.18.0",
+    "scipy>=1.11.0",
+    "librosa>=0.10.1",
+    "soundfile>=0.12.1",
 ]
