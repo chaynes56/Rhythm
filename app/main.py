@@ -10,13 +10,13 @@ import io
 import soundfile as sf
 import librosa
 import json
-import os
+# import os
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 app.layout = dbc.Container([
     dbc.Row([
-        dbc.Col(html.H1("Percussion Guidance App"), className="text-center mb-4")
+        dbc.Col(html.H1("Rhythm App"), className="text-center mb-4")
     ]),
     
     dbc.Row([
@@ -74,8 +74,9 @@ app.layout = dbc.Container([
     dcc.Store(id="audio-store"),
     dcc.Store(id="metronome-points-store"),
     dcc.Store(id="pulse-points-store"),
-    html.Input(id="audio-data-store", type="hidden"),
-    dbc.Button(id="audio-process-btn", style={'display': 'none'}),
+    dcc.Input(id="audio-data-store", type="text", style={'display': 'none'}, persistence=False),
+    dcc.Input(id="playback-sync", type="text", style={'display': 'none'}),
+    dbc.Button("Process", id="audio-process-btn", style={'display': 'none'}, n_clicks=0),
     dcc.Download(id="download-audio"),
     dcc.Upload(id="upload-audio", style={'display': 'none'})
 ], fluid=True)
@@ -94,12 +95,13 @@ clientside_callback(
 
 clientside_callback(
     """
-    function(n_clicks) {
-        return window.dash_clientside.recorder.playAudio(n_clicks);
+    function(n_clicks, volume) {
+        return window.dash_clientside.recorder.playAudio(n_clicks, volume);
     }
     """,
     Output("play-btn", "n_clicks"),
     Input("play-btn", "n_clicks"),
+    State("playback-vol", "value"),
 )
 
 clientside_callback(
@@ -116,6 +118,27 @@ clientside_callback(
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
     State("metronome-vol", "value"),
+)
+
+clientside_callback(
+    """
+    function(audio_json) {
+        if (audio_json) {
+            try {
+                const data = JSON.parse(audio_json);
+                if (data && data.audio) {
+                    window.lastRecordedAudio = data.audio;
+                    console.log("Updated window.lastRecordedAudio from audio-store");
+                }
+            } catch (e) {
+                console.error("Error parsing audio_json in clientside callback:", e);
+            }
+        }
+        return "";
+    }
+    """,
+    Output("playback-sync", "value"),
+    Input("audio-store", "data"),
 )
 
 @app.callback(
@@ -148,83 +171,91 @@ def update_record_button(recording_value):
     prevent_initial_call=True
 )
 def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
+    print(f"process_audio: n_clicks={n_clicks}, audio_len={len(base64_audio) if base64_audio else 0}")
     if not base64_audio:
         return None, go.Figure()
     
-    # Extract data from base64
-    header, data = base64_audio.split(',')
-    audio_bytes = base64.b64decode(data)
-    
-    # Load with soundfile
-    with io.BytesIO(audio_bytes) as f:
-        y, sr = sf.read(f)
-    
-    # If stereo, convert to mono
-    if len(y.shape) > 1:
-        y = y.mean(axis=1)
+    try:
+        # Extract data from base64
+        if ',' in base64_audio:
+            header, data = base64_audio.split(',')
+        else:
+            data = base64_audio
+            
+        audio_bytes = base64.b64decode(data)
         
-    # Pulse analysis
-    onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    # limit by tempo
-    tempo_detected, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, bpm=tempo)
-    beat_times = librosa.frames_to_time(beats, sr=sr)
-    
-    # Metronome points (ideal points based on tempo)
-    # For now, just generate them from the start
-    duration = len(y) / sr
-    seconds_per_beat = 60.0 / tempo
-    metronome_times = np.arange(0, duration, seconds_per_beat)
-    
-    # Create waveform figure
-    time = np.linspace(0, duration, num=len(y))
-    # Downsample for display if too large
-    if len(y) > 10000:
-        skip = len(y) // 10000
-        time_display = time[::skip]
-        y_display = y[::skip]
-    else:
-        time_display = time
-        y_display = y
+        # Load with soundfile
+        with io.BytesIO(audio_bytes) as f:
+            y, sr = sf.read(f)
         
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform", line=dict(color='blue')))
-    
-    # Add metronome points
-    metronome_colors = ['red' if i % beats_per_measure == 0 else 'orange' for i in range(len(metronome_times))]
-    fig.add_trace(go.Scatter(
-        x=metronome_times, 
-        y=[max(y_display)*1.1 if i % beats_per_measure == 0 else max(y_display)*1.05 for i in range(len(metronome_times))],
-        mode='markers',
-        name='Metronome',
-        marker=dict(color=metronome_colors, symbol='diamond')
-    ))
-    
-    # Add pulse points
-    fig.add_trace(go.Scatter(
-        x=beat_times,
-        y=[min(y_display)*1.1] * len(beat_times),
-        mode='markers',
-        name='Pulses',
-        marker=dict(color='green', symbol='circle')
-    ))
-    
-    fig.update_layout(
-        xaxis_title="Time (s)",
-        yaxis_title="Amplitude",
-        dragmode='pan',
-        template='plotly_white'
-    )
-    
-    # Prepare data for saving
-    save_data = {
-        "audio": base64_audio,
-        "tempo": tempo,
-        "beats_per_measure": beats_per_measure,
-        "metronome_times": metronome_times.tolist(),
-        "beat_times": beat_times.tolist()
-    }
-    
-    return json.dumps(save_data), fig
+        # If stereo, convert to mono
+        if len(y.shape) > 1:
+            y = y.mean(axis=1)
+            
+        # Pulse analysis
+        onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+        # limit by tempo
+        tempo_detected, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, bpm=tempo)
+        beat_times = librosa.frames_to_time(beats, sr=sr)
+        
+        # Metronome points (ideal points based on tempo)
+        duration = len(y) / sr
+        seconds_per_beat = 60.0 / tempo
+        metronome_times = np.arange(0, duration, seconds_per_beat)
+        
+        # Create waveform figure
+        time = np.linspace(0, duration, num=len(y))
+        # Downsample for display if too large
+        if len(y) > 10000:
+            skip = len(y) // 10000
+            time_display = time[::skip]
+            y_display = y[::skip]
+        else:
+            time_display = time
+            y_display = y
+            
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform", line=dict(color='blue')))
+        
+        # Add metronome points
+        metronome_colors = ['red' if i % beats_per_measure == 0 else 'orange' for i in range(len(metronome_times))]
+        fig.add_trace(go.Scatter(
+            x=metronome_times, 
+            y=[max(y_display)*1.1 if i % beats_per_measure == 0 else max(y_display)*1.05 for i in range(len(metronome_times))],
+            mode='markers',
+            name='Metronome',
+            marker=dict(color=metronome_colors, symbol='diamond')
+        ))
+        
+        # Add pulse points
+        fig.add_trace(go.Scatter(
+            x=beat_times,
+            y=[min(y_display)*1.1] * len(beat_times),
+            mode='markers',
+            name='Pulses',
+            marker=dict(color='green', symbol='circle')
+        ))
+        
+        fig.update_layout(
+            xaxis_title="Time (s)",
+            yaxis_title="Amplitude",
+            dragmode='pan',
+            template='plotly_white'
+        )
+        
+        # Prepare data for saving
+        save_data = {
+            "audio": base64_audio,
+            "tempo": tempo,
+            "beats_per_measure": beats_per_measure,
+            "metronome_times": metronome_times.tolist(),
+            "beat_times": beat_times.tolist()
+        }
+        
+        return json.dumps(save_data), fig
+    except Exception as e:
+        print(f"Error processing audio: {e}")
+        return None, go.Figure()
 
 @app.callback(
     Output("download-audio", "data"),
@@ -242,62 +273,80 @@ def save_recording(n_clicks, audio_json):
     Output("waveform-graph", "figure", allow_duplicate=True),
     Output("status-msg", "children"),
     Input("upload-audio", "contents"),
+    State("tempo-slider", "value"),
+    State("beats-per-measure", "value"),
     prevent_initial_call=True
 )
-def load_recording(contents):
+def load_recording(contents, tempo_slider, beats_per_measure_slider):
     if not contents:
         return None, go.Figure(), ""
     
-    content_type, content_string = contents.split(',')
-    decoded = base64.b64decode(content_string)
-    data = json.loads(decoded.decode('utf-8'))
-    
-    base64_audio = data["audio"]
-    # Re-extract for display
-    header, audio_data = base64_audio.split(',')
-    audio_bytes = base64.b64decode(audio_data)
-    with io.BytesIO(audio_bytes) as f:
-        y, sr = sf.read(f)
-    if len(y.shape) > 1:
-        y = y.mean(axis=1)
-    
-    duration = len(y) / sr
-    time = np.linspace(0, duration, num=len(y))
-    if len(y) > 10000:
-        skip = len(y) // 10000
-        time_display = time[::skip]
-        y_display = y[::skip]
-    else:
-        time_display = time
-        y_display = y
+    try:
+        content_type, content_string = contents.split(',')
+        decoded = base64.b64decode(content_string)
         
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform", line=dict(color='blue')))
-    
-    metronome_times = np.array(data["metronome_times"])
-    beat_times = np.array(data["beat_times"])
-    bpm = data["beats_per_measure"]
-    
-    metronome_colors = ['red' if i % bpm == 0 else 'orange' for i in range(len(metronome_times))]
-    fig.add_trace(go.Scatter(
-        x=metronome_times, 
-        y=[max(y_display)*1.1 if i % bpm == 0 else max(y_display)*1.05 for i in range(len(metronome_times))],
-        mode='markers',
-        name='Metronome',
-        marker=dict(color=metronome_colors, symbol='diamond')
-    ))
-    
-    fig.add_trace(go.Scatter(
-        x=beat_times,
-        y=[min(y_display)*1.1] * len(beat_times),
-        mode='markers',
-        name='Pulses',
-        marker=dict(color='green', symbol='circle')
-    ))
-    
-    fig.update_layout(xaxis_title="Time (s)", yaxis_title="Amplitude", dragmode='pan', template='plotly_white')
-    
-    return json.dumps(data), fig, "Recording loaded successfully"
+        try:
+            data = json.loads(decoded.decode('utf-8'))
+        except UnicodeDecodeError:
+            return None, go.Figure(), "Error: Uploaded file is not a valid JSON recording saved by this app."
+            
+        base64_audio = data["audio"]
+        # Set global for playback
+        # This will be passed to recorder.js if we use another clientside callback or similar.
+        # But here we are in server side. We need to pass it to JS.
+        if ',' in base64_audio:
+            header, audio_data = base64_audio.split(',')
+        else:
+            audio_data = base64_audio
+            
+        audio_bytes = base64.b64decode(audio_data)
+        with io.BytesIO(audio_bytes) as f:
+            y, sr = sf.read(f)
+        if len(y.shape) > 1:
+            y = y.mean(axis=1)
+        
+        duration = len(y) / sr
+        time = np.linspace(0, duration, num=len(y))
+        if len(y) > 10000:
+            skip = len(y) // 10000
+            time_display = time[::skip]
+            y_display = y[::skip]
+        else:
+            time_display = time
+            y_display = y
+            
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform", line=dict(color='blue')))
+        
+        metronome_times = np.array(data.get("metronome_times", []))
+        beat_times = np.array(data.get("beat_times", []))
+        bpm = data.get("beats_per_measure", beats_per_measure_slider)
+        
+        if len(metronome_times) > 0:
+            metronome_colors = ['red' if i % bpm == 0 else 'orange' for i in range(len(metronome_times))]
+            fig.add_trace(go.Scatter(
+                x=metronome_times, 
+                y=[max(y_display)*1.1 if i % bpm == 0 else max(y_display)*1.05 for i in range(len(metronome_times))],
+                mode='markers',
+                name='Metronome',
+                marker=dict(color=metronome_colors, symbol='diamond')
+            ))
+        
+        if len(beat_times) > 0:
+            fig.add_trace(go.Scatter(
+                x=beat_times,
+                y=[min(y_display)*1.1] * len(beat_times),
+                mode='markers',
+                name='Pulses',
+                marker=dict(color='green', symbol='circle')
+            ))
+        
+        fig.update_layout(xaxis_title="Time (s)", yaxis_title="Amplitude", dragmode='pan', template='plotly_white')
+        
+        return json.dumps(data), fig, "Recording loaded successfully"
+    except Exception as e:
+        print(f"Error loading recording: {e}")
+        return None, go.Figure(), f"Error loading recording: {str(e)}"
 
 clientside_callback(
     """

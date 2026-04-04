@@ -1,11 +1,7 @@
 # Development notes
 
 # TODO
-- Metronome
-- mp3 input
-- Audio output
-- Mic input
-- Remove pandas dependency if not necessary
+- See Rhythm App Notes.md in Obsidian favorites.
 # Junie agent request
 This project is to develop a Plotly/Dash app providing guidance to percussionists. 
 Begin by creating an app that can record audio from the player's
@@ -33,3 +29,17 @@ response:
 3. Replace `html.Input` with `dcc.Input` or a more appropriate component in `app/main.py`.
 4. Run a lint check or a small test script to ensure the fix works.
 5. Verify other components in `app/main.py` for similar issues.
+
+Github Copilot just said replacing html.Input with dcc.Input.
+App display works, but the recording functionality is not working.
+
+## Status
+### Working
+- app display
+- metronome, all functionality
+- Start/stop recording toggle, and asks for permission to use microphone
+- Load recording pops up a file picker
+### Not working
+- nothing displayed
+- play recording button unresponsive
+- save recording button unresponsive
