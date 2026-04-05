@@ -10,7 +10,10 @@ import io
 import soundfile as sf
 import librosa
 import json
-# import os
+import warnings
+
+# Suppress librosa deprecation warnings to clean up console output
+warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
@@ -66,7 +69,7 @@ app.layout = dbc.Container([
         ], width=4),
         
         dbc.Col([
-            dcc.Graph(id="waveform-graph", config={'scrollZoom': True}),
+            dcc.Graph(id="waveform-graph", config={'scrollZoom': True, 'displayModeBar': True, 'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d'], 'displaylogo': False}),
         ], width=8)
     ]),
     
@@ -85,7 +88,10 @@ app.layout = dbc.Container([
 clientside_callback(
     """
     function(n_clicks, recording_status) {
-        return window.dash_clientside.recorder.toggleRecording(n_clicks, recording_status.length > 0) ? ['recording'] : [];
+        if (n_clicks) {
+            return window.dash_clientside.recorder.toggleRecording(n_clicks, recording_status.length > 0) ? ['recording'] : [];
+        }
+        return recording_status;
     }
     """,
     Output("is-recording", "value"),
@@ -164,6 +170,7 @@ def update_record_button(recording_value):
 @app.callback(
     Output("audio-store", "data"),
     Output("waveform-graph", "figure"),
+    Output("status-msg", "children", allow_duplicate=True),
     Input("audio-process-btn", "n_clicks"),
     State("audio-data-store", "value"),
     State("tempo-slider", "value"),
@@ -172,9 +179,12 @@ def update_record_button(recording_value):
 )
 def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
     print(f"process_audio: n_clicks={n_clicks}, audio_len={len(base64_audio) if base64_audio else 0}")
+
     if not base64_audio:
-        return None, go.Figure()
-    
+        status_msg = "No audio data to process"
+        print(f"status_msg: {status_msg}")
+        return None, go.Figure(), status_msg
+
     try:
         # Extract data from base64
         if ',' in base64_audio:
@@ -184,10 +194,25 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
             
         audio_bytes = base64.b64decode(data)
         
-        # Load with soundfile
-        with io.BytesIO(audio_bytes) as f:
-            y, sr = sf.read(f)
-        
+        # Load with librosa (handles more formats than soundfile)
+        # Try soundfile first for better performance with WAV files
+        try:
+            with io.BytesIO(audio_bytes) as f:
+                y, sr = sf.read(f)
+        except Exception as sf_error:
+            # If soundfile fails, try librosa which can handle WebM, OGG, etc.
+            print(f"Soundfile failed: {sf_error}. Trying librosa...")
+            # Save to temporary location for librosa to read
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+            try:
+                y, sr = librosa.load(tmp_path, sr=None)
+            finally:
+                import os
+                os.unlink(tmp_path)
+
         # If stereo, convert to mono
         if len(y.shape) > 1:
             y = y.mean(axis=1)
@@ -252,10 +277,12 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
             "beat_times": beat_times.tolist()
         }
         
-        return json.dumps(save_data), fig
+        return json.dumps(save_data), fig, "Recording processed successfully"
     except Exception as e:
-        print(f"Error processing audio: {e}")
-        return None, go.Figure()
+        error_msg = f"Error processing audio: {e}"
+        print(error_msg)
+        status_msg = error_msg
+        return None, go.Figure(), status_msg
 
 @app.callback(
     Output("download-audio", "data"),
@@ -282,14 +309,22 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
         return None, go.Figure(), ""
     
     try:
+        print(f"load_recording: contents length = {len(contents) if contents else 0}")
         content_type, content_string = contents.split(',')
+        print(f"load_recording: content_type = {content_type}")
         decoded = base64.b64decode(content_string)
-        
+        print(f"load_recording: decoded length = {len(decoded)}")
+
         try:
             data = json.loads(decoded.decode('utf-8'))
-        except UnicodeDecodeError:
+            print(f"load_recording: JSON parsed successfully, keys = {list(data.keys())}")
+        except UnicodeDecodeError as e:
+            print(f"load_recording: UnicodeDecodeError: {e}")
             return None, go.Figure(), "Error: Uploaded file is not a valid JSON recording saved by this app."
-            
+        except json.JSONDecodeError as e:
+            print(f"load_recording: JSONDecodeError: {e}")
+            return None, go.Figure(), "Error: Uploaded file contains invalid JSON."
+
         base64_audio = data["audio"]
         # Set global for playback
         # This will be passed to recorder.js if we use another clientside callback or similar.
@@ -300,8 +335,23 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
             audio_data = base64_audio
             
         audio_bytes = base64.b64decode(audio_data)
-        with io.BytesIO(audio_bytes) as f:
-            y, sr = sf.read(f)
+        # Load with librosa (handles more formats than soundfile)
+        try:
+            with io.BytesIO(audio_bytes) as f:
+                y, sr = sf.read(f)
+        except Exception as sf_error:
+            # If soundfile fails, try librosa which can handle WebM, OGG, etc.
+            print(f"Soundfile failed: {sf_error}. Trying librosa...")
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+            try:
+                y, sr = librosa.load(tmp_path, sr=None)
+            finally:
+                import os
+                os.unlink(tmp_path)
+
         if len(y.shape) > 1:
             y = y.mean(axis=1)
         
@@ -342,6 +392,9 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
             ))
         
         fig.update_layout(xaxis_title="Time (s)", yaxis_title="Amplitude", dragmode='pan', template='plotly_white')
+        
+        print(f"load_recording: Successfully processed audio, duration={duration:.2f}s, sr={sr}")
+        print(f"load_recording: Returning data with {len(metronome_times)} metronome points, {len(beat_times)} beat points")
         
         return json.dumps(data), fig, "Recording loaded successfully"
     except Exception as e:
