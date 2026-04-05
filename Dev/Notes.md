@@ -112,3 +112,39 @@ load_recording: Returning data with 8 metronome points, 7 beat points
 **Key Finding**: Everything works after browser cache clear + app restart
 **Issue**: Browser AudioContext gets into invalid/suspended state over time
 **Fix Applied**: Improved AudioContext state management - properly detect closed/suspended state, reinitialize if needed, add error handling
+
+## Testing2
+- After cache clear and restart, metronome works, start recording for about a minute
+- Stop recording, and message Error processing audio: appears under buttons, with 
+  console output: Soundfile failed: Error opening <_io.BytesIO object at 0x108f4b920>: Format not recognised.. Trying librosa...
+/Users/cth/Dev/PycharmProjects/Rhythm/app/main.py:211: UserWarning: PySoundFile failed. Trying audioread instead.
+  y, sr = librosa.load(tmp_path, sr=None)
+Error processing audio: 
+- No waveform graphics.
+- Play recording works 
+- Tried another recording of just a few seconds, with the same message when 
+  recording stops, but now message Recording processed successfully under buttons and 
+  waveform appears.
+
+**Key Finding**: Long recordings timeout when librosa audioread backend processes them
+**Issue**: librosa.load with audioread backend hangs on large WebM files
+**Fix Applied**: 
+- Added timeout protection (30 seconds max per file)
+- Added threading-based timeout handling
+- Better error messages for processing failures
+- Added duration check (max 10 minutes)
+
+## Testing3
+- Works for up to 15 seconds
+- 20 sec recording gives a failed processing error when stopped
+  - after this error, playback and load still works
+  - but no waveform and save does not work
+- full recovery after another recording of under 15 seconds
+- 15 seconds of analysis is marginal for this app. It would be nice to have the 
+  limit be at least a minute. 
+  - Why isn't this possible?
+  - It would be much better to automatically stop the recording before the limit is 
+    reached so the recording isn't wasted.
+- The play button should toggle to stop playback (as the record button stops recording)
+  - This is better functionality and stops the present poor behavior of letting a 
+    second playback start while another is in progress. 

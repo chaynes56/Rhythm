@@ -11,9 +11,75 @@ import soundfile as sf
 import librosa
 import json
 import warnings
+import signal
+import tempfile
+import os
 
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
+
+def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=60):
+    """
+    Load audio from bytes with timeout and size limits.
+
+    Args:
+        audio_bytes: Raw audio bytes from recording
+        max_duration: Maximum allowed audio duration in seconds (default 10 min)
+        timeout_seconds: Timeout for librosa.load (default 60 sec - increased from 30)
+
+    Returns:
+        tuple: (y, sr) audio array and sample rate, or None if fails
+    """
+    import threading
+
+    result = {"y": None, "sr": None, "error": None}
+
+    def load_with_librosa():
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as tmp:
+                tmp.write(audio_bytes)
+                tmp_path = tmp.name
+            try:
+                print(f"load_audio_from_bytes: Loading with librosa (audio size: {len(audio_bytes)} bytes, timeout: {timeout_seconds}s)...")
+                # Try with different backends if available
+                try:
+                    y, sr = librosa.load(tmp_path, sr=None)
+                except Exception as e1:
+                    print(f"load_audio_from_bytes: First attempt failed: {e1}, trying with mono=True...")
+                    # Try with mono=True which might be faster
+                    y, sr = librosa.load(tmp_path, sr=None, mono=True)
+
+                # Check duration
+                duration = len(y) / sr
+                if duration > max_duration:
+                    result["error"] = f"Recording too long ({duration:.1f}s > {max_duration}s max)"
+                    print(f"load_audio_from_bytes: {result['error']}")
+                else:
+                    result["y"] = y
+                    result["sr"] = sr
+                    print(f"load_audio_from_bytes: Loaded successfully, duration={duration:.1f}s, sr={sr}")
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+        except Exception as e:
+            result["error"] = str(e)
+            print(f"load_audio_from_bytes: Error: {e}")
+
+    # Try with increased timeout
+    thread = threading.Thread(target=load_with_librosa)
+    thread.daemon = True
+    thread.start()
+    thread.join(timeout=timeout_seconds)
+
+    if thread.is_alive():
+        result["error"] = f"Audio loading timeout (>{timeout_seconds}s)"
+        print(f"load_audio_from_bytes: TIMEOUT after {timeout_seconds} seconds")
+        return None
+
+    if result["error"]:
+        return None
+
+    return (result["y"], result["sr"])
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
@@ -32,6 +98,7 @@ app.layout = dbc.Container([
                     dbc.Button("Save Recording", id="save-btn", color="primary", className="me-2"),
                     dbc.Button("Load Recording", id="load-btn", color="info"),
                     dcc.Checklist(id="is-recording", options=[{"label": "Recording", "value": "recording"}], value=[], style={'display': 'none'}),
+                    dcc.Checklist(id="is-playing", options=[{"label": "Playing", "value": "playing"}], value=[], style={'display': 'none'}),
                     html.Div(id="status-msg", className="mt-2")
                 ])
             ], className="mb-4"),
@@ -101,13 +168,16 @@ clientside_callback(
 
 clientside_callback(
     """
-    function(n_clicks, volume) {
-        return window.dash_clientside.recorder.playAudio(n_clicks, volume);
+    function(n_clicks, volume, playing_status) {
+        const isPlaying = playing_status.length > 0;
+        const result = window.dash_clientside.recorder.playAudio(n_clicks, volume, isPlaying);
+        return result ? ['playing'] : [];
     }
     """,
-    Output("play-btn", "n_clicks"),
+    Output("is-playing", "value"),
     Input("play-btn", "n_clicks"),
     State("playback-vol", "value"),
+    State("is-playing", "value"),
 )
 
 clientside_callback(
@@ -168,6 +238,16 @@ def update_record_button(recording_value):
     return "Start Recording", "danger"
 
 @app.callback(
+    Output("play-btn", "children"),
+    Output("play-btn", "color"),
+    Input("is-playing", "value")
+)
+def update_play_button(playing_value):
+    if "playing" in playing_value:
+        return "Stop Playback", "secondary"
+    return "Play Recording", "success"
+
+@app.callback(
     Output("audio-store", "data"),
     Output("waveform-graph", "figure"),
     Output("status-msg", "children", allow_duplicate=True),
@@ -193,25 +273,25 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
             data = base64_audio
             
         audio_bytes = base64.b64decode(data)
-        
+        print(f"process_audio: Decoded audio size: {len(audio_bytes)} bytes")
+
         # Load with librosa (handles more formats than soundfile)
         # Try soundfile first for better performance with WAV files
         try:
             with io.BytesIO(audio_bytes) as f:
                 y, sr = sf.read(f)
+            print(f"process_audio: Loaded with soundfile, sr={sr}, duration={len(y)/sr:.2f}s")
         except Exception as sf_error:
             # If soundfile fails, try librosa which can handle WebM, OGG, etc.
             print(f"Soundfile failed: {sf_error}. Trying librosa...")
-            # Save to temporary location for librosa to read
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-            try:
-                y, sr = librosa.load(tmp_path, sr=None)
-            finally:
-                import os
-                os.unlink(tmp_path)
+
+            # For large recordings, use timeout
+            result = load_audio_from_bytes(audio_bytes)
+            if result is None:
+                return None, go.Figure(), "Error: Audio processing timeout. Recording may be too long or corrupted."
+
+            y, sr = result
+            print(f"process_audio: Loaded with librosa, sr={sr}, duration={len(y)/sr:.2f}s")
 
         # If stereo, convert to mono
         if len(y.shape) > 1:
@@ -335,22 +415,24 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
             audio_data = base64_audio
             
         audio_bytes = base64.b64decode(audio_data)
+        print(f"load_recording: Decoded audio size: {len(audio_bytes)} bytes")
+        
         # Load with librosa (handles more formats than soundfile)
         try:
             with io.BytesIO(audio_bytes) as f:
                 y, sr = sf.read(f)
+            print(f"load_recording: Loaded with soundfile, sr={sr}")
         except Exception as sf_error:
             # If soundfile fails, try librosa which can handle WebM, OGG, etc.
-            print(f"Soundfile failed: {sf_error}. Trying librosa...")
-            import tempfile
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
-            try:
-                y, sr = librosa.load(tmp_path, sr=None)
-            finally:
-                import os
-                os.unlink(tmp_path)
+            print(f"Soundfile failed: {sf_error}. Trying librosa with timeout...")
+            
+            # For large recordings, use timeout
+            result = load_audio_from_bytes(audio_bytes)
+            if result is None:
+                return None, go.Figure(), "Error: Recording too long or corrupted. Max length is 10 minutes."
+            
+            y, sr = result
+            print(f"load_recording: Loaded with librosa, sr={sr}")
 
         if len(y.shape) > 1:
             y = y.mean(axis=1)

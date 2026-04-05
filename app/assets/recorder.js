@@ -6,6 +6,7 @@ let mediaRecorder;
 let audioChunks = [];
 let audioContext;
 let metronomeInterval;
+let currentAudio = null; // Track current playing audio
 
 window.dash_clientside.recorder = {
     toggleRecording: function(n_clicks, is_recording) {
@@ -20,11 +21,23 @@ window.dash_clientside.recorder = {
                     mediaRecorder.start();
                     audioChunks = [];
 
+                    // Set up automatic stop after 45 seconds (before 60 second timeout)
+                    const maxRecordingTime = 45000; // 45 seconds
+                    const recordingTimeout = setTimeout(() => {
+                        if (mediaRecorder && mediaRecorder.state === 'recording') {
+                            console.log("Automatic stop: Recording reached maximum time limit");
+                            mediaRecorder.stop();
+                            // Stop all tracks to release microphone
+                            stream.getTracks().forEach(track => track.stop());
+                        }
+                    }, maxRecordingTime);
+
                     mediaRecorder.addEventListener("dataavailable", event => {
                         audioChunks.push(event.data);
                     });
 
                     mediaRecorder.addEventListener("stop", () => {
+                        clearTimeout(recordingTimeout); // Clear the timeout if manually stopped
                         console.log("Recording stopped. Processing audio...");
                         // Try to use the format the browser actually recorded in
                         const mimeType = mediaRecorder.mimeType || 'audio/wav';
@@ -76,25 +89,52 @@ window.dash_clientside.recorder = {
             console.log("Stopping recording...");
             if (mediaRecorder && mediaRecorder.state !== "inactive") {
                 mediaRecorder.stop();
+                // Stop all tracks to release microphone
+                if (mediaRecorder.stream) {
+                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                }
             }
             return false;
         }
     },
 
-    playAudio: function(n_clicks, volume) {
-        console.log("playAudio: n_clicks=", n_clicks, "volume=", volume, "lastRecordedAudio exists:", !!window.lastRecordedAudio);
-        if (n_clicks && window.lastRecordedAudio) {
-            const audio = new Audio(window.lastRecordedAudio);
-            audio.volume = (volume !== undefined && volume !== null) ? volume : 1.0;
-            console.log("Playing audio with volume:", audio.volume);
-            audio.play().catch(err => {
+    playAudio: function(n_clicks, volume, is_playing) {
+        console.log("playAudio: n_clicks=", n_clicks, "volume=", volume, "is_playing=", is_playing, "lastRecordedAudio exists:", !!window.lastRecordedAudio);
+
+        // If currently playing, stop it
+        if (is_playing && currentAudio) {
+            console.log("Stopping current playback");
+            currentAudio.pause();
+            currentAudio.currentTime = 0;
+            currentAudio = null;
+            return false; // Not playing anymore
+        }
+
+        // If not playing and we have audio, start playing
+        if (!is_playing && window.lastRecordedAudio) {
+            currentAudio = new Audio(window.lastRecordedAudio);
+            currentAudio.volume = (volume !== undefined && volume !== null) ? volume : 1.0;
+            console.log("Playing audio with volume:", currentAudio.volume);
+
+            currentAudio.addEventListener('ended', () => {
+                console.log("Audio playback ended");
+                currentAudio = null;
+                // Note: We can't directly update the Dash state from here
+                // The button will be updated when clicked again
+            });
+
+            currentAudio.play().catch(err => {
                 console.error("Playback error:", err);
                 console.error("Error message:", err.message);
+                currentAudio = null;
             });
-        } else if (n_clicks) {
+
+            return true; // Now playing
+        } else if (!window.lastRecordedAudio) {
             console.warn("No recording available to play");
         }
-        return n_clicks;
+
+        return is_playing; // Return current state if no action taken
     },
 
     toggleMetronome: function(n_clicks, is_playing, tempo, beatsPerMeasure, volume) {
