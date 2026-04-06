@@ -13,24 +13,59 @@ window.dash_clientside.recorder = {
         console.log("toggleRecording: n_clicks=", n_clicks, "is_recording=", is_recording);
         if (!n_clicks) return is_recording;
 
-        if (!is_recording) {
+                if (!is_recording) {
             console.log("Starting recording...");
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
-                    mediaRecorder = new MediaRecorder(stream);
+                    // Prefer a more compatible MIME type if possible
+                    const types = [
+                        'audio/webm;codecs=opus',
+                        'audio/ogg;codecs=opus',
+                        'audio/webm',
+                        'audio/ogg',
+                        'audio/mp4',
+                        'audio/wav'
+                    ];
+                    
+                    let options = {};
+                    for (const type of types) {
+                        if (MediaRecorder.isTypeSupported(type)) {
+                            console.log("Using supported MIME type:", type);
+                            options.mimeType = type;
+                            break;
+                        }
+                    }
+                    
+                    mediaRecorder = new MediaRecorder(stream, options);
                     mediaRecorder.start();
                     audioChunks = [];
 
-                    // Set up automatic stop after 45 seconds (before 60 second timeout)
-                    const maxRecordingTime = 45000; // 45 seconds
+                    // Set up automatic stop after 60 seconds with 5-second warning
+                    const maxRecordingTime = 60000; // 60 seconds
+                    const warningTime = 55000; // 55 seconds - warn user 5 seconds before stop
+                    let warningGiven = false;
+
                     const recordingTimeout = setTimeout(() => {
                         if (mediaRecorder && mediaRecorder.state === 'recording') {
-                            console.log("Automatic stop: Recording reached maximum time limit");
+                            console.log("Automatic stop: Recording reached maximum time limit (60 seconds)");
+                            // Play stop beep - half second alert tone
+                            window.dash_clientside.recorder.playStopBeep();
                             mediaRecorder.stop();
                             // Stop all tracks to release microphone
                             stream.getTracks().forEach(track => track.stop());
+                            // Update UI with auto-stop message
+                            window.dash_clientside.recorder.showAutoStopMessage();
                         }
                     }, maxRecordingTime);
+
+                    // Give warning at 55 seconds
+                    const warningTimeout = setTimeout(() => {
+                        if (mediaRecorder && mediaRecorder.state === 'recording' && !warningGiven) {
+                            warningGiven = true;
+                            console.log("Warning: Recording will auto-stop in 5 seconds");
+                            window.dash_clientside.recorder.playWarningBeep();
+                        }
+                    }, warningTime);
 
                     mediaRecorder.addEventListener("dataavailable", event => {
                         audioChunks.push(event.data);
@@ -38,10 +73,13 @@ window.dash_clientside.recorder = {
 
                     mediaRecorder.addEventListener("stop", () => {
                         clearTimeout(recordingTimeout); // Clear the timeout if manually stopped
+                        clearTimeout(warningTimeout); // Clear the warning timeout too
                         console.log("Recording stopped. Processing audio...");
-                        // Try to use the format the browser actually recorded in
-                        const mimeType = mediaRecorder.mimeType || 'audio/wav';
+                        
+                        // Try to find if we can use a more compatible MIME type
+                        let mimeType = mediaRecorder.mimeType || 'audio/webm';
                         console.log("Actual MIME type recorded:", mimeType);
+                        
                         const audioBlob = new Blob(audioChunks, { type: mimeType });
                         const reader = new FileReader();
                         reader.readAsDataURL(audioBlob);
@@ -204,6 +242,99 @@ window.dash_clientside.recorder = {
                 console.log("Stopped metronome");
             }
             return false;
+        }
+    },
+
+    playStopBeep: function() {
+        /**
+         * Play a half-second stop alert beep (low to high frequency sweep)
+         */
+        try {
+            if (!audioContext || audioContext.state === 'closed') {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+
+            osc.type = 'sine';
+            // Sweep from 800Hz to 1200Hz over half second for alert
+            osc.frequency.setValueAtTime(800, audioContext.currentTime);
+            osc.frequency.linearRampToValueAtTime(1200, audioContext.currentTime + 0.5);
+
+            gain.gain.setValueAtTime(0.5, audioContext.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+
+            osc.start(audioContext.currentTime);
+            osc.stop(audioContext.currentTime + 0.5);
+
+            console.log("Played stop beep");
+        } catch (err) {
+            console.error("Error playing stop beep:", err);
+        }
+    },
+
+    playWarningBeep: function() {
+        /**
+         * Play a warning beep to alert user that recording will auto-stop soon
+         */
+        try {
+            if (!audioContext || audioContext.state === 'closed') {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            }
+
+            if (audioContext.state === 'suspended') {
+                audioContext.resume();
+            }
+
+            // Two quick beeps
+            const playBeep = (frequency, delay) => {
+                const osc = audioContext.createOscillator();
+                const gain = audioContext.createGain();
+
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(frequency, audioContext.currentTime + delay);
+
+                gain.gain.setValueAtTime(0.3, audioContext.currentTime + delay);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + delay + 0.15);
+
+                osc.connect(gain);
+                gain.connect(audioContext.destination);
+
+                osc.start(audioContext.currentTime + delay);
+                osc.stop(audioContext.currentTime + delay + 0.15);
+            };
+
+            playBeep(1000, 0);      // First beep at 1000Hz
+            playBeep(1200, 0.2);    // Second beep at 1200Hz
+
+            console.log("Played warning beep");
+        } catch (err) {
+            console.error("Error playing warning beep:", err);
+        }
+    },
+
+    showAutoStopMessage: function() {
+        /**
+         * Update UI to show that auto-stop occurred
+         * Triggered when recording reaches time limit
+         */
+        try {
+            const statusMsg = document.getElementById('status-msg');
+            if (statusMsg) {
+                // Create a temporary message that will be overwritten by actual processing
+                statusMsg.textContent = 'Auto-stop: Recording reached 60-second limit. Processing audio...';
+                console.log("Displayed auto-stop message");
+            }
+        } catch (err) {
+            console.error("Error showing auto-stop message:", err);
         }
     }
 };

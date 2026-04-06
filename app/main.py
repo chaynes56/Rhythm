@@ -11,28 +11,27 @@ import soundfile as sf
 import librosa
 import json
 import warnings
-import signal
 import tempfile
 import os
 
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=60):
+def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
     """
     Load audio from bytes with timeout and size limits.
 
     Args:
         audio_bytes: Raw audio bytes from recording
         max_duration: Maximum allowed audio duration in seconds (default 10 min)
-        timeout_seconds: Timeout for librosa.load (default 60 sec - increased from 30)
+        timeout_seconds: Timeout for librosa.load (default 120 sec for recordings up to 60s)
 
     Returns:
         tuple: (y, sr) audio array and sample rate, or None if fails
     """
     import threading
 
-    result = {"y": None, "sr": None, "error": None}
+    result = {"y": None, "sr": None, "error": ""}
 
     def load_with_librosa():
         try:
@@ -47,7 +46,18 @@ def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=60):
                 except Exception as e1:
                     print(f"load_audio_from_bytes: First attempt failed: {e1}, trying with mono=True...")
                     # Try with mono=True which might be faster
-                    y, sr = librosa.load(tmp_path, sr=None, mono=True)
+                    try:
+                        y, sr = librosa.load(tmp_path, sr=None, mono=True)
+                    except Exception as e2:
+                        print(f"load_audio_from_bytes: Second attempt also failed: {e2}")
+                        result["error"] = f"Could not load audio: {e2}"
+                        return
+
+                # Check if we successfully loaded audio
+                if y is None or sr is None:
+                    result["error"] = "Audio data is corrupted or in unsupported format"
+                    print(f"load_audio_from_bytes: {result['error']}")
+                    return
 
                 # Check duration
                 duration = len(y) / sr
@@ -77,9 +87,14 @@ def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=60):
         return None
 
     if result["error"]:
+        print(f"load_audio_from_bytes: Final error: {result['error']}")
         return None
 
-    return (result["y"], result["sr"])
+    if result["y"] is None or result["sr"] is None:
+        print(f"load_audio_from_bytes: Result is missing y or sr")
+        return None
+
+    return result["y"], result["sr"]
 
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
@@ -218,6 +233,44 @@ clientside_callback(
 )
 
 @app.callback(
+    Output("status-msg", "children", allow_duplicate=True),
+    Output("is-recording", "value", allow_duplicate=True),
+    Input("record-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def clear_msg_on_record(n_clicks):
+    """Clear status message and reset recording state when user clicks record button"""
+    return "", []
+
+@app.callback(
+    Output("status-msg", "children", allow_duplicate=True),
+    Output("is-playing", "value", allow_duplicate=True),
+    Input("play-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def clear_msg_on_play(n_clicks):
+    """Clear status message and reset playing state when user clicks play button"""
+    return "", []
+
+@app.callback(
+    Output("status-msg", "children", allow_duplicate=True),
+    Input("save-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def clear_msg_on_save(n_clicks):
+    """Clear status message when user clicks save button"""
+    return ""
+
+@app.callback(
+    Output("status-msg", "children", allow_duplicate=True),
+    Input("load-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def clear_msg_on_load(n_clicks):
+    """Clear status message when user clicks load button"""
+    return ""
+
+@app.callback(
     Output("metronome-btn", "children"),
     Output("metronome-btn", "color"),
     Input("is-metronome-playing", "value")
@@ -261,8 +314,8 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
     print(f"process_audio: n_clicks={n_clicks}, audio_len={len(base64_audio) if base64_audio else 0}")
 
     if not base64_audio:
-        status_msg = "No audio data to process"
-        print(f"status_msg: {status_msg}")
+        status_msg = ""
+        print(f"status_msg: No audio data to process")
         return None, go.Figure(), status_msg
 
     try:
@@ -288,7 +341,12 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
             # For large recordings, use timeout
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
-                return None, go.Figure(), "Error: Audio processing timeout. Recording may be too long or corrupted."
+                # Don't show error message for auto-stop timeout - just log it
+                print(f"process_audio: Audio loading timeout (likely due to large file size)")
+                return None, go.Figure(), ""
+
+            if not isinstance(result, tuple) or result[0] == "" or result[1] == "":
+                return None, go.Figure(), "Error: Failed to process audio. Recording may be corrupted or in unsupported format."
 
             y, sr = result
             print(f"process_audio: Loaded with librosa, sr={sr}, duration={len(y)/sr:.2f}s")
@@ -357,12 +415,14 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
             "beat_times": beat_times.tolist()
         }
         
-        return json.dumps(save_data), fig, "Recording processed successfully"
+        # Log success but don't show message (waveform appearing is enough feedback)
+        print(f"process_audio: Successfully processed recording, duration={duration:.2f}s")
+        return json.dumps(save_data), fig, ""
     except Exception as e:
         error_msg = f"Error processing audio: {e}"
         print(error_msg)
-        status_msg = error_msg
-        return None, go.Figure(), status_msg
+        # Don't show error message to user - just log it
+        return None, go.Figure(), ""
 
 @app.callback(
     Output("download-audio", "data"),
@@ -431,6 +491,9 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
             if result is None:
                 return None, go.Figure(), "Error: Recording too long or corrupted. Max length is 10 minutes."
             
+            if not isinstance(result, tuple) or result[0] == "" or result[1] == "":
+                return None, go.Figure(), "Error: Failed to load recording. File may be corrupted or in unsupported format."
+
             y, sr = result
             print(f"load_recording: Loaded with librosa, sr={sr}")
 
@@ -478,10 +541,12 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
         print(f"load_recording: Successfully processed audio, duration={duration:.2f}s, sr={sr}")
         print(f"load_recording: Returning data with {len(metronome_times)} metronome points, {len(beat_times)} beat points")
         
-        return json.dumps(data), fig, "Recording loaded successfully"
+        # Don't show success message (waveform appearing is enough feedback)
+        return json.dumps(data), fig, ""
     except Exception as e:
         print(f"Error loading recording: {e}")
-        return None, go.Figure(), f"Error loading recording: {str(e)}"
+        # Don't show error message to user
+        return None, go.Figure(), ""
 
 clientside_callback(
     """

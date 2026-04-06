@@ -148,3 +148,58 @@ Error processing audio:
 - The play button should toggle to stop playback (as the record button stops recording)
   - This is better functionality and stops the present poor behavior of letting a 
     second playback start while another is in progress. 
+## Testing4
+- Recoding stopped at 45 seconds, with inappropriate message: Error processing 
+  audio: object of type 'NoneType' has no len() 
+- It plays back the full recording, but then stops with unresponsive save and 
+  playback buttons and no waveform.
+- Console output: process_audio: n_clicks=1, audio_len=524288
+process_audio: Decoded audio size: 393186 bytes
+Soundfile failed: Error opening <_io.BytesIO object at 0x10b4ac2c0>: Format not recognised.. Trying librosa...
+load_audio_from_bytes: Loading with librosa (audio size: 393186 bytes, timeout: 60s)...
+/Users/cth/Dev/PycharmProjects/Rhythm/app/main.py:46: UserWarning: PySoundFile failed. Trying audioread instead.
+  y, sr = librosa.load(tmp_path, sr=None)
+load_audio_from_bytes: First attempt failed: , trying with mono=True...
+load_audio_from_bytes: Error: 
+Error processing audio: object of type 'NoneType' has no len()
+/Users/cth/Dev/PycharmProjects/Rhythm/app/main.py:50: UserWarning: PySoundFile failed. Trying audioread instead.
+  y, sr = librosa.load(tmp_path, sr=None, mono=True)
+- Better if the autostop were at a full 60 seconds, with some additional buffer 
+  space for safety. 
+- There should be an appropriate "Auto Stop" message under the buttons, and also a 
+  full half second stop beep to alert the user that the recording has stopped.
+## Testing6
+- Recording warning and stop good, after which play and load work, but still problems:
+  - No waveform
+  - Message below buttons: Error: Audio processing timeout. Recording may be too 
+    long or corrupted. 
+    - Should instead just have message about autostop.
+    - User don't need message about processing completed as that's obvious from the 
+      waveform. Just send that message to the log. 
+- Test recordings of 30 and 45 seconds failed the same way.
+- Test recording of 15 seconds worked.
+- At the start of each action (record, play, load, save) any message below the 
+  button area should be cleared, so the user doesn't get confused by old messages.
+- Lots of Expected type 'None' (matched generic type '_VT'), got 'str'  
+  warnings in main.py, which all seem to come from initializing `result` dictionary 
+  values to None. Should be able to refactor these values to "" and eliminate this 
+  type error (which includes changing some conditional expressions).
+## testing7
+- After autostop the record button still says recording (should go back to start 
+  recording), and there is a processing audio... message but it never finishes 
+  processing: not waveform display. Save button does not work. Playback starts but 
+  freezes at end. Save recording button also does not work.
+- Following is the console output, which indicates there is still a problem with reading
+  large file size:
+process_audio:process_audio: n_clicks=1, audio_len=524288
+process_audio: Decoded audio size: 393186 bytes
+Soundfile failed: Error opening <_io.BytesIO object at 0x10abdb7e0>: Format not recognised.. Trying librosa...
+load_audio_from_bytes: Loading with librosa (audio size: 393186 bytes, timeout: 120s)...
+/Users/cth/Dev/PycharmProjects/Rhythm/app/main.py:45: UserWarning: PySoundFile failed. Trying audioread instead.
+  y, sr = librosa.load(tmp_path, sr=None)
+/Users/cth/Dev/PycharmProjects/Rhythm/app/main.py:50: UserWarning: PySoundFile failed. Trying audioread instead.
+  y, sr = librosa.load(tmp_path, sr=None, mono=True)
+load_audio_from_bytes: First attempt failed: , trying with mono=True...
+load_audio_from_bytes: Second attempt also failed: 
+load_audio_from_bytes: Final error: Could not load audio: 
+process_audio: Audio loading timeout (likely due to large file size)
