@@ -35,22 +35,35 @@ def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
 
     def load_with_librosa():
         try:
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.webm') as tmp:
+            # Detect format from magic bytes
+            suffix = '.webm'  # default
+            if audio_bytes.startswith(b'RIFF') and b'WAVE' in audio_bytes[:12]:
+                suffix = '.wav'
+                print("Detected WAV format from magic bytes")
+            elif audio_bytes.startswith(b'\xff\xfb') or audio_bytes.startswith(b'\xff\xfa'):
+                suffix = '.mp3'
+                print("Detected MP3 format from magic bytes")
+            else:
+                print(f"Unknown format, magic bytes: {audio_bytes[:4].hex()}")
+
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
                 tmp.write(audio_bytes)
                 tmp_path = tmp.name
             try:
-                print(f"load_audio_from_bytes: Loading with librosa (audio size: {len(audio_bytes)} bytes, timeout: {timeout_seconds}s)...")
+                print(f"load_audio_from_bytes: Loading with librosa (audio size: {len(audio_bytes)} bytes, format: {suffix}, timeout: {timeout_seconds}s)...")
                 # Try with different backends if available
                 try:
                     y, sr = librosa.load(tmp_path, sr=None)
                 except Exception as e1:
-                    print(f"load_audio_from_bytes: First attempt failed: {e1}, trying with mono=True...")
-                    # Try with mono=True which might be faster
+                    print(
+                        f"load_audio_from_bytes: First attempt failed: {type(e1).__name__}: {e1}")
                     try:
                         y, sr = librosa.load(tmp_path, sr=None, mono=True)
                     except Exception as e2:
-                        print(f"load_audio_from_bytes: Second attempt also failed: {e2}")
-                        result["error"] = f"Could not load audio: {e2}"
+                        print(
+                            f"load_audio_from_bytes: Second attempt failed: {type(e2).__name__}: {e2}")
+                        result[
+                            "error"] = f"Could not load audio: {type(e2).__name__}: {e2}"
                         return
 
                 # Check if we successfully loaded audio
@@ -159,7 +172,7 @@ app.layout = dbc.Container([
     dcc.Store(id="audio-store"),
     dcc.Store(id="metronome-points-store"),
     dcc.Store(id="pulse-points-store"),
-    dcc.Input(id="audio-data-store", type="text", style={'display': 'none'}, persistence=False),
+    dcc.Store(id="audio-data-store"),
     dcc.Input(id="playback-sync", type="text", style={'display': 'none'}),
     dbc.Button("Process", id="audio-process-btn", style={'display': 'none'}, n_clicks=0),
     dcc.Download(id="download-audio"),
@@ -213,6 +226,22 @@ clientside_callback(
 
 clientside_callback(
     """
+    function(n_clicks) {
+        if (window.recordedAudioData) {
+            console.log("Clientside: Sending recorded audio to store, length:", window.recordedAudioData.length);
+            const result = window.recordedAudioData;
+            window.recordedAudioData = null;  // Clear it after sending
+            return result;
+        }
+        return null;
+    }
+    """,
+    Output("audio-data-store", "data"),
+    Input("audio-process-btn", "n_clicks"),
+)
+
+clientside_callback(
+    """
     function(audio_json) {
         if (audio_json) {
             try {
@@ -232,15 +261,15 @@ clientside_callback(
     Input("audio-store", "data"),
 )
 
+# Debug callback to watch audio-data-store changes
 @app.callback(
-    Output("status-msg", "children", allow_duplicate=True),
-    Output("is-recording", "value", allow_duplicate=True),
-    Input("record-btn", "n_clicks"),
+    Output("playback-sync", "value", allow_duplicate=True),
+    Input("audio-data-store", "data"),
     prevent_initial_call=True
 )
-def clear_msg_on_record(n_clicks):
-    """Clear status message and reset recording state when user clicks record button"""
-    return "", []
+def debug_audio_store(data):
+    print(f"DEBUG: audio-data-store changed! Data length: {len(data) if data else 0}")
+    return f"audio-store-update-{len(data) if data else 0}"
 
 @app.callback(
     Output("status-msg", "children", allow_duplicate=True),
@@ -304,30 +333,63 @@ def update_play_button(playing_value):
     Output("audio-store", "data"),
     Output("waveform-graph", "figure"),
     Output("status-msg", "children", allow_duplicate=True),
-    Input("audio-process-btn", "n_clicks"),
-    State("audio-data-store", "value"),
+    Input("audio-data-store", "data"),
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
     prevent_initial_call=True
 )
-def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
-    print(f"process_audio: n_clicks={n_clicks}, audio_len={len(base64_audio) if base64_audio else 0}")
-
-    if not base64_audio:
-        status_msg = ""
-        print(f"status_msg: No audio data to process")
-        return None, go.Figure(), status_msg
+def process_audio(base64_audio, tempo, beats_per_measure):
+    print(f"\n{'='*60}")
+    print(f"PROCESS_AUDIO CALLBACK TRIGGERED!")
+    print(f"audio_len={len(base64_audio) if base64_audio else 0}")
+    print(f"tempo={tempo}, beats_per_measure={beats_per_measure}")
+    print(f"{'='*60}\n")
 
     try:
         # Extract data from base64
+        if not base64_audio:
+            print(f"process_audio: No audio data to process")
+            return None, go.Figure(), ""
+
         if ',' in base64_audio:
             header, data = base64_audio.split(',')
         else:
             data = base64_audio
-            
+
         audio_bytes = base64.b64decode(data)
         print(f"process_audio: Decoded audio size: {len(audio_bytes)} bytes")
 
+        # Try to detect if it's WebM and convert to WAV if needed
+        if audio_bytes[:4] == b'\x1a\x45\xdf\xa3':  # EBML signature (WebM)
+            print(f"process_audio: Detected WebM format, attempting conversion with pyogg...")
+            try:
+                from pyogg import OggOpus
+                import wave as wave_module
+
+                # Load WebM/Opus with pyogg
+                ogg_opus = OggOpus(io.BytesIO(audio_bytes))
+
+                # Get audio data and sample rate
+                pcm_data = ogg_opus.as_array()
+                sr_webm = ogg_opus.frequency
+
+                print(f"process_audio: Successfully decoded WebM with pyogg, sr={sr_webm}, shape={pcm_data.shape}")
+
+                # Convert to mono if stereo
+                if len(pcm_data.shape) > 1 and pcm_data.shape[1] > 1:
+                    pcm_data = pcm_data.mean(axis=1)
+
+                # Normalize to -1 to 1 range if needed
+                if pcm_data.dtype != np.float32:
+                    pcm_data = pcm_data.astype(np.float32) / 32768.0
+
+                y = pcm_data
+                sr = sr_webm
+                print(f"process_audio: Loaded WebM successfully, shape={y.shape}, sr={sr}")
+            except Exception as convert_err:
+                print(f"process_audio: WebM conversion with pyogg failed: {convert_err}")
+                print(f"Attempting to load with librosa...")
+                # Fall through to librosa attempt below
         # Load with librosa (handles more formats than soundfile)
         # Try soundfile first for better performance with WAV files
         try:
@@ -345,7 +407,7 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
                 print(f"process_audio: Audio loading timeout (likely due to large file size)")
                 return None, go.Figure(), ""
 
-            if not isinstance(result, tuple) or result[0] == "" or result[1] == "":
+            if not isinstance(result, tuple) or result[0] is None or result[1] is None:
                 return None, go.Figure(), "Error: Failed to process audio. Recording may be corrupted or in unsupported format."
 
             y, sr = result
@@ -354,18 +416,18 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
         # If stereo, convert to mono
         if len(y.shape) > 1:
             y = y.mean(axis=1)
-            
+
         # Pulse analysis
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
         # limit by tempo
         tempo_detected, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, bpm=tempo)
         beat_times = librosa.frames_to_time(beats, sr=sr)
-        
+
         # Metronome points (ideal points based on tempo)
         duration = len(y) / sr
         seconds_per_beat = 60.0 / tempo
         metronome_times = np.arange(0, duration, seconds_per_beat)
-        
+
         # Create waveform figure
         time = np.linspace(0, duration, num=len(y))
         # Downsample for display if too large
@@ -376,20 +438,20 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
         else:
             time_display = time
             y_display = y
-            
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform", line=dict(color='blue')))
-        
+
         # Add metronome points
         metronome_colors = ['red' if i % beats_per_measure == 0 else 'orange' for i in range(len(metronome_times))]
         fig.add_trace(go.Scatter(
-            x=metronome_times, 
+            x=metronome_times,
             y=[max(y_display)*1.1 if i % beats_per_measure == 0 else max(y_display)*1.05 for i in range(len(metronome_times))],
             mode='markers',
             name='Metronome',
             marker=dict(color=metronome_colors, symbol='diamond')
         ))
-        
+
         # Add pulse points
         fig.add_trace(go.Scatter(
             x=beat_times,
@@ -398,14 +460,14 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
             name='Pulses',
             marker=dict(color='green', symbol='circle')
         ))
-        
+
         fig.update_layout(
             xaxis_title="Time (s)",
             yaxis_title="Amplitude",
             dragmode='pan',
             template='plotly_white'
         )
-        
+
         # Prepare data for saving
         save_data = {
             "audio": base64_audio,
@@ -414,13 +476,15 @@ def process_audio(n_clicks, base64_audio, tempo, beats_per_measure):
             "metronome_times": metronome_times.tolist(),
             "beat_times": beat_times.tolist()
         }
-        
+
         # Log success but don't show message (waveform appearing is enough feedback)
         print(f"process_audio: Successfully processed recording, duration={duration:.2f}s")
         return json.dumps(save_data), fig, ""
     except Exception as e:
         error_msg = f"Error processing audio: {e}"
         print(error_msg)
+        import traceback
+        traceback.print_exc()
         # Don't show error message to user - just log it
         return None, go.Figure(), ""
 
@@ -490,8 +554,8 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
                 return None, go.Figure(), "Error: Recording too long or corrupted. Max length is 10 minutes."
-            
-            if not isinstance(result, tuple) or result[0] == "" or result[1] == "":
+
+            if not isinstance(result, tuple) or result[0] is None or result[1] is None:
                 return None, go.Figure(), "Error: Failed to load recording. File may be corrupted or in unsupported format."
 
             y, sr = result

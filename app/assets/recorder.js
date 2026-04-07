@@ -6,59 +6,93 @@ let mediaRecorder;
 let audioChunks = [];
 let audioContext;
 let metronomeInterval;
-let currentAudio = null; // Track current playing audio
+let currentAudio = null;
+
+function encodeWAV(samples, sampleRate) {
+    const buffer = new ArrayBuffer(44 + samples.length * 2);
+    const view = new DataView(buffer);
+
+    // WAV header
+    const writeString = (offset, string) => {
+        for (let i = 0; i < string.length; i++) {
+            view.setUint8(offset + i, string.charCodeAt(i));
+        }
+    };
+
+    writeString(0, 'RIFF');
+    view.setUint32(4, 36 + samples.length * 2, true);
+    writeString(8, 'WAVE');
+    writeString(12, 'fmt ');
+    view.setUint32(16, 16, true); // subchunk1Size
+    view.setUint16(20, 1, true); // PCM format
+    view.setUint16(22, 1, true); // mono
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * 2, true);
+    view.setUint16(32, 2, true);
+    view.setUint16(34, 16, true);
+    writeString(36, 'data');
+    view.setUint32(40, samples.length * 2, true);
+
+    let offset = 44;
+    for (let i = 0; i < samples.length; i++, offset += 2) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+    }
+
+    return buffer;
+}
 
 window.dash_clientside.recorder = {
     toggleRecording: function(n_clicks, is_recording) {
         console.log("toggleRecording: n_clicks=", n_clicks, "is_recording=", is_recording);
         if (!n_clicks) return is_recording;
 
-                if (!is_recording) {
+        if (!is_recording) {
             console.log("Starting recording...");
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
-                    // Prefer a more compatible MIME type if possible
                     const types = [
+                        'audio/wav',
+                        'audio/webm',
                         'audio/webm;codecs=opus',
                         'audio/ogg;codecs=opus',
-                        'audio/webm',
                         'audio/ogg',
-                        'audio/mp4',
-                        'audio/wav'
+                        'audio/mp4'
                     ];
-                    
+
                     let options = {};
+                    let selectedMimeType = null;
                     for (const type of types) {
                         if (MediaRecorder.isTypeSupported(type)) {
                             console.log("Using supported MIME type:", type);
+                            selectedMimeType = type;
                             options.mimeType = type;
                             break;
                         }
                     }
-                    
+
+                    if (!selectedMimeType) {
+                        console.warn("No supported MIME type found, using default");
+                    }
+
                     mediaRecorder = new MediaRecorder(stream, options);
                     mediaRecorder.start();
                     audioChunks = [];
 
-                    // Set up automatic stop after 60 seconds with 5-second warning
-                    const maxRecordingTime = 60000; // 60 seconds
-                    const warningTime = 55000; // 55 seconds - warn user 5 seconds before stop
+                    const maxRecordingTime = 60000;
+                    const warningTime = 55000;
                     let warningGiven = false;
 
                     const recordingTimeout = setTimeout(() => {
                         if (mediaRecorder && mediaRecorder.state === 'recording') {
                             console.log("Automatic stop: Recording reached maximum time limit (60 seconds)");
-                            // Play stop beep - half second alert tone
                             window.dash_clientside.recorder.playStopBeep();
                             mediaRecorder.stop();
-                            // Stop all tracks to release microphone
                             stream.getTracks().forEach(track => track.stop());
-                            // Update UI with auto-stop message
                             window.dash_clientside.recorder.showAutoStopMessage();
                         }
                     }, maxRecordingTime);
 
-                    // Give warning at 55 seconds
                     const warningTimeout = setTimeout(() => {
                         if (mediaRecorder && mediaRecorder.state === 'recording' && !warningGiven) {
                             warningGiven = true;
@@ -72,50 +106,37 @@ window.dash_clientside.recorder = {
                     });
 
                     mediaRecorder.addEventListener("stop", () => {
-                        clearTimeout(recordingTimeout); // Clear the timeout if manually stopped
-                        clearTimeout(warningTimeout); // Clear the warning timeout too
+                        clearTimeout(recordingTimeout);
+                        clearTimeout(warningTimeout);
                         console.log("Recording stopped. Processing audio...");
-                        
-                        // Try to find if we can use a more compatible MIME type
-                        let mimeType = mediaRecorder.mimeType || 'audio/webm';
-                        console.log("Actual MIME type recorded:", mimeType);
-                        
-                        const audioBlob = new Blob(audioChunks, { type: mimeType });
+
+                        // Convert WebM chunks to PCM and then to WAV
                         const reader = new FileReader();
-                        reader.readAsDataURL(audioBlob);
+                        const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+
+                        // Create audio context to decode and re-encode as WAV
+                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        reader.readAsArrayBuffer(audioBlob);
                         reader.onloadend = () => {
-                            const base64data = reader.result;
-                            window.lastRecordedAudio = base64data;
-                            console.log("Base64 data created, length:", base64data.length);
+                            audioContext.decodeAudioData(reader.result, (audioBuffer) => {
+                                // Get raw PCM data
+                                const rawData = audioBuffer.getChannelData(0); // mono
+                                const wavData = encodeWAV(Array.from(rawData), audioBuffer.sampleRate);
+                                const wavBlob = new Blob([wavData], { type: 'audio/wav' });
 
-                            // Find the input element. dcc.Input with id="audio-data-store"
-                            // dcc.Input renders as an input element directly
-                            const dataInput = document.querySelector('input[id="audio-data-store"]');
+                                const wavReader = new FileReader();
+                                wavReader.readAsDataURL(wavBlob);
+                                wavReader.onloadend = () => {
+                                    window.lastRecordedAudio = wavReader.result;
+                                    window.recordedAudioData = wavReader.result;
+                                    console.log("Converted to WAV, length:", wavReader.result.length);
 
-                            if (dataInput) {
-                                console.log("Updating audio-data-store...");
-                                // This is a hack for React-controlled inputs to trigger Dash's listener
-                                const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                                nativeInputValueSetter.call(dataInput, base64data);
-                                dataInput.dispatchEvent(new Event('input', { bubbles: true }));
-                                dataInput.dispatchEvent(new Event('change', { bubbles: true }));
-
-                                setTimeout(() => {
                                     const hiddenBtn = document.getElementById('audio-process-btn');
                                     if (hiddenBtn) {
-                                        console.log("Clicking audio-process-btn...");
                                         hiddenBtn.click();
-                                        // Also try using the button's onclick event
-                                        if (hiddenBtn.onclick) {
-                                            hiddenBtn.onclick();
-                                        }
-                                    } else {
-                                        console.error("Could not find audio-process-btn element");
                                     }
-                                }, 100);
-                            } else {
-                                console.error("Could not find audio-data-store element.");
-                            }
+                                };
+                            });
                         };
                     });
                 }).catch(err => {
@@ -127,7 +148,6 @@ window.dash_clientside.recorder = {
             console.log("Stopping recording...");
             if (mediaRecorder && mediaRecorder.state !== "inactive") {
                 mediaRecorder.stop();
-                // Stop all tracks to release microphone
                 if (mediaRecorder.stream) {
                     mediaRecorder.stream.getTracks().forEach(track => track.stop());
                 }
@@ -139,16 +159,14 @@ window.dash_clientside.recorder = {
     playAudio: function(n_clicks, volume, is_playing) {
         console.log("playAudio: n_clicks=", n_clicks, "volume=", volume, "is_playing=", is_playing, "lastRecordedAudio exists:", !!window.lastRecordedAudio);
 
-        // If currently playing, stop it
         if (is_playing && currentAudio) {
             console.log("Stopping current playback");
             currentAudio.pause();
             currentAudio.currentTime = 0;
             currentAudio = null;
-            return false; // Not playing anymore
+            return false;
         }
 
-        // If not playing and we have audio, start playing
         if (!is_playing && window.lastRecordedAudio) {
             currentAudio = new Audio(window.lastRecordedAudio);
             currentAudio.volume = (volume !== undefined && volume !== null) ? volume : 1.0;
@@ -157,34 +175,31 @@ window.dash_clientside.recorder = {
             currentAudio.addEventListener('ended', () => {
                 console.log("Audio playback ended");
                 currentAudio = null;
-                // Note: We can't directly update the Dash state from here
-                // The button will be updated when clicked again
             });
 
             currentAudio.play().catch(err => {
                 console.error("Playback error:", err);
-                console.error("Error message:", err.message);
                 currentAudio = null;
             });
 
-            return true; // Now playing
+            return true;
         } else if (!window.lastRecordedAudio) {
             console.warn("No recording available to play");
         }
 
-        return is_playing; // Return current state if no action taken
+        return is_playing;
     },
 
     toggleMetronome: function(n_clicks, is_playing, tempo, beatsPerMeasure, volume) {
+        console.log("toggleMetronome: n_clicks=", n_clicks, "is_playing=", is_playing, "tempo=", tempo, "beatsPerMeasure=", beatsPerMeasure, "volume=", volume);
+
         if (!n_clicks) return is_playing;
 
-        // Reinitialize or recover AudioContext if needed
         if (!audioContext || audioContext.state === 'closed') {
             console.log("Creating new AudioContext...");
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
 
-        // Resume suspended context
         if (audioContext.state === 'suspended') {
             console.log("Resuming suspended AudioContext...");
             audioContext.resume().then(() => {
@@ -197,10 +212,9 @@ window.dash_clientside.recorder = {
         if (!is_playing) {
             let beatCount = 0;
             const secondsPerBeat = 60.0 / tempo;
-            
+
             const playTone = () => {
                 try {
-                    // Double-check context state before playing
                     if (audioContext.state === 'closed') {
                         console.error("AudioContext is closed, cannot play tone");
                         return;
@@ -246,9 +260,6 @@ window.dash_clientside.recorder = {
     },
 
     playStopBeep: function() {
-        /**
-         * Play a half-second stop alert beep (low to high frequency sweep)
-         */
         try {
             if (!audioContext || audioContext.state === 'closed') {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -262,7 +273,6 @@ window.dash_clientside.recorder = {
             const gain = audioContext.createGain();
 
             osc.type = 'sine';
-            // Sweep from 800Hz to 1200Hz over half second for alert
             osc.frequency.setValueAtTime(800, audioContext.currentTime);
             osc.frequency.linearRampToValueAtTime(1200, audioContext.currentTime + 0.5);
 
@@ -282,9 +292,6 @@ window.dash_clientside.recorder = {
     },
 
     playWarningBeep: function() {
-        /**
-         * Play a warning beep to alert user that recording will auto-stop soon
-         */
         try {
             if (!audioContext || audioContext.state === 'closed') {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -294,7 +301,6 @@ window.dash_clientside.recorder = {
                 audioContext.resume();
             }
 
-            // Two quick beeps
             const playBeep = (frequency, delay) => {
                 const osc = audioContext.createOscillator();
                 const gain = audioContext.createGain();
@@ -312,8 +318,8 @@ window.dash_clientside.recorder = {
                 osc.stop(audioContext.currentTime + delay + 0.15);
             };
 
-            playBeep(1000, 0);      // First beep at 1000Hz
-            playBeep(1200, 0.2);    // Second beep at 1200Hz
+            playBeep(1000, 0);
+            playBeep(1200, 0.2);
 
             console.log("Played warning beep");
         } catch (err) {
@@ -322,14 +328,9 @@ window.dash_clientside.recorder = {
     },
 
     showAutoStopMessage: function() {
-        /**
-         * Update UI to show that auto-stop occurred
-         * Triggered when recording reaches time limit
-         */
         try {
             const statusMsg = document.getElementById('status-msg');
             if (statusMsg) {
-                // Create a temporary message that will be overwritten by actual processing
                 statusMsg.textContent = 'Auto-stop: Recording reached 60-second limit. Processing audio...';
                 console.log("Displayed auto-stop message");
             }
@@ -338,3 +339,5 @@ window.dash_clientside.recorder = {
         }
     }
 };
+
+console.log("recorder.js loaded successfully. window.dash_clientside.recorder is ready.");

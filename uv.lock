@@ -232,6 +232,12 @@ wheels = [
 ]
 
 [[package]]
+name = "ffmpeg"
+version = "1.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/f0/cc/3b7408b8ecf7c1d20ad480c3eaed7619857bf1054b690226e906fdf14258/ffmpeg-1.4.tar.gz", hash = "sha256:6931692c890ff21d39938433c2189747815dca0c60ddc7f9bb97f199dba0b5b9", size = 5055, upload-time = "2018-10-08T07:50:05.748Z" }
+
+[[package]]
 name = "flask"
 version = "3.1.3"
 source = { registry = "https://pypi.org/simple" }
@@ -634,12 +640,31 @@ wheels = [
 ]
 
 [[package]]
+name = "pydub"
+version = "0.25.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/fe/9a/e6bca0eed82db26562c73b5076539a4a08d3cffd19c3cc5913a3e61145fd/pydub-0.25.1.tar.gz", hash = "sha256:980a33ce9949cab2a569606b65674d748ecbca4f0796887fd6f46173a7b0d30f", size = 38326, upload-time = "2021-03-10T02:09:54.659Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a6/53/d78dc063216e62fc55f6b2eebb447f6a4b0a59f55c8406376f76bf959b08/pydub-0.25.1-py2.py3-none-any.whl", hash = "sha256:65617e33033874b59d87db603aa1ed450633288aefead953b30bded59cb599a6", size = 32327, upload-time = "2021-03-10T02:09:53.503Z" },
+]
+
+[[package]]
 name = "pygments"
 version = "2.20.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/c3/b2/bc9c9196916376152d655522fdcebac55e66de6603a76a02bca1b6414f6c/pygments-2.20.0.tar.gz", hash = "sha256:6757cd03768053ff99f3039c1a36d6c0aa0b263438fcab17520b30a303a82b5f", size = 4955991, upload-time = "2026-03-29T13:29:33.898Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/f4/7e/a72dd26f3b0f4f2bf1dd8923c85f7ceb43172af56d63c7383eb62b332364/pygments-2.20.0-py3-none-any.whl", hash = "sha256:81a9e26dd42fd28a23a2d169d86d7ac03b46e2f8b59ed4698fb4785f946d0176", size = 1231151, upload-time = "2026-03-29T13:29:30.038Z" },
+]
+
+[[package]]
+name = "pyogg"
+version = "0.6.14a1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1a/13/07358440dc3e94a71f3cd0f734e90b41392cc125de1571a99c4f8b594ccb/PyOgg-0.6.14a1.tar.gz", hash = "sha256:8294b34aa59c90200c4630c2cc4a5b84407209141e8e5d069d7a5be358e94262", size = 35091, upload-time = "2020-06-26T12:51:57.378Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/19/b8/aa50bedf5628dc66a88a3aa6554b91a3f931baf2b221ece3a8525278b667/PyOgg-0.6.14a1-py2.py3-none-win32.whl", hash = "sha256:794db340fb5833afb4f493b40f91e3e0f594606fd4b31aea0ebf5be2de9da964", size = 1037870, upload-time = "2020-06-26T12:51:52.764Z" },
+    { url = "https://files.pythonhosted.org/packages/52/14/34b6b82684f26e517f6947d9c1d43e64dbf1630954f284ffd9912f4c46c8/PyOgg-0.6.14a1-py2.py3-none-win_amd64.whl", hash = "sha256:40f79b288b3a667309890885f4cf53371163b7dae17eb17567fb24ab467eca26", size = 1099508, upload-time = "2020-06-26T12:51:55.912Z" },
 ]
 
 [[package]]
@@ -685,10 +710,13 @@ source = { virtual = "." }
 dependencies = [
     { name = "dash", extra = ["cloud"] },
     { name = "dash-bootstrap-components" },
+    { name = "ffmpeg" },
     { name = "librosa" },
     { name = "numpy" },
     { name = "pandas" },
     { name = "plotly" },
+    { name = "pydub" },
+    { name = "pyogg" },
     { name = "scipy" },
     { name = "soundfile" },
 ]
@@ -697,10 +725,13 @@ dependencies = [
 requires-dist = [
     { name = "dash", extras = ["cloud"], specifier = ">=2.14.0" },
     { name = "dash-bootstrap-components", specifier = ">=2.0.4" },
+    { name = "ffmpeg", specifier = "==1.4" },
     { name = "librosa", specifier = ">=0.10.1" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "pandas", specifier = ">=3.0.1" },
     { name = "plotly", specifier = ">=5.18.0" },
+    { name = "pydub", specifier = "==0.25.1" },
+    { name = "pyogg", specifier = "==0.6.14a1" },
     { name = "scipy", specifier = ">=1.11.0" },
     { name = "soundfile", specifier = ">=0.12.1" },
 ]
