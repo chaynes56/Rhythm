@@ -2,6 +2,7 @@
 # Copyright 2026 Christopher T. Haynes. See the project LICENSE file.
 
 from dash import Dash, dcc, html, Input, Output, State, clientside_callback
+from dash.exceptions import PreventUpdate
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import numpy as np
@@ -268,8 +269,10 @@ clientside_callback(
     prevent_initial_call=True
 )
 def debug_audio_store(data):
-    print(f"DEBUG: audio-data-store changed! Data length: {len(data) if data else 0}")
-    return f"audio-store-update-{len(data) if data else 0}"
+    if not data:
+        raise PreventUpdate
+    print(f"DEBUG: audio-data-store changed! Data length: {len(data)}")
+    return f"audio-store-update-{len(data)}"
 
 @app.callback(
     Output("status-msg", "children", allow_duplicate=True),
@@ -348,8 +351,8 @@ def process_audio(base64_audio, tempo, beats_per_measure):
     try:
         # Extract data from base64
         if not base64_audio:
-            print(f"process_audio: No audio data to process")
-            return None, go.Figure(), ""
+            print("process_audio: empty payload, skipping callback")
+            raise PreventUpdate
 
         if ',' in base64_audio:
             header, data = base64_audio.split(',')
@@ -419,9 +422,19 @@ def process_audio(base64_audio, tempo, beats_per_measure):
 
         # Pulse analysis
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-        # limit by tempo
-        tempo_detected, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, bpm=tempo)
-        beat_times = librosa.frames_to_time(beats, sr=sr)
+
+        # These 2 lines of code are causing a worker crash on cloud,
+        # log shows numba/llvmlite JIT compile path.
+        # tempo_detected, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, bpm=tempo)
+        # beat_times = librosa.frames_to_time(beats, sr=sr)
+        # ...So replacing beat tracking with simpler onset detection
+        onset_frames = librosa.onset.onset_detect(
+            onset_envelope=onset_env,
+            sr=sr,
+            units="frames",
+            backtrack=False
+        )
+        beat_times = librosa.frames_to_time(onset_frames, sr=sr)
 
         # Metronome points (ideal points based on tempo)
         duration = len(y) / sr
