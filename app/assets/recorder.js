@@ -7,6 +7,15 @@ let audioChunks = [];
 let audioContext;
 let metronomeInterval;
 let currentAudio = null;
+let metronomeState = {
+    beatCount: 0,
+    measureCount: 0,
+    measuresPerPattern: 1,
+    beatsPerMeasure: 4,
+    volume: 0.5,
+    tempo: 120,
+    hiToneOn: true
+};
 
 function encodeWAV(samples, sampleRate) {
     const buffer = new ArrayBuffer(44 + samples.length * 2);
@@ -49,6 +58,25 @@ window.dash_clientside.recorder = {
 
         if (!is_recording) {
             console.log("Starting recording...");
+
+            // Auto-start metronome if not already playing
+            // If patterns > 1, start at the beginning of the last measure in the pattern
+            if (!metronomeInterval) {
+                console.log("Auto-starting metronome with recording...");
+                const measuresPerPattern = metronomeState.measuresPerPattern || 1;
+                if (measuresPerPattern > 1) {
+                    // Set up to start at the beginning of the last measure of the pattern
+                    metronomeState.beatCount = (measuresPerPattern - 1) * metronomeState.beatsPerMeasure;
+                    metronomeState.measureCount = measuresPerPattern - 1;
+                    console.log("Pattern offset: starting at measure", metronomeState.measureCount + 1, "of pattern");
+                }
+                // Trigger metronome start by clicking the button
+                const metronomeBtn = document.getElementById('metronome-btn');
+                if (metronomeBtn) {
+                    metronomeBtn.click();
+                }
+            }
+
             navigator.mediaDevices.getUserMedia({ audio: true })
                 .then(stream => {
                     const types = [
@@ -159,6 +187,11 @@ window.dash_clientside.recorder = {
     playAudio: function(n_clicks, volume, is_playing) {
         console.log("playAudio: n_clicks=", n_clicks, "volume=", volume, "is_playing=", is_playing, "lastRecordedAudio exists:", !!window.lastRecordedAudio);
 
+        // If Dash says playing but the audio already ended, reset state.
+        if (is_playing && !currentAudio) {
+            return false;
+        }
+
         if (is_playing && currentAudio) {
             console.log("Stopping current playback");
             currentAudio.pause();
@@ -190,10 +223,26 @@ window.dash_clientside.recorder = {
         return is_playing;
     },
 
-    toggleMetronome: function(n_clicks, is_playing, tempo, beatsPerMeasure, volume) {
-        console.log("toggleMetronome: n_clicks=", n_clicks, "is_playing=", is_playing, "tempo=", tempo, "beatsPerMeasure=", beatsPerMeasure, "volume=", volume);
+    toggleMetronome: function(n_clicks, is_playing, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn) {
+        console.log("toggleMetronome: n_clicks=", n_clicks, "is_playing=", is_playing, "tempo=", tempo,
+                    "beatsPerMeasure=", beatsPerMeasure, "measuresPerPattern=", measuresPerPattern,
+                    "volume=", volume, "hiToneOn=", hiToneOn);
 
         if (!n_clicks) return is_playing;
+
+        // Defensive defaults to avoid silent output from undefined/null state values.
+        tempo = Number.isFinite(tempo) ? tempo : 120;
+        beatsPerMeasure = Number.isFinite(beatsPerMeasure) ? beatsPerMeasure : 4;
+        measuresPerPattern = Number.isFinite(measuresPerPattern) ? measuresPerPattern : 1;
+        volume = Number.isFinite(volume) ? volume : 0.5;
+        hiToneOn = (hiToneOn !== false);
+
+        // Store current state for later use
+        metronomeState.tempo = tempo;
+        metronomeState.beatsPerMeasure = beatsPerMeasure;
+        metronomeState.measuresPerPattern = measuresPerPattern;
+        metronomeState.volume = volume;
+        metronomeState.hiToneOn = hiToneOn;
 
         if (!audioContext || audioContext.state === 'closed') {
             console.log("Creating new AudioContext...");
@@ -210,7 +259,8 @@ window.dash_clientside.recorder = {
         }
 
         if (!is_playing) {
-            let beatCount = 0;
+            metronomeState.beatCount = 0;
+            metronomeState.measureCount = 0;
             const secondsPerBeat = 60.0 / tempo;
 
             const playTone = () => {
@@ -228,31 +278,55 @@ window.dash_clientside.recorder = {
                     const osc = audioContext.createOscillator();
                     const gain = audioContext.createGain();
 
-                    osc.type = 'sine';
-                    osc.frequency.setValueAtTime(beatCount % beatsPerMeasure === 0 ? 220 : 440, audioContext.currentTime);
+                    let frequency = 440; // Default hi-tone (beat within measure)
+                    let shouldPlay = true;
 
-                    gain.gain.setValueAtTime(volume, audioContext.currentTime);
-                    gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.1);
+                    const positionInMeasure = metronomeState.beatCount % metronomeState.beatsPerMeasure;
+                    const positionInPattern = metronomeState.measureCount % metronomeState.measuresPerPattern;
 
-                    osc.connect(gain);
-                    gain.connect(audioContext.destination);
+                    // Determine tone type
+                    if (positionInMeasure === 0 && positionInPattern === 0) {
+                        // First beat of pattern: low tone
+                        frequency = 110;
+                    } else if (positionInMeasure === 0) {
+                        // First beat of measure (not pattern start): mid-tone
+                        frequency = 220;
+                    } else if (!metronomeState.hiToneOn) {
+                        // Not a measure-start beat and hi-tone is off: silence
+                        shouldPlay = false;
+                    }
 
-                    osc.start(audioContext.currentTime);
-                    osc.stop(audioContext.currentTime + 0.1);
+                    if (shouldPlay) {
+                        osc.type = 'sine';
+                        osc.frequency.setValueAtTime(frequency, audioContext.currentTime);
 
-                    beatCount++;
+                        gain.gain.setValueAtTime(metronomeState.volume, audioContext.currentTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.1);
+
+                        osc.connect(gain);
+                        gain.connect(audioContext.destination);
+
+                        osc.start(audioContext.currentTime);
+                        osc.stop(audioContext.currentTime + 0.1);
+                    }
+
+                    metronomeState.beatCount++;
+                    if (metronomeState.beatCount % metronomeState.beatsPerMeasure === 0) {
+                        metronomeState.measureCount++;
+                    }
                 } catch (err) {
                     console.error("Error playing tone:", err);
                 }
             };
 
-            console.log("Starting metronome at", tempo, "BPM");
+            console.log("Starting metronome at", tempo, "BPM with", measuresPerPattern, "measures/pattern");
             playTone();
             metronomeInterval = setInterval(playTone, secondsPerBeat * 1000);
             return true;
         } else {
             if (metronomeInterval) {
                 clearInterval(metronomeInterval);
+                metronomeInterval = null;
                 console.log("Stopped metronome");
             }
             return false;

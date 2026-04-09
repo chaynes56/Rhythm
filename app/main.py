@@ -164,42 +164,75 @@ app.layout = dbc.Container([
             dbc.Card([
                 dbc.CardHeader("Recording & Playback"),
                 dbc.CardBody([
-                    dbc.Button("Start Recording", id="record-btn", color="danger", className="me-2"),
-                    dbc.Button("Play Recording", id="play-btn", color="success", className="me-2"),
-                    dbc.Button("Save Recording", id="save-btn", color="primary", className="me-2"),
-                    dbc.Button("Load Recording", id="load-btn", color="info"),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Button("Start Recording", id="record-btn", color="danger", className="me-2"),
+                            dbc.Button("Play Recording", id="play-btn", color="success", className="me-2"),
+                            dbc.Button("Save Recording", id="save-btn", color="primary", className="me-2"),
+                            dbc.Button("Load Recording", id="load-btn", color="info"),
+                        ], width=12),
+                    ], className="mb-2"),
                     dcc.Checklist(id="is-recording", options=[{"label": "Recording", "value": "recording"}], value=[], style={"display": "none"}),
                     dcc.Checklist(id="is-playing", options=[{"label": "Playing", "value": "playing"}], value=[], style={"display": "none"}),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Recording Volume", className="small"),
+                            dcc.Slider(min=0, max=1, step=0.1, value=1.0, id="recording-vol"),
+                        ], width=6),
+                        dbc.Col([
+                            html.Label("Playback Volume", className="small"),
+                            dcc.Slider(min=0, max=1, step=0.1, value=1.0, id="playback-vol"),
+                        ], width=6),
+                    ]),
                     html.Div(id="status-msg", className="mt-2"),
                 ]),
             ], className="mb-4"),
             dbc.Card([
                 dbc.CardHeader("Metronome Settings"),
                 dbc.CardBody([
-                    dbc.Button("Start Metronome", id="metronome-btn", color="primary", className="mb-3 w-100"),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Button("Start Metronome", id="metronome-btn", color="primary"),
+                        ], width="auto"),
+                        dbc.Col([
+                            html.Label("Measures / Pattern", className="small"),
+                            dcc.Dropdown(
+                                id="measures-per-pattern",
+                                options=[{"label": str(i), "value": i} for i in range(1, 9)],
+                                value=1,
+                                clearable=False,
+                                style={"width": "90px"},
+                            ),
+                        ], width="auto"),
+                        dbc.Col([
+                            html.Label("Beats / Measure", className="small"),
+                            dcc.Dropdown(
+                                id="beats-per-measure",
+                                options=[{"label": str(i), "value": i} for i in range(1, 13)],
+                                value=4,
+                                clearable=False,
+                                style={"width": "90px"},
+                            ),
+                        ], width="auto"),
+                        dbc.Col([
+                            dcc.Checklist(
+                                id="play-hi-tone",
+                                options=[{"label": "Play Hi Tone", "value": "on"}],
+                                value=["on"],
+                                style={"marginTop": "20px"}
+                            ),
+                        ], width="auto"),
+                    ], align="end", className="mb-3"),
                     dcc.Checklist(id="is-metronome-playing", options=[{"label": "Playing", "value": "playing"}], value=[], style={"display": "none"}),
                     dbc.Row([
                         dbc.Col([
-                            html.Label("Tempo (BPM)"),
+                            html.Label("Tempo (BPM)", className="small"),
                             dcc.Slider(min=40, max=240, step=1, value=120, id="tempo-slider", marks={i: str(i) for i in range(40, 241, 40)}),
                         ], width=6),
                         dbc.Col([
-                            html.Label("Beats per Measure"),
-                            dcc.Input(type="number", value=4, min=1, max=16, id="beats-per-measure"),
+                            html.Label("Metronome Volume", className="small"),
+                            dcc.Slider(min=0, max=1, step=0.1, value=0.5, id="metronome-vol"),
                         ], width=6),
-                    ]),
-                    dbc.Row([
-                        dbc.Col([
-                            html.Label("Volumes"),
-                            html.Div([
-                                html.Label("Metronome", className="small"),
-                                dcc.Slider(min=0, max=1, step=0.1, value=0.5, id="metronome-vol"),
-                                html.Label("Recording", className="small"),
-                                dcc.Slider(min=0, max=1, step=0.1, value=1.0, id="recording-vol"),
-                                html.Label("Playback", className="small"),
-                                dcc.Slider(min=0, max=1, step=0.1, value=1.0, id="playback-vol"),
-                            ]),
-                        ]),
                     ]),
                 ]),
             ]),
@@ -248,9 +281,12 @@ clientside_callback(
 
 clientside_callback(
     """
-    function(n_clicks, playing_status, tempo, beats, volume) {
+    function(n_clicks, playing_status, tempo, beats, measures_per_pattern, volume, play_hi_tone) {
         const isPlaying = playing_status.length > 0;
-        const result = window.dash_clientside.recorder.toggleMetronome(n_clicks, isPlaying, tempo, beats, volume);
+        const hi_tone_on = play_hi_tone && play_hi_tone.length > 0;
+        const result = window.dash_clientside.recorder.toggleMetronome(
+            n_clicks, isPlaying, tempo, beats, measures_per_pattern, volume, hi_tone_on
+        );
         return result ? ['playing'] : [];
     }
     """,
@@ -259,7 +295,9 @@ clientside_callback(
     State("is-metronome-playing", "value"),
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
+    State("measures-per-pattern", "value"),
     State("metronome-vol", "value"),
+    State("play-hi-tone", "value"),
 )
 
 clientside_callback(
@@ -313,13 +351,12 @@ def debug_audio_store(data):
 
 @app.callback(
     Output("status-msg", "children", allow_duplicate=True),
-    Output("is-playing", "value", allow_duplicate=True),
     Input("play-btn", "n_clicks"),
     prevent_initial_call=True
 )
 def clear_msg_on_play(n_clicks):
-    """Clear status message and reset playing state when user clicks play button"""
-    return "", []
+    """Clear status message when user clicks play button"""
+    return ""
 
 @app.callback(
     Output("status-msg", "children", allow_duplicate=True),
