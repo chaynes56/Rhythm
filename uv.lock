@@ -658,16 +658,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyogg"
-version = "0.6.14a1"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1a/13/07358440dc3e94a71f3cd0f734e90b41392cc125de1571a99c4f8b594ccb/PyOgg-0.6.14a1.tar.gz", hash = "sha256:8294b34aa59c90200c4630c2cc4a5b84407209141e8e5d069d7a5be358e94262", size = 35091, upload-time = "2020-06-26T12:51:57.378Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/b8/aa50bedf5628dc66a88a3aa6554b91a3f931baf2b221ece3a8525278b667/PyOgg-0.6.14a1-py2.py3-none-win32.whl", hash = "sha256:794db340fb5833afb4f493b40f91e3e0f594606fd4b31aea0ebf5be2de9da964", size = 1037870, upload-time = "2020-06-26T12:51:52.764Z" },
-    { url = "https://files.pythonhosted.org/packages/52/14/34b6b82684f26e517f6947d9c1d43e64dbf1630954f284ffd9912f4c46c8/PyOgg-0.6.14a1-py2.py3-none-win_amd64.whl", hash = "sha256:40f79b288b3a667309890885f4cf53371163b7dae17eb17567fb24ab467eca26", size = 1099508, upload-time = "2020-06-26T12:51:55.912Z" },
-]
-
-[[package]]
 name = "python-dateutil"
 version = "2.9.0.post0"
 source = { registry = "https://pypi.org/simple" }
@@ -716,7 +706,6 @@ dependencies = [
     { name = "pandas" },
     { name = "plotly" },
     { name = "pydub" },
-    { name = "pyogg" },
     { name = "scipy" },
     { name = "soundfile" },
 ]
@@ -731,7 +720,6 @@ requires-dist = [
     { name = "pandas", specifier = ">=3.0.1" },
     { name = "plotly", specifier = ">=5.18.0" },
     { name = "pydub", specifier = "==0.25.1" },
-    { name = "pyogg", specifier = "==0.6.14a1" },
     { name = "scipy", specifier = ">=1.11.0" },
     { name = "soundfile", specifier = ">=0.12.1" },
 ]

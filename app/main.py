@@ -32,7 +32,7 @@ def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
     """
     import threading
 
-    result = {"y": None, "sr": None, "error": ""}
+    result: dict = {"y": None, "sr": None, "error": ""}
 
     def load_with_librosa():
         try:
@@ -110,13 +110,55 @@ def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
 
     return result["y"], result["sr"]
 
+
+def normalize_waveform_for_display(y: np.ndarray) -> np.ndarray:
+    """
+    Symmetrically clip around zero using the smaller side magnitude,
+    then normalize to [-1, 1].
+    """
+    if y.size == 0:
+        return y
+
+    max_pos = float(np.max(y))
+    max_neg = float(abs(np.min(y)))
+    clip_bound = min(max_pos, max_neg)
+
+    # Fallback if one side is near zero
+    if clip_bound <= 1e-12:
+        peak = float(np.max(np.abs(y)))
+        if peak <= 1e-12:
+            return np.zeros_like(y, dtype=np.float32)
+        return (y / peak).astype(np.float32)
+
+    y_clipped = np.clip(y, -clip_bound, clip_bound)
+    y_norm = (y_clipped / clip_bound).astype(np.float32)
+    return y_norm
+
+
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 app.layout = dbc.Container([
     dbc.Row([
-        dbc.Col(html.H1("Rhythm App"), className="text-center mb-4")
+        dbc.Col(html.H1("Rhythm Analysis App"), className="text-center mb-4")
     ]),
-    
+
+    # Waveform first, full width
+    dbc.Row([
+        dbc.Col([
+            dcc.Graph(
+                id="waveform-graph",
+                style={"height": "260px"},  # ~6:1+ on typical desktop widths
+                config={
+                    "scrollZoom": True,
+                    "displayModeBar": True,
+                    "modeBarButtonsToRemove": ["pan2d", "select2d", "lasso2d",
+                                               "autoScale2d"],
+                    "displaylogo": False
+                },
+            ),
+        ], width=12)
+    ], className="mb-4"),
+
     dbc.Row([
         dbc.Col([
             dbc.Card([
@@ -126,17 +168,16 @@ app.layout = dbc.Container([
                     dbc.Button("Play Recording", id="play-btn", color="success", className="me-2"),
                     dbc.Button("Save Recording", id="save-btn", color="primary", className="me-2"),
                     dbc.Button("Load Recording", id="load-btn", color="info"),
-                    dcc.Checklist(id="is-recording", options=[{"label": "Recording", "value": "recording"}], value=[], style={'display': 'none'}),
-                    dcc.Checklist(id="is-playing", options=[{"label": "Playing", "value": "playing"}], value=[], style={'display': 'none'}),
-                    html.Div(id="status-msg", className="mt-2")
-                ])
+                    dcc.Checklist(id="is-recording", options=[{"label": "Recording", "value": "recording"}], value=[], style={"display": "none"}),
+                    dcc.Checklist(id="is-playing", options=[{"label": "Playing", "value": "playing"}], value=[], style={"display": "none"}),
+                    html.Div(id="status-msg", className="mt-2"),
+                ]),
             ], className="mb-4"),
-            
             dbc.Card([
                 dbc.CardHeader("Metronome Settings"),
                 dbc.CardBody([
                     dbc.Button("Start Metronome", id="metronome-btn", color="primary", className="mb-3 w-100"),
-                    dcc.Checklist(id="is-metronome-playing", options=[{"label": "Playing", "value": "playing"}], value=[], style={'display': 'none'}),
+                    dcc.Checklist(id="is-metronome-playing", options=[{"label": "Playing", "value": "playing"}], value=[], style={"display": "none"}),
                     dbc.Row([
                         dbc.Col([
                             html.Label("Tempo (BPM)"),
@@ -157,27 +198,23 @@ app.layout = dbc.Container([
                                 dcc.Slider(min=0, max=1, step=0.1, value=1.0, id="recording-vol"),
                                 html.Label("Playback", className="small"),
                                 dcc.Slider(min=0, max=1, step=0.1, value=1.0, id="playback-vol"),
-                            ])
-                        ])
-                    ])
-                ])
-            ])
-        ], width=4),
-        
-        dbc.Col([
-            dcc.Graph(id="waveform-graph", config={'scrollZoom': True, 'displayModeBar': True, 'modeBarButtonsToRemove': ['pan2d', 'select2d', 'lasso2d', 'autoScale2d'], 'displaylogo': False}),
-        ], width=8)
+                            ]),
+                        ]),
+                    ]),
+                ]),
+            ]),
+        ], width=12),
     ]),
-    
+
     # Hidden components for data storage and communication
     dcc.Store(id="audio-store"),
     dcc.Store(id="metronome-points-store"),
     dcc.Store(id="pulse-points-store"),
     dcc.Store(id="audio-data-store"),
-    dcc.Input(id="playback-sync", type="text", style={'display': 'none'}),
-    dbc.Button("Process", id="audio-process-btn", style={'display': 'none'}, n_clicks=0),
+    dcc.Input(id="playback-sync", type="text", style={"display": "none"}),
+    dbc.Button("Process", id="audio-process-btn", style={"display": "none"}, n_clicks=0),
     dcc.Download(id="download-audio"),
-    dcc.Upload(id="upload-audio", style={'display': 'none'})
+    dcc.Upload(id="upload-audio", style={"display": "none"}),
 ], fluid=True)
 
 # Clientside callbacks for recording and playback
@@ -362,39 +399,7 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         audio_bytes = base64.b64decode(data)
         print(f"process_audio: Decoded audio size: {len(audio_bytes)} bytes")
 
-        # Try to detect if it's WebM and convert to WAV if needed
-        if audio_bytes[:4] == b'\x1a\x45\xdf\xa3':  # EBML signature (WebM)
-            print(f"process_audio: Detected WebM format, attempting conversion with pyogg...")
-            try:
-                from pyogg import OggOpus
-                import wave as wave_module
-
-                # Load WebM/Opus with pyogg
-                ogg_opus = OggOpus(io.BytesIO(audio_bytes))
-
-                # Get audio data and sample rate
-                pcm_data = ogg_opus.as_array()
-                sr_webm = ogg_opus.frequency
-
-                print(f"process_audio: Successfully decoded WebM with pyogg, sr={sr_webm}, shape={pcm_data.shape}")
-
-                # Convert to mono if stereo
-                if len(pcm_data.shape) > 1 and pcm_data.shape[1] > 1:
-                    pcm_data = pcm_data.mean(axis=1)
-
-                # Normalize to -1 to 1 range if needed
-                if pcm_data.dtype != np.float32:
-                    pcm_data = pcm_data.astype(np.float32) / 32768.0
-
-                y = pcm_data
-                sr = sr_webm
-                print(f"process_audio: Loaded WebM successfully, shape={y.shape}, sr={sr}")
-            except Exception as convert_err:
-                print(f"process_audio: WebM conversion with pyogg failed: {convert_err}")
-                print(f"Attempting to load with librosa...")
-                # Fall through to librosa attempt below
-        # Load with librosa (handles more formats than soundfile)
-        # Try soundfile first for better performance with WAV files
+        # Try soundfile first (WAV), then librosa for WebM/OGG
         try:
             with io.BytesIO(audio_bytes) as f:
                 y, sr = sf.read(f)
@@ -416,9 +421,10 @@ def process_audio(base64_audio, tempo, beats_per_measure):
             y, sr = result
             print(f"process_audio: Loaded with librosa, sr={sr}, duration={len(y)/sr:.2f}s")
 
-        # If stereo, convert to mono
+        # Convert to mono if stereo, then normalize for display
         if len(y.shape) > 1:
             y = y.mean(axis=1)
+        y = normalize_waveform_for_display(y)
 
         # Pulse analysis
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
@@ -476,9 +482,11 @@ def process_audio(base64_audio, tempo, beats_per_measure):
 
         fig.update_layout(
             xaxis_title="Time (s)",
-            yaxis_title="Amplitude",
-            dragmode='pan',
-            template='plotly_white'
+            yaxis_title="Normalized Amplitude",
+            yaxis_range=[-1.1, 1.1],
+            dragmode="pan",
+            template="plotly_white",
+            margin=dict(l=40, r=20, t=20, b=40),
         )
 
         # Prepare data for saving
@@ -576,7 +584,8 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
 
         if len(y.shape) > 1:
             y = y.mean(axis=1)
-        
+        y = normalize_waveform_for_display(y)
+
         duration = len(y) / sr
         time = np.linspace(0, duration, num=len(y))
         if len(y) > 10000:
@@ -613,8 +622,15 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
                 marker=dict(color='green', symbol='circle')
             ))
         
-        fig.update_layout(xaxis_title="Time (s)", yaxis_title="Amplitude", dragmode='pan', template='plotly_white')
-        
+        fig.update_layout(
+            xaxis_title="Time (s)",
+            yaxis_title="Normalized Amplitude",
+            yaxis_range=[-1.1, 1.1],
+            dragmode="pan",
+            template="plotly_white",
+            margin=dict(l=40, r=20, t=20, b=40),
+        )
+
         print(f"load_recording: Successfully processed audio, duration={duration:.2f}s, sr={sr}")
         print(f"load_recording: Returning data with {len(metronome_times)} metronome points, {len(beat_times)} beat points")
         

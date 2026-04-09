@@ -14,5 +14,4 @@ dependencies = [
     "soundfile>=0.12.1",
     "ffmpeg==1.4",
     "pydub==0.25.1",
-    "pyogg==0.6.14a1",
 ]
