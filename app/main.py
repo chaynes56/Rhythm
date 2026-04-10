@@ -422,12 +422,12 @@ def process_audio(base64_audio, tempo, beats_per_measure):
     print(f"tempo={tempo}, beats_per_measure={beats_per_measure}")
     print(f"{'='*60}\n")
 
+    if not base64_audio:
+        print("process_audio: empty payload, skipping callback")
+        raise PreventUpdate
+
     try:
         # Extract data from base64
-        if not base64_audio:
-            print("process_audio: empty payload, skipping callback")
-            raise PreventUpdate
-
         if ',' in base64_audio:
             header, data = base64_audio.split(',')
         else:
@@ -538,6 +538,8 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         # Log success but don't show message (waveform appearing is enough feedback)
         print(f"process_audio: Successfully processed recording, duration={duration:.2f}s")
         return json.dumps(save_data), fig, ""
+    except PreventUpdate:
+        raise
     except Exception as e:
         error_msg = f"Error processing audio: {e}"
         print(error_msg)

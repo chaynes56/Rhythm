@@ -6,6 +6,7 @@ let mediaRecorder;
 let audioChunks = [];
 let audioContext;
 let metronomeInterval;
+let metronomeScheduler = null; // Web Audio scheduler for precise timing
 let currentAudio = null;
 let metronomeState = {
     beatCount: 0,
@@ -15,6 +16,20 @@ let metronomeState = {
     volume: 0.5,
     tempo: 120,
     hiToneOn: true
+};
+let toneFrequency = {
+    low: 220,
+    mid: 440,
+    high: 880
+};
+
+// Diagnostics: Track recording buffer health
+let recordingDiagnostics = {
+    chunks: [],
+    lastChunkTime: 0,
+    totalDuration: 0,
+    gapDetected: false,
+    largestGap: 0
 };
 
 function encodeWAV(samples, sampleRate) {
@@ -77,7 +92,17 @@ window.dash_clientside.recorder = {
                 }
             }
 
-            navigator.mediaDevices.getUserMedia({ audio: true })
+            // Request specific audio constraints to ensure consistent audio stream
+            const audioConstraints = {
+                audio: {
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                    sampleRate: 48000  // Standard sample rate; browser will use closest available
+                }
+            };
+
+            navigator.mediaDevices.getUserMedia(audioConstraints)
                 .then(stream => {
                     const types = [
                         'audio/wav',
@@ -88,7 +113,9 @@ window.dash_clientside.recorder = {
                         'audio/mp4'
                     ];
 
-                    let options = {};
+                    let options = {
+                        audioBitsPerSecond: 128000  // Ensure consistent bitrate
+                    };
                     let selectedMimeType = null;
                     for (const type of types) {
                         if (MediaRecorder.isTypeSupported(type)) {
@@ -104,8 +131,21 @@ window.dash_clientside.recorder = {
                     }
 
                     mediaRecorder = new MediaRecorder(stream, options);
-                    mediaRecorder.start();
+
+                    // Reset diagnostics for this recording session
+                    recordingDiagnostics = {
+                        chunks: [],
+                        lastChunkTime: Date.now(),
+                        totalDuration: 0,
+                        gapDetected: false,
+                        largestGap: 0
+                    };
+
+                    // Use small timeslice to ensure continuous, consistent chunks
+                    // This prevents buffer buildup and ensures even audio capture
+                    mediaRecorder.start(100);  // 100ms timeslice for consistent chunks
                     audioChunks = [];
+                    console.log("MediaRecorder started with timeslice=100ms, constraints:", audioConstraints);
 
                     const maxRecordingTime = 60000;
                     const warningTime = 55000;
@@ -131,12 +171,39 @@ window.dash_clientside.recorder = {
 
                     mediaRecorder.addEventListener("dataavailable", event => {
                         audioChunks.push(event.data);
+
+                        // Diagnostics: Track chunk timing
+                        const now = Date.now();
+                        const timeSinceLastChunk = now - recordingDiagnostics.lastChunkTime;
+                        recordingDiagnostics.chunks.push({
+                            size: event.data.size,
+                            timeSinceLastChunk: timeSinceLastChunk,
+                            timestamp: now
+                        });
+                        recordingDiagnostics.lastChunkTime = now;
+                        recordingDiagnostics.totalDuration += timeSinceLastChunk;
+
+                        // Detect gaps (>250ms would indicate dropout)
+                        if (timeSinceLastChunk > 250) {
+                            recordingDiagnostics.gapDetected = true;
+                            recordingDiagnostics.largestGap = Math.max(recordingDiagnostics.largestGap, timeSinceLastChunk);
+                            console.warn(`Recording gap detected: ${timeSinceLastChunk}ms (chunk size: ${event.data.size} bytes)`);
+                        }
                     });
 
                     mediaRecorder.addEventListener("stop", () => {
                         clearTimeout(recordingTimeout);
                         clearTimeout(warningTimeout);
                         console.log("Recording stopped. Processing audio...");
+
+                        // Log buffer diagnostics
+                        console.log("=== RECORDING BUFFER DIAGNOSTICS ===");
+                        console.log(`Total chunks: ${audioChunks.length}`);
+                        console.log(`Total duration: ${recordingDiagnostics.totalDuration}ms`);
+                        console.log(`Gap detected: ${recordingDiagnostics.gapDetected}`);
+                        console.log(`Largest gap: ${recordingDiagnostics.largestGap}ms`);
+                        console.log(`Chunk sizes:`, recordingDiagnostics.chunks.map(c => c.size).join(', '));
+                        console.log("====================================");
 
                         // Convert WebM chunks to PCM and then to WAV
                         const reader = new FileReader();
@@ -263,7 +330,10 @@ window.dash_clientside.recorder = {
             metronomeState.measureCount = 0;
             const secondsPerBeat = 60.0 / tempo;
 
-            const playTone = () => {
+            // Warm up the context and prepare for scheduling
+            console.log(`Starting metronome with Web Audio scheduler at ${tempo} BPM (${secondsPerBeat.toFixed(3)}s per beat)`);
+
+            const playTone = (scheduledTime = null) => {
                 try {
                     if (audioContext.state === 'closed') {
                         console.error("AudioContext is closed, cannot play tone");
@@ -275,10 +345,14 @@ window.dash_clientside.recorder = {
                         audioContext.resume();
                     }
 
+                    const toneTime = (Number.isFinite(scheduledTime) && scheduledTime >= audioContext.currentTime)
+                        ? scheduledTime
+                        : audioContext.currentTime;
+
                     const osc = audioContext.createOscillator();
                     const gain = audioContext.createGain();
 
-                    let frequency = 440; // Default hi-tone (beat within measure)
+                    let frequency = toneFrequency.high;
                     let shouldPlay = true;
 
                     const positionInMeasure = metronomeState.beatCount % metronomeState.beatsPerMeasure;
@@ -287,10 +361,10 @@ window.dash_clientside.recorder = {
                     // Determine tone type
                     if (positionInMeasure === 0 && positionInPattern === 0) {
                         // First beat of pattern: low tone
-                        frequency = 110;
+                        frequency = toneFrequency.low;
                     } else if (positionInMeasure === 0) {
                         // First beat of measure (not pattern start): mid-tone
-                        frequency = 220;
+                        frequency = toneFrequency.mid;
                     } else if (!metronomeState.hiToneOn) {
                         // Not a measure-start beat and hi-tone is off: silence
                         shouldPlay = false;
@@ -298,16 +372,16 @@ window.dash_clientside.recorder = {
 
                     if (shouldPlay) {
                         osc.type = 'sine';
-                        osc.frequency.setValueAtTime(frequency, audioContext.currentTime);
+                        osc.frequency.setValueAtTime(frequency, toneTime);
 
-                        gain.gain.setValueAtTime(metronomeState.volume, audioContext.currentTime);
-                        gain.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.1);
+                        gain.gain.setValueAtTime(metronomeState.volume, toneTime);
+                        gain.gain.exponentialRampToValueAtTime(0.001, toneTime + 0.1);
 
                         osc.connect(gain);
                         gain.connect(audioContext.destination);
 
-                        osc.start(audioContext.currentTime);
-                        osc.stop(audioContext.currentTime + 0.1);
+                        osc.start(toneTime);
+                        osc.stop(toneTime + 0.1);
                     }
 
                     metronomeState.beatCount++;
@@ -319,14 +393,35 @@ window.dash_clientside.recorder = {
                 }
             };
 
-            console.log("Starting metronome at", tempo, "BPM with", measuresPerPattern, "measures/pattern");
+            // Play first beat immediately to minimize startup delay
             playTone();
-            metronomeInterval = setInterval(playTone, secondsPerBeat * 1000);
+
+            // Use Web Audio scheduler for subsequent beats (much more accurate than setInterval)
+            // Schedule next beat times using audioContext.currentTime for precise timing
+            let nextScheduledTime = audioContext.currentTime + secondsPerBeat;
+
+            metronomeScheduler = setInterval(() => {
+                try {
+                    const now = audioContext.currentTime;
+                    // Schedule all beats that are due (handles brief interruptions)
+                    while (nextScheduledTime <= now + 0.050) {  // 50ms lookahead
+                        // Always trigger each due beat exactly once.
+                        // If overdue, play immediately; if in lookahead window, schedule precisely.
+                        playTone(nextScheduledTime);
+                        nextScheduledTime += secondsPerBeat;
+                    }
+                } catch (err) {
+                    console.error("Error in metronome scheduler:", err);
+                }
+            }, secondsPerBeat * 500);  // Check frequency: half the beat interval for precision
+
+            metronomeInterval = metronomeScheduler; // Keep for compatibility
             return true;
         } else {
             if (metronomeInterval) {
                 clearInterval(metronomeInterval);
                 metronomeInterval = null;
+                metronomeScheduler = null;
                 console.log("Stopped metronome");
             }
             return false;
