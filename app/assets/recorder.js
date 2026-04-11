@@ -13,6 +13,7 @@ let activeMetronomeAudios = [];
 let metronomeClickBuffers = null;
 let metronomeBufferContext = null;
 let metronomeAudioUrls = null;
+let metronomeAutoStartedByRecording = false;
 let metronomeState = {
     beatCount: 0,
     measureCount: 0,
@@ -77,6 +78,27 @@ function cleanupMetronomeNode(nodeRecord) {
 
 function cleanupMetronomeAudio(audio) {
     activeMetronomeAudios = activeMetronomeAudios.filter(item => item !== audio);
+}
+
+function clickHiddenButton(buttonId) {
+    const button = document.getElementById(buttonId);
+    if (!button) {
+        return;
+    }
+
+    button.click();
+}
+
+function stopMetronomeIfAutoStartedByRecording() {
+    if (!metronomeAutoStartedByRecording || !metronomeInterval) {
+        return;
+    }
+
+    const metronomeBtn = document.getElementById('metronome-btn');
+    metronomeAutoStartedByRecording = false;
+    if (metronomeBtn) {
+        metronomeBtn.click();
+    }
 }
 
 function isSafariBrowser() {
@@ -173,6 +195,7 @@ const recorderControls = {
             // If patterns > 1, start at the beginning of the last measure in the pattern
             if (!metronomeInterval) {
                 console.log("Auto-starting metronome with recording...");
+                metronomeAutoStartedByRecording = true;
                 const measuresPerPattern = metronomeState.measuresPerPattern || 1;
                 if (measuresPerPattern > 1) {
                     // Set up to start at the beginning of the last measure of the pattern
@@ -254,6 +277,7 @@ const recorderControls = {
                             window.recorderControls.playStopBeep();
                             mediaRecorder.stop();
                             stream.getTracks().forEach(track => track.stop());
+                            stopMetronomeIfAutoStartedByRecording();
                             window.recorderControls.showAutoStopMessage();
                         }
                     }, maxRecordingTime);
@@ -349,6 +373,7 @@ const recorderControls = {
                     mediaRecorder.stream.getTracks().forEach(track => track.stop());
                 }
             }
+            stopMetronomeIfAutoStartedByRecording();
             return false;
         }
     },
@@ -377,6 +402,7 @@ const recorderControls = {
             currentAudio.addEventListener('ended', () => {
                 console.log("Audio playback ended");
                 currentAudio = null;
+                clickHiddenButton('playback-ended-btn');
             });
 
             currentAudio.play().catch(err => {
@@ -634,6 +660,7 @@ const recorderControls = {
                     }
                 });
                 activeMetronomeAudios = [];
+                metronomeAutoStartedByRecording = false;
                 console.log("Stopped metronome");
             }
             return false;

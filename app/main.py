@@ -1,20 +1,21 @@
 #!/usr/bin/env python3
 # Copyright 2026 Christopher T. Haynes. See the project LICENSE file.
 
-from dash import Dash, dcc, html, Input, Output, State, clientside_callback
-from dash.exceptions import PreventUpdate
-import dash_bootstrap_components as dbc
-import plotly.graph_objects as go
-import numpy as np
 import base64
 import io
-import soundfile as sf
-import librosa
 import json
-import warnings
-import tempfile
 import os
+import tempfile
+import warnings
 from pathlib import Path
+
+import dash_bootstrap_components as dbc
+import librosa
+import numpy as np
+import plotly.graph_objects as go
+import soundfile as sf
+from dash import Dash, dcc, html, Input, Output, State, clientside_callback
+from dash.exceptions import PreventUpdate
 
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
@@ -25,7 +26,8 @@ RECORDER_SCRIPT_PATH = ASSETS_DIR / "recorder.js"
 
 def load_inline_script(script_path: Path) -> str:
     try:
-        return script_path.read_text(encoding="utf-8").replace("</script>", r"<\/script>")
+        return script_path.read_text(encoding="utf-8").replace("</script>",
+                                                               r"<\/script>")
     except Exception as exc:
         error_text = json.dumps(str(exc))
         print(f"Failed to load inline recorder script: {exc}")
@@ -33,6 +35,7 @@ def load_inline_script(script_path: Path) -> str:
 
 
 RECORDER_INLINE_SCRIPT = load_inline_script(RECORDER_SCRIPT_PATH)
+
 
 def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
     """
@@ -57,7 +60,8 @@ def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
             if audio_bytes.startswith(b'RIFF') and b'WAVE' in audio_bytes[:12]:
                 suffix = '.wav'
                 print("Detected WAV format from magic bytes")
-            elif audio_bytes.startswith(b'\xff\xfb') or audio_bytes.startswith(b'\xff\xfa'):
+            elif audio_bytes.startswith(b'\xff\xfb') or audio_bytes.startswith(
+                    b'\xff\xfa'):
                 suffix = '.mp3'
                 print("Detected MP3 format from magic bytes")
             else:
@@ -67,7 +71,8 @@ def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
                 tmp.write(audio_bytes)
                 tmp_path = tmp.name
             try:
-                print(f"load_audio_from_bytes: Loading with librosa (audio size: {len(audio_bytes)} bytes, format: {suffix}, timeout: {timeout_seconds}s)...")
+                print(
+                    f"load_audio_from_bytes: Loading with librosa (audio size: {len(audio_bytes)} bytes, format: {suffix}, timeout: {timeout_seconds}s)...")
                 # Try with different backends if available
                 try:
                     y, sr = librosa.load(tmp_path, sr=None)
@@ -92,12 +97,14 @@ def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
                 # Check duration
                 duration = len(y) / sr
                 if duration > max_duration:
-                    result["error"] = f"Recording too long ({duration:.1f}s > {max_duration}s max)"
+                    result[
+                        "error"] = f"Recording too long ({duration:.1f}s > {max_duration}s max)"
                     print(f"load_audio_from_bytes: {result['error']}")
                 else:
                     result["y"] = y
                     result["sr"] = sr
-                    print(f"load_audio_from_bytes: Loaded successfully, duration={duration:.1f}s, sr={sr}")
+                    print(
+                        f"load_audio_from_bytes: Loaded successfully, duration={duration:.1f}s, sr={sr}")
             finally:
                 if os.path.exists(tmp_path):
                     os.unlink(tmp_path)
@@ -188,7 +195,7 @@ app.layout = dbc.Container([
         dbc.Col([
             dcc.Graph(
                 id="waveform-graph",
-                style={"height": "260px"},  # ~6:1+ on typical desktop widths
+                style={"height": "260px", "visibility": "hidden"},  # ~6:1+ on typical desktop widths
                 config={
                     "scrollZoom": True,
                     "displayModeBar": True,
@@ -207,22 +214,31 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
-                            dbc.Button("Start Recording", id="record-btn", color="danger", className="me-2"),
-                            dbc.Button("Play Recording", id="play-btn", color="success", className="me-2"),
-                            dbc.Button("Save Recording", id="save-btn", color="primary", className="me-2"),
+                            dbc.Button("Start Recording", id="record-btn",
+                                       color="danger", className="me-2"),
+                            dbc.Button("Play Recording", id="play-btn", color="success",
+                                       className="me-2"),
+                            dbc.Button("Save Recording", id="save-btn", color="primary",
+                                       className="me-2"),
                             dbc.Button("Load Recording", id="load-btn", color="info"),
                         ], width=12),
                     ], className="mb-2"),
-                    dcc.Checklist(id="is-recording", options=[{"label": "Recording", "value": "recording"}], value=[], style={"display": "none"}),
-                    dcc.Checklist(id="is-playing", options=[{"label": "Playing", "value": "playing"}], value=[], style={"display": "none"}),
+                    dcc.Checklist(id="is-recording", options=[
+                        {"label": "Recording", "value": "recording"}], value=[],
+                                  style={"display": "none"}),
+                    dcc.Checklist(id="is-playing",
+                                  options=[{"label": "Playing", "value": "playing"}],
+                                  value=[], style={"display": "none"}),
                     dbc.Row([
                         dbc.Col([
                             html.Label("Recording Volume", className="small"),
-                            dcc.Slider(min=0, max=1, step=0.1, value=1.0, id="recording-vol"),
+                            dcc.Slider(min=0, max=1, step=0.1, value=1.0,
+                                       id="recording-vol"),
                         ], width=6),
                         dbc.Col([
                             html.Label("Playback Volume", className="small"),
-                            dcc.Slider(min=0, max=1, step=0.1, value=1.0, id="playback-vol"),
+                            dcc.Slider(min=0, max=1, step=0.1, value=1.0,
+                                       id="playback-vol"),
                         ], width=6),
                     ]),
                     html.Div(id="status-msg", className="mt-2"),
@@ -233,13 +249,15 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
-                            dbc.Button("Start Metronome", id="metronome-btn", color="primary"),
+                            dbc.Button("Start Metronome", id="metronome-btn",
+                                       color="primary"),
                         ], width="auto"),
                         dbc.Col([
                             html.Label("Measures / Pattern", className="small"),
                             dcc.Dropdown(
                                 id="measures-per-pattern",
-                                options=[{"label": str(i), "value": i} for i in range(1, 9)],
+                                options=[{"label": str(i), "value": i} for i in
+                                         range(1, 9)],
                                 value=1,
                                 clearable=False,
                                 style={"width": "90px"},
@@ -249,7 +267,8 @@ app.layout = dbc.Container([
                             html.Label("Beats / Measure", className="small"),
                             dcc.Dropdown(
                                 id="beats-per-measure",
-                                options=[{"label": str(i), "value": i} for i in range(1, 13)],
+                                options=[{"label": str(i), "value": i} for i in
+                                         range(1, 17)],
                                 value=4,
                                 clearable=False,
                                 style={"width": "90px"},
@@ -258,21 +277,26 @@ app.layout = dbc.Container([
                         dbc.Col([
                             dcc.Checklist(
                                 id="play-hi-tone",
-                                options=[{"label": "Play Hi Tone", "value": "on"}],
+                                options=[{"label": "Play High Tone", "value": "on"}],
                                 value=["on"],
                                 style={"marginTop": "20px"}
                             ),
                         ], width="auto"),
                     ], align="end", className="mb-3"),
-                    dcc.Checklist(id="is-metronome-playing", options=[{"label": "Playing", "value": "playing"}], value=[], style={"display": "none"}),
+                    dcc.Checklist(id="is-metronome-playing",
+                                  options=[{"label": "Playing", "value": "playing"}],
+                                  value=[], style={"display": "none"}),
                     dbc.Row([
                         dbc.Col([
                             html.Label("Tempo (BPM)", className="small"),
-                            dcc.Slider(min=40, max=240, step=1, value=120, id="tempo-slider", marks={i: str(i) for i in range(40, 241, 40)}),
+                            dcc.Slider(min=40, max=240, step=1, value=120,
+                                       id="tempo-slider",
+                                       marks={i: str(i) for i in range(40, 241, 40)}),
                         ], width=6),
                         dbc.Col([
                             html.Label("Metronome Volume", className="small"),
-                            dcc.Slider(min=0, max=1, step=0.1, value=0.5, id="metronome-vol"),
+                            dcc.Slider(min=0, max=1, step=0.1, value=0.5,
+                                       id="metronome-vol"),
                         ], width=6),
                     ]),
                 ]),
@@ -282,11 +306,15 @@ app.layout = dbc.Container([
 
     # Hidden components for data storage and communication
     dcc.Store(id="audio-store"),
+    dcc.Store(id="waveform-visible-store", data=False),
     dcc.Store(id="metronome-points-store"),
     dcc.Store(id="pulse-points-store"),
     dcc.Store(id="audio-data-store"),
+    dbc.Button("Playback Ended", id="playback-ended-btn",
+               style={"display": "none"}, n_clicks=0),
     dcc.Input(id="playback-sync", type="text", style={"display": "none"}),
-    dbc.Button("Process", id="audio-process-btn", style={"display": "none"}, n_clicks=0),
+    dbc.Button("Process", id="audio-process-btn", style={"display": "none"},
+               n_clicks=0),
     dcc.Download(id="download-audio"),
     dcc.Upload(id="upload-audio", style={"display": "none"}),
 ], fluid=True)
@@ -390,6 +418,63 @@ clientside_callback(
     Input("audio-store", "data"),
 )
 
+clientside_callback(
+    """
+    function(recording_status) {
+        if (recording_status && recording_status.length > 0) {
+            return false;
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("waveform-visible-store", "data", allow_duplicate=True),
+    Input("is-recording", "value"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
+    function(n_clicks, playing_status) {
+        if (!n_clicks) {
+            return playing_status;
+        }
+        return [];
+    }
+    """,
+    Output("is-playing", "value", allow_duplicate=True),
+    Input("playback-ended-btn", "n_clicks"),
+    State("is-playing", "value"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
+    function(recording_status, waveform_visible) {
+        const baseStyle = {
+            height: '260px',
+            visibility: 'hidden'
+        };
+
+        if (recording_status && recording_status.length > 0) {
+            return baseStyle;
+        }
+
+        if (waveform_visible) {
+            return {
+                height: '260px',
+                visibility: 'visible'
+            };
+        }
+
+        return baseStyle;
+    }
+    """,
+    Output("waveform-graph", "style"),
+    Input("is-recording", "value"),
+    Input("waveform-visible-store", "data"),
+)
+
+
 # Debug callback to watch audio-data-store changes
 @app.callback(
     Output("playback-sync", "value", allow_duplicate=True),
@@ -402,6 +487,8 @@ def debug_audio_store(data):
     print(f"DEBUG: audio-data-store changed! Data length: {len(data)}")
     return f"audio-store-update-{len(data)}"
 
+
+# noinspection PyUnusedLocal
 @app.callback(
     Output("status-msg", "children", allow_duplicate=True),
     Input("play-btn", "n_clicks"),
@@ -411,6 +498,8 @@ def clear_msg_on_play(n_clicks):
     """Clear status message when user clicks play button"""
     return ""
 
+
+# noinspection PyUnusedLocal
 @app.callback(
     Output("status-msg", "children", allow_duplicate=True),
     Input("save-btn", "n_clicks"),
@@ -420,6 +509,8 @@ def clear_msg_on_save(n_clicks):
     """Clear status message when user clicks save button"""
     return ""
 
+
+# noinspection PyUnusedLocal
 @app.callback(
     Output("status-msg", "children", allow_duplicate=True),
     Input("load-btn", "n_clicks"),
@@ -428,6 +519,7 @@ def clear_msg_on_save(n_clicks):
 def clear_msg_on_load(n_clicks):
     """Clear status message when user clicks load button"""
     return ""
+
 
 @app.callback(
     Output("metronome-btn", "children"),
@@ -439,6 +531,7 @@ def update_metronome_button(playing_value):
         return "Stop Metronome", "secondary"
     return "Start Metronome", "primary"
 
+
 @app.callback(
     Output("record-btn", "children"),
     Output("record-btn", "color"),
@@ -448,6 +541,7 @@ def update_record_button(recording_value):
     if "recording" in recording_value:
         return "Stop Recording", "secondary"
     return "Start Recording", "danger"
+
 
 @app.callback(
     Output("play-btn", "children"),
@@ -459,8 +553,10 @@ def update_play_button(playing_value):
         return "Stop Playback", "secondary"
     return "Play Recording", "success"
 
+
 @app.callback(
     Output("audio-store", "data"),
+    Output("waveform-visible-store", "data"),
     Output("waveform-graph", "figure"),
     Output("status-msg", "children", allow_duplicate=True),
     Input("audio-data-store", "data"),
@@ -469,11 +565,11 @@ def update_play_button(playing_value):
     prevent_initial_call=True
 )
 def process_audio(base64_audio, tempo, beats_per_measure):
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"PROCESS_AUDIO CALLBACK TRIGGERED!")
     print(f"audio_len={len(base64_audio) if base64_audio else 0}")
     print(f"tempo={tempo}, beats_per_measure={beats_per_measure}")
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")
 
     if not base64_audio:
         print("process_audio: empty payload, skipping callback")
@@ -493,7 +589,8 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         try:
             with io.BytesIO(audio_bytes) as f:
                 y, sr = sf.read(f)
-            print(f"process_audio: Loaded with soundfile, sr={sr}, duration={len(y)/sr:.2f}s")
+            print(
+                f"process_audio: Loaded with soundfile, sr={sr}, duration={len(y) / sr:.2f}s")
         except Exception as sf_error:
             # If soundfile fails, try librosa which can handle WebM, OGG, etc.
             print(f"Soundfile failed: {sf_error}. Trying librosa...")
@@ -502,14 +599,16 @@ def process_audio(base64_audio, tempo, beats_per_measure):
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
                 # Don't show error message for auto-stop timeout - just log it
-                print(f"process_audio: Audio loading timeout (likely due to large file size)")
-                return None, go.Figure(), ""
+                print(
+                    f"process_audio: Audio loading timeout (likely due to large file size)")
+                return None, False, go.Figure(), ""
 
             if not isinstance(result, tuple) or result[0] is None or result[1] is None:
-                return None, go.Figure(), "Error: Failed to process audio. Recording may be corrupted or in unsupported format."
+                return None, False, go.Figure(), "Error: Failed to process audio. Recording may be corrupted or in unsupported format."
 
             y, sr = result
-            print(f"process_audio: Loaded with librosa, sr={sr}, duration={len(y)/sr:.2f}s")
+            print(
+                f"process_audio: Loaded with librosa, sr={sr}, duration={len(y) / sr:.2f}s")
 
         # Convert to mono if stereo, then normalize for display
         if len(y.shape) > 1:
@@ -549,13 +648,16 @@ def process_audio(base64_audio, tempo, beats_per_measure):
             y_display = y
 
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform", line=dict(color='blue')))
+        fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform",
+                                 line=dict(color='blue')))
 
         # Add metronome points
-        metronome_colors = ['red' if i % beats_per_measure == 0 else 'orange' for i in range(len(metronome_times))]
+        metronome_colors = ['red' if i % beats_per_measure == 0 else 'orange' for i in
+                            range(len(metronome_times))]
         fig.add_trace(go.Scatter(
             x=metronome_times,
-            y=[max(y_display)*1.1 if i % beats_per_measure == 0 else max(y_display)*1.05 for i in range(len(metronome_times))],
+            y=[max(y_display) * 1.1 if i % beats_per_measure == 0 else max(
+                y_display) * 1.05 for i in range(len(metronome_times))],
             mode='markers',
             name='Metronome',
             marker=dict(color=metronome_colors, symbol='diamond')
@@ -564,7 +666,7 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         # Add pulse points
         fig.add_trace(go.Scatter(
             x=beat_times,
-            y=[min(y_display)*1.1] * len(beat_times),
+            y=[min(y_display) * 1.1] * len(beat_times),
             mode='markers',
             name='Pulses',
             marker=dict(color='green', symbol='circle')
@@ -589,8 +691,9 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         }
 
         # Log success but don't show message (waveform appearing is enough feedback)
-        print(f"process_audio: Successfully processed recording, duration={duration:.2f}s")
-        return json.dumps(save_data), fig, ""
+        print(
+            f"process_audio: Successfully processed recording, duration={duration:.2f}s")
+        return json.dumps(save_data), True, fig, ""
     except PreventUpdate:
         raise
     except Exception as e:
@@ -599,8 +702,10 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         import traceback
         traceback.print_exc()
         # Don't show error message to user - just log it
-        return None, go.Figure(), ""
+        return None, False, go.Figure(), ""
 
+
+# noinspection PyUnusedLocal
 @app.callback(
     Output("download-audio", "data"),
     Input("save-btn", "n_clicks"),
@@ -612,8 +717,10 @@ def save_recording(n_clicks, audio_json):
         return None
     return dict(content=audio_json, filename="recording.json")
 
+
 @app.callback(
     Output("audio-store", "data", allow_duplicate=True),
+    Output("waveform-visible-store", "data", allow_duplicate=True),
     Output("waveform-graph", "figure", allow_duplicate=True),
     Output("status-msg", "children"),
     Input("upload-audio", "contents"),
@@ -623,8 +730,8 @@ def save_recording(n_clicks, audio_json):
 )
 def load_recording(contents, tempo_slider, beats_per_measure_slider):
     if not contents:
-        return None, go.Figure(), ""
-    
+        return None, False, go.Figure(), ""
+
     try:
         print(f"load_recording: contents length = {len(contents) if contents else 0}")
         content_type, content_string = contents.split(',')
@@ -634,13 +741,14 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
 
         try:
             data = json.loads(decoded.decode('utf-8'))
-            print(f"load_recording: JSON parsed successfully, keys = {list(data.keys())}")
+            print(
+                f"load_recording: JSON parsed successfully, keys = {list(data.keys())}")
         except UnicodeDecodeError as e:
             print(f"load_recording: UnicodeDecodeError: {e}")
-            return None, go.Figure(), "Error: Uploaded file is not a valid JSON recording saved by this app."
+            return None, False, go.Figure(), "Error: Uploaded file is not a valid JSON recording saved by this app."
         except json.JSONDecodeError as e:
             print(f"load_recording: JSONDecodeError: {e}")
-            return None, go.Figure(), "Error: Uploaded file contains invalid JSON."
+            return None, False, go.Figure(), "Error: Uploaded file contains invalid JSON."
 
         base64_audio = data["audio"]
         # Set global for playback
@@ -650,10 +758,10 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
             header, audio_data = base64_audio.split(',')
         else:
             audio_data = base64_audio
-            
+
         audio_bytes = base64.b64decode(audio_data)
         print(f"load_recording: Decoded audio size: {len(audio_bytes)} bytes")
-        
+
         # Load with librosa (handles more formats than soundfile)
         try:
             with io.BytesIO(audio_bytes) as f:
@@ -662,14 +770,14 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
         except Exception as sf_error:
             # If soundfile fails, try librosa which can handle WebM, OGG, etc.
             print(f"Soundfile failed: {sf_error}. Trying librosa with timeout...")
-            
+
             # For large recordings, use timeout
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
-                return None, go.Figure(), "Error: Recording too long or corrupted. Max length is 10 minutes."
+                return None, False, go.Figure(), "Error: Recording too long or corrupted. Max length is 10 minutes."
 
             if not isinstance(result, tuple) or result[0] is None or result[1] is None:
-                return None, go.Figure(), "Error: Failed to load recording. File may be corrupted or in unsupported format."
+                return None, False, go.Figure(), "Error: Failed to load recording. File may be corrupted or in unsupported format."
 
             y, sr = result
             print(f"load_recording: Loaded with librosa, sr={sr}")
@@ -687,33 +795,36 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
         else:
             time_display = time
             y_display = y
-            
+
         fig = go.Figure()
-        fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform", line=dict(color='blue')))
-        
+        fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform",
+                                 line=dict(color='blue')))
+
         metronome_times = np.array(data.get("metronome_times", []))
         beat_times = np.array(data.get("beat_times", []))
         bpm = data.get("beats_per_measure", beats_per_measure_slider)
-        
+
         if len(metronome_times) > 0:
-            metronome_colors = ['red' if i % bpm == 0 else 'orange' for i in range(len(metronome_times))]
+            metronome_colors = ['red' if i % bpm == 0 else 'orange' for i in
+                                range(len(metronome_times))]
             fig.add_trace(go.Scatter(
-                x=metronome_times, 
-                y=[max(y_display)*1.1 if i % bpm == 0 else max(y_display)*1.05 for i in range(len(metronome_times))],
+                x=metronome_times,
+                y=[max(y_display) * 1.1 if i % bpm == 0 else max(y_display) * 1.05 for i
+                   in range(len(metronome_times))],
                 mode='markers',
                 name='Metronome',
                 marker=dict(color=metronome_colors, symbol='diamond')
             ))
-        
+
         if len(beat_times) > 0:
             fig.add_trace(go.Scatter(
                 x=beat_times,
-                y=[min(y_display)*1.1] * len(beat_times),
+                y=[min(y_display) * 1.1] * len(beat_times),
                 mode='markers',
                 name='Pulses',
                 marker=dict(color='green', symbol='circle')
             ))
-        
+
         fig.update_layout(
             xaxis_title="Time (s)",
             yaxis_title="Normalized Amplitude",
@@ -723,15 +834,18 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
             margin=dict(l=40, r=20, t=20, b=40),
         )
 
-        print(f"load_recording: Successfully processed audio, duration={duration:.2f}s, sr={sr}")
-        print(f"load_recording: Returning data with {len(metronome_times)} metronome points, {len(beat_times)} beat points")
-        
+        print(
+            f"load_recording: Successfully processed audio, duration={duration:.2f}s, sr={sr}")
+        print(
+            f"load_recording: Returning data with {len(metronome_times)} metronome points, {len(beat_times)} beat points")
+
         # Don't show success message (waveform appearing is enough feedback)
-        return json.dumps(data), fig, ""
+        return json.dumps(data), True, fig, ""
     except Exception as e:
         print(f"Error loading recording: {e}")
         # Don't show the error message to the user
-        return None, go.Figure(), ""
+        return None, False, go.Figure(), ""
+
 
 clientside_callback(
     """
@@ -748,4 +862,3 @@ clientside_callback(
 
 if __name__ == '__main__':
     app.run(debug=True, port=8006)
-
