@@ -81,7 +81,23 @@ function cleanupMetronomeAudio(audio) {
 
 function isSafariBrowser() {
     const ua = navigator.userAgent || "";
-    return /Safari/.test(ua) && !/Chrome|Chromium|CriOS|Firefox|FxiOS|Edg\//.test(ua);
+    const vendor = navigator.vendor || "";
+    const hasSafariInUa = /Safari/i.test(ua);
+    const excludedBrowsers = /Chrome|Chromium|CriOS|Firefox|FxiOS|Edg\//i.test(ua);
+    const appleVendor = /Apple/i.test(vendor);
+    return (hasSafariInUa && !excludedBrowsers) || appleVendor;
+}
+
+function shouldUseHtmlAudioMetronome() {
+    const host = (window.location && window.location.hostname) ? window.location.hostname : "";
+    const ua = navigator.userAgent || "";
+    const isFirefox = /Firefox|FxiOS/i.test(ua);
+    const safariLike = isSafariBrowser();
+    const isPlotlyCloud = /(?:^|\.)plotly\.app$/i.test(host);
+
+    // Safari local works with the HTMLAudio fallback, and Safari on plotly.app
+    // may present a UA string that misses the narrower Safari test.
+    return safariLike || (isPlotlyCloud && !isFirefox);
 }
 
 function createClickSamples(frequency, duration = 0.1, sampleRate = 44100) {
@@ -145,7 +161,7 @@ function ensureMetronomeClickBuffers(ctx) {
 }
 
 try {
-window.dash_clientside.recorder = {
+const recorderControls = {
     toggleRecording: function(n_clicks, is_recording) {
         console.log("toggleRecording: n_clicks=", n_clicks, "is_recording=", is_recording);
         if (!n_clicks) return is_recording;
@@ -235,10 +251,10 @@ window.dash_clientside.recorder = {
                     const recordingTimeout = setTimeout(() => {
                         if (mediaRecorder && mediaRecorder.state === 'recording') {
                             console.log("Automatic stop: Recording reached maximum time limit (60 seconds)");
-                            window.dash_clientside.recorder.playStopBeep();
+                            window.recorderControls.playStopBeep();
                             mediaRecorder.stop();
                             stream.getTracks().forEach(track => track.stop());
-                            window.dash_clientside.recorder.showAutoStopMessage();
+                            window.recorderControls.showAutoStopMessage();
                         }
                     }, maxRecordingTime);
 
@@ -246,7 +262,7 @@ window.dash_clientside.recorder = {
                         if (mediaRecorder && mediaRecorder.state === 'recording' && !warningGiven) {
                             warningGiven = true;
                             console.log("Warning: Recording will auto-stop in 5 seconds");
-                            window.dash_clientside.recorder.playWarningBeep();
+                            window.recorderControls.playWarningBeep();
                         }
                     }, warningTime);
 
@@ -404,7 +420,7 @@ window.dash_clientside.recorder = {
 
         if (!is_playing) {
             const secondsPerBeat = 60.0 / tempo;
-            const useHtmlAudioMetronome = isSafariBrowser();
+            const useHtmlAudioMetronome = shouldUseHtmlAudioMetronome();
 
             const playTone = (scheduledTime = null) => {
                 try {
@@ -526,7 +542,11 @@ window.dash_clientside.recorder = {
                 console.log(`Starting metronome with Web Audio scheduler at ${tempo} BPM (${secondsPerBeat.toFixed(3)}s per beat)`);
 
                 if (useHtmlAudioMetronome) {
-                    console.log("Using Safari HTMLAudio metronome fallback");
+                    console.log("Using HTMLAudio metronome fallback", {
+                        host: window.location ? window.location.hostname : "",
+                        vendor: navigator.vendor || "",
+                        userAgent: navigator.userAgent || ""
+                    });
                     playHtmlTone();
                     let nextScheduledTimeMs = performance.now() + (secondsPerBeat * 1000);
 
@@ -700,11 +720,15 @@ window.dash_clientside.recorder = {
         }
     }
 };
-console.log("recorder.js: window.dash_clientside.recorder initialized successfully.");
+
+window.recorderControls = recorderControls;
+window.dash_clientside = window.dash_clientside || {};
+window.dash_clientside.recorder = recorderControls;
+console.log("recorder.js: recorderControls initialized successfully.");
 } catch (initErr) {
     console.error("recorder.js: CRITICAL - failed to initialize recorder namespace:", initErr, initErr.stack);
     // Install stubs so Dash doesn't cascade-crash on undefined.method() calls
-    window.dash_clientside.recorder = {
+    window.recorderControls = {
         toggleRecording:    function() { console.error("recorder not initialized"); return false; },
         playAudio:          function() { console.error("recorder not initialized"); return false; },
         toggleMetronome:    function() { console.error("recorder not initialized"); return false; },
@@ -712,6 +736,8 @@ console.log("recorder.js: window.dash_clientside.recorder initialized successful
         playWarningBeep:    function() {},
         showAutoStopMessage:function() {}
     };
+    window.dash_clientside = window.dash_clientside || {};
+    window.dash_clientside.recorder = window.recorderControls;
 }
 
-console.log("recorder.js loaded successfully. window.dash_clientside.recorder is ready.");
+console.log("recorder.js loaded successfully. recorderControls is ready.");

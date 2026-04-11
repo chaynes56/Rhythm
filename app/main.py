@@ -254,12 +254,12 @@ app.layout = dbc.Container([
 clientside_callback(
     """
     function(n_clicks, recording_status) {
-        if (!window.dash_clientside || !window.dash_clientside.recorder) {
+        if (!window.recorderControls) {
             console.error("recorder.js not loaded");
             return recording_status;
         }
         if (n_clicks) {
-            return window.dash_clientside.recorder.toggleRecording(n_clicks, recording_status.length > 0) ? ['recording'] : [];
+            return window.recorderControls.toggleRecording(n_clicks, recording_status.length > 0) ? ['recording'] : [];
         }
         return recording_status;
     }
@@ -272,12 +272,12 @@ clientside_callback(
 clientside_callback(
     """
     function(n_clicks, volume, playing_status) {
-        if (!window.dash_clientside || !window.dash_clientside.recorder) {
+        if (!window.recorderControls) {
             console.error("recorder.js not loaded");
             return playing_status;
         }
         const isPlaying = playing_status.length > 0;
-        const result = window.dash_clientside.recorder.playAudio(n_clicks, volume, isPlaying);
+        const result = window.recorderControls.playAudio(n_clicks, volume, isPlaying);
         return result ? ['playing'] : [];
     }
     """,
@@ -290,13 +290,13 @@ clientside_callback(
 clientside_callback(
     """
     function(n_clicks, playing_status, tempo, beats, measures_per_pattern, volume, play_hi_tone) {
-        if (!window.dash_clientside || !window.dash_clientside.recorder) {
+        if (!window.recorderControls) {
             console.error("recorder.js not loaded");
             return playing_status;
         }
         const isPlaying = playing_status.length > 0;
         const hi_tone_on = play_hi_tone && play_hi_tone.length > 0;
-        const result = window.dash_clientside.recorder.toggleMetronome(
+        const result = window.recorderControls.toggleMetronome(
             n_clicks, isPlaying, tempo, beats, measures_per_pattern, volume, hi_tone_on
         );
         return result ? ['playing'] : [];
@@ -689,7 +689,7 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
         return json.dumps(data), fig, ""
     except Exception as e:
         print(f"Error loading recording: {e}")
-        # Don't show error message to user
+        # Don't show the error message to the user
         return None, go.Figure(), ""
 
 clientside_callback(
