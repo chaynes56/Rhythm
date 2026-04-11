@@ -8,6 +8,11 @@ let audioContext;
 let metronomeInterval;
 let metronomeScheduler = null; // Web Audio scheduler for precise timing
 let currentAudio = null;
+let activeMetronomeNodes = [];
+let activeMetronomeAudios = [];
+let metronomeClickBuffers = null;
+let metronomeBufferContext = null;
+let metronomeAudioUrls = null;
 let metronomeState = {
     beatCount: 0,
     measureCount: 0,
@@ -66,6 +71,80 @@ function encodeWAV(samples, sampleRate) {
     return buffer;
 }
 
+function cleanupMetronomeNode(nodeRecord) {
+    activeMetronomeNodes = activeMetronomeNodes.filter(node => node !== nodeRecord);
+}
+
+function cleanupMetronomeAudio(audio) {
+    activeMetronomeAudios = activeMetronomeAudios.filter(item => item !== audio);
+}
+
+function isSafariBrowser() {
+    const ua = navigator.userAgent || "";
+    return /Safari/.test(ua) && !/Chrome|Chromium|CriOS|Firefox|FxiOS|Edg\//.test(ua);
+}
+
+function createClickSamples(frequency, duration = 0.1, sampleRate = 44100) {
+    const frameCount = Math.floor(sampleRate * duration);
+    const samples = new Float32Array(frameCount);
+
+    for (let i = 0; i < frameCount; i++) {
+        const t = i / sampleRate;
+        const env = Math.exp(-40 * t);
+        samples[i] = Math.sin(2 * Math.PI * frequency * t) * env;
+    }
+
+    return samples;
+}
+
+function ensureMetronomeAudioUrls() {
+    if (metronomeAudioUrls) {
+        return;
+    }
+
+    const buildUrl = (frequency) => {
+        const wavBuffer = encodeWAV(createClickSamples(frequency), 44100);
+        const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+        return URL.createObjectURL(blob);
+    };
+
+    metronomeAudioUrls = {
+        low: buildUrl(toneFrequency.low),
+        mid: buildUrl(toneFrequency.mid),
+        high: buildUrl(toneFrequency.high)
+    };
+}
+
+function createClickBuffer(ctx, frequency, duration = 0.1) {
+    const sampleRate = ctx.sampleRate;
+    const frameCount = Math.floor(sampleRate * duration);
+    const buffer = ctx.createBuffer(1, frameCount, sampleRate);
+    const data = buffer.getChannelData(0);
+
+    for (let i = 0; i < frameCount; i++) {
+        const t = i / sampleRate;
+        // Fast attack, exponential-like decay for a short click.
+        const env = Math.exp(-40 * t);
+        data[i] = Math.sin(2 * Math.PI * frequency * t) * env;
+    }
+
+    return buffer;
+}
+
+function ensureMetronomeClickBuffers(ctx) {
+    if (metronomeClickBuffers && metronomeBufferContext === ctx) {
+        return;
+    }
+
+    metronomeClickBuffers = {
+        low: createClickBuffer(ctx, toneFrequency.low),
+        mid: createClickBuffer(ctx, toneFrequency.mid),
+        high: createClickBuffer(ctx, toneFrequency.high)
+    };
+    metronomeBufferContext = ctx;
+}
+
+try {
 window.dash_clientside.recorder = {
     toggleRecording: function(n_clicks, is_recording) {
         console.log("toggleRecording: n_clicks=", n_clicks, "is_recording=", is_recording);
@@ -92,13 +171,15 @@ window.dash_clientside.recorder = {
                 }
             }
 
-            // Request specific audio constraints to ensure consistent audio stream
+            // Request specific audio constraints to ensure consistent audio stream.
+            // Use 'ideal' for sampleRate so Firefox/Safari don't throw OverconstrainedError
+            // if the exact rate is unavailable.
             const audioConstraints = {
                 audio: {
                     echoCancellation: false,
                     noiseSuppression: false,
                     autoGainControl: false,
-                    sampleRate: 48000  // Standard sample rate; browser will use closest available
+                    sampleRate: { ideal: 48000 }
                 }
             };
 
@@ -210,13 +291,16 @@ window.dash_clientside.recorder = {
                         const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
 
                         // Create audio context to decode and re-encode as WAV
-                        const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                        const decodeCtx = new (window.AudioContext || window.webkitAudioContext)();
                         reader.readAsArrayBuffer(audioBlob);
                         reader.onloadend = () => {
-                            audioContext.decodeAudioData(reader.result, (audioBuffer) => {
-                                // Get raw PCM data
-                                const rawData = audioBuffer.getChannelData(0); // mono
-                                const wavData = encodeWAV(Array.from(rawData), audioBuffer.sampleRate);
+                            // Use Promise form of decodeAudioData for cross-browser support
+                            // (callback form is deprecated in Firefox/Safari)
+                            decodeCtx.decodeAudioData(reader.result).then((audioBuffer) => {
+                                // Get raw PCM data as Float32Array - do NOT convert to plain Array,
+                                // that doubles memory and causes tab crashes in Firefox/Safari.
+                                const rawData = audioBuffer.getChannelData(0); // mono, Float32Array
+                                const wavData = encodeWAV(rawData, audioBuffer.sampleRate);
                                 const wavBlob = new Blob([wavData], { type: 'audio/wav' });
 
                                 const wavReader = new FileReader();
@@ -231,6 +315,8 @@ window.dash_clientside.recorder = {
                                         hiddenBtn.click();
                                     }
                                 };
+                            }).catch((err) => {
+                                console.error("decodeAudioData failed:", err);
                             });
                         };
                     });
@@ -316,22 +402,9 @@ window.dash_clientside.recorder = {
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
         }
 
-        if (audioContext.state === 'suspended') {
-            console.log("Resuming suspended AudioContext...");
-            audioContext.resume().then(() => {
-                console.log("AudioContext resumed successfully");
-            }).catch(err => {
-                console.error("Failed to resume AudioContext:", err);
-            });
-        }
-
         if (!is_playing) {
-            metronomeState.beatCount = 0;
-            metronomeState.measureCount = 0;
             const secondsPerBeat = 60.0 / tempo;
-
-            // Warm up the context and prepare for scheduling
-            console.log(`Starting metronome with Web Audio scheduler at ${tempo} BPM (${secondsPerBeat.toFixed(3)}s per beat)`);
+            const useHtmlAudioMetronome = isSafariBrowser();
 
             const playTone = (scheduledTime = null) => {
                 try {
@@ -340,19 +413,16 @@ window.dash_clientside.recorder = {
                         return;
                     }
 
-                    if (audioContext.state === 'suspended') {
-                        console.log("Context suspended during playback, resuming...");
-                        audioContext.resume();
-                    }
+                    ensureMetronomeClickBuffers(audioContext);
 
                     const toneTime = (Number.isFinite(scheduledTime) && scheduledTime >= audioContext.currentTime)
                         ? scheduledTime
                         : audioContext.currentTime;
 
-                    const osc = audioContext.createOscillator();
+                    const source = audioContext.createBufferSource();
                     const gain = audioContext.createGain();
 
-                    let frequency = toneFrequency.high;
+                    let toneKey = 'high';
                     let shouldPlay = true;
 
                     const positionInMeasure = metronomeState.beatCount % metronomeState.beatsPerMeasure;
@@ -361,27 +431,39 @@ window.dash_clientside.recorder = {
                     // Determine tone type
                     if (positionInMeasure === 0 && positionInPattern === 0) {
                         // First beat of pattern: low tone
-                        frequency = toneFrequency.low;
+                        toneKey = 'low';
                     } else if (positionInMeasure === 0) {
                         // First beat of measure (not pattern start): mid-tone
-                        frequency = toneFrequency.mid;
+                        toneKey = 'mid';
                     } else if (!metronomeState.hiToneOn) {
                         // Not a measure-start beat and hi-tone is off: silence
                         shouldPlay = false;
                     }
 
                     if (shouldPlay) {
-                        osc.type = 'sine';
-                        osc.frequency.setValueAtTime(frequency, toneTime);
+                        source.buffer = metronomeClickBuffers[toneKey];
 
-                        gain.gain.setValueAtTime(metronomeState.volume, toneTime);
-                        gain.gain.exponentialRampToValueAtTime(0.001, toneTime + 0.1);
+                        gain.gain.cancelScheduledValues(toneTime);
+                        gain.gain.setValueAtTime(0.0001, toneTime);
+                        gain.gain.linearRampToValueAtTime(metronomeState.volume, toneTime + 0.005);
+                        gain.gain.exponentialRampToValueAtTime(0.0001, toneTime + 0.1);
 
-                        osc.connect(gain);
+                        source.connect(gain);
                         gain.connect(audioContext.destination);
 
-                        osc.start(toneTime);
-                        osc.stop(toneTime + 0.1);
+                        const nodeRecord = { source, gain };
+                        activeMetronomeNodes.push(nodeRecord);
+                        source.onended = () => {
+                            try {
+                                source.disconnect();
+                                gain.disconnect();
+                            } catch (disconnectErr) {
+                                console.warn("Metronome node disconnect warning:", disconnectErr);
+                            }
+                            cleanupMetronomeNode(nodeRecord);
+                        };
+
+                        source.start(toneTime);
                     }
 
                     metronomeState.beatCount++;
@@ -393,35 +475,145 @@ window.dash_clientside.recorder = {
                 }
             };
 
-            // Play first beat immediately to minimize startup delay
-            playTone();
-
-            // Use Web Audio scheduler for subsequent beats (much more accurate than setInterval)
-            // Schedule next beat times using audioContext.currentTime for precise timing
-            let nextScheduledTime = audioContext.currentTime + secondsPerBeat;
-
-            metronomeScheduler = setInterval(() => {
+            const playHtmlTone = () => {
                 try {
-                    const now = audioContext.currentTime;
-                    // Schedule all beats that are due (handles brief interruptions)
-                    while (nextScheduledTime <= now + 0.050) {  // 50ms lookahead
-                        // Always trigger each due beat exactly once.
-                        // If overdue, play immediately; if in lookahead window, schedule precisely.
-                        playTone(nextScheduledTime);
-                        nextScheduledTime += secondsPerBeat;
+                    ensureMetronomeAudioUrls();
+
+                    let toneKey = 'high';
+                    let shouldPlay = true;
+
+                    const positionInMeasure = metronomeState.beatCount % metronomeState.beatsPerMeasure;
+                    const positionInPattern = metronomeState.measureCount % metronomeState.measuresPerPattern;
+
+                    if (positionInMeasure === 0 && positionInPattern === 0) {
+                        toneKey = 'low';
+                    } else if (positionInMeasure === 0) {
+                        toneKey = 'mid';
+                    } else if (!metronomeState.hiToneOn) {
+                        shouldPlay = false;
+                    }
+
+                    if (shouldPlay) {
+                        const audio = new Audio(metronomeAudioUrls[toneKey]);
+                        audio.preload = 'auto';
+                        audio.volume = metronomeState.volume;
+                        activeMetronomeAudios.push(audio);
+                        audio.addEventListener('ended', () => cleanupMetronomeAudio(audio), { once: true });
+                        audio.play().catch(err => {
+                            console.error("HTMLAudio metronome playback error:", err);
+                            cleanupMetronomeAudio(audio);
+                        });
+                    }
+
+                    metronomeState.beatCount++;
+                    if (metronomeState.beatCount % metronomeState.beatsPerMeasure === 0) {
+                        metronomeState.measureCount++;
                     }
                 } catch (err) {
-                    console.error("Error in metronome scheduler:", err);
+                    console.error("Error playing HTMLAudio metronome tone:", err);
                 }
-            }, secondsPerBeat * 500);  // Check frequency: half the beat interval for precision
+            };
 
-            metronomeInterval = metronomeScheduler; // Keep for compatibility
+            const startMetronomeScheduler = () => {
+                if (metronomeInterval) {
+                    return;
+                }
+
+                metronomeState.beatCount = 0;
+                metronomeState.measureCount = 0;
+
+                // Warm up the context and prepare for scheduling
+                console.log(`Starting metronome with Web Audio scheduler at ${tempo} BPM (${secondsPerBeat.toFixed(3)}s per beat)`);
+
+                if (useHtmlAudioMetronome) {
+                    console.log("Using Safari HTMLAudio metronome fallback");
+                    playHtmlTone();
+                    let nextScheduledTimeMs = performance.now() + (secondsPerBeat * 1000);
+
+                    metronomeScheduler = setInterval(() => {
+                        try {
+                            const nowMs = performance.now();
+                            while (nextScheduledTimeMs <= nowMs + 30) {
+                                playHtmlTone();
+                                nextScheduledTimeMs += secondsPerBeat * 1000;
+                            }
+                        } catch (err) {
+                            console.error("Error in HTMLAudio metronome scheduler:", err);
+                        }
+                    }, 20);
+
+                    metronomeInterval = metronomeScheduler;
+                    return;
+                }
+
+                // In Safari, scheduling the first tone a hair ahead is more reliable than "now".
+                const firstToneTime = audioContext.currentTime + 0.02;
+                playTone(firstToneTime);
+
+                // Use Web Audio scheduler for subsequent beats (much more accurate than setInterval)
+                // Schedule next beat times using audioContext.currentTime for precise timing
+                let nextScheduledTime = firstToneTime + secondsPerBeat;
+
+                metronomeScheduler = setInterval(() => {
+                    try {
+                        const now = audioContext.currentTime;
+                        // Schedule all beats that are due (handles brief interruptions)
+                        while (nextScheduledTime <= now + 0.050) {  // 50ms lookahead
+                            // Always trigger each due beat exactly once.
+                            // If overdue, play immediately; if in lookahead window, schedule precisely.
+                            playTone(nextScheduledTime);
+                            nextScheduledTime += secondsPerBeat;
+                        }
+                    } catch (err) {
+                        console.error("Error in metronome scheduler:", err);
+                    }
+                }, secondsPerBeat * 500);  // Check frequency: half the beat interval for precision
+
+                metronomeInterval = metronomeScheduler; // Keep for compatibility
+            };
+
+            if (audioContext.state === 'suspended') {
+                console.log("Resuming suspended AudioContext before starting metronome...");
+                audioContext.resume().then(() => {
+                    console.log("AudioContext resumed successfully");
+                    startMetronomeScheduler();
+                }).catch(err => {
+                    console.error("Failed to resume AudioContext:", err);
+                });
+            } else {
+                startMetronomeScheduler();
+            }
+
             return true;
         } else {
             if (metronomeInterval) {
                 clearInterval(metronomeInterval);
                 metronomeInterval = null;
                 metronomeScheduler = null;
+                activeMetronomeNodes.forEach(({ source, gain }) => {
+                    try {
+                        source.onended = null;
+                        source.stop();
+                    } catch (stopErr) {
+                        console.warn("Metronome node stop warning:", stopErr);
+                    }
+                    try {
+                        source.disconnect();
+                        gain.disconnect();
+                    } catch (disconnectErr) {
+                        console.warn("Metronome node disconnect warning:", disconnectErr);
+                    }
+                });
+                activeMetronomeNodes = [];
+                activeMetronomeAudios.forEach(audio => {
+                    try {
+                        audio.pause();
+                        audio.currentTime = 0;
+                    } catch (audioErr) {
+                        console.warn("Metronome audio stop warning:", audioErr);
+                    }
+                });
+                activeMetronomeAudios = [];
                 console.log("Stopped metronome");
             }
             return false;
@@ -508,5 +700,18 @@ window.dash_clientside.recorder = {
         }
     }
 };
+console.log("recorder.js: window.dash_clientside.recorder initialized successfully.");
+} catch (initErr) {
+    console.error("recorder.js: CRITICAL - failed to initialize recorder namespace:", initErr, initErr.stack);
+    // Install stubs so Dash doesn't cascade-crash on undefined.method() calls
+    window.dash_clientside.recorder = {
+        toggleRecording:    function() { console.error("recorder not initialized"); return false; },
+        playAudio:          function() { console.error("recorder not initialized"); return false; },
+        toggleMetronome:    function() { console.error("recorder not initialized"); return false; },
+        playStopBeep:       function() {},
+        playWarningBeep:    function() {},
+        showAutoStopMessage:function() {}
+    };
+}
 
 console.log("recorder.js loaded successfully. window.dash_clientside.recorder is ready.");

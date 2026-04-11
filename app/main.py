@@ -254,6 +254,10 @@ app.layout = dbc.Container([
 clientside_callback(
     """
     function(n_clicks, recording_status) {
+        if (!window.dash_clientside || !window.dash_clientside.recorder) {
+            console.error("recorder.js not loaded");
+            return recording_status;
+        }
         if (n_clicks) {
             return window.dash_clientside.recorder.toggleRecording(n_clicks, recording_status.length > 0) ? ['recording'] : [];
         }
@@ -268,6 +272,10 @@ clientside_callback(
 clientside_callback(
     """
     function(n_clicks, volume, playing_status) {
+        if (!window.dash_clientside || !window.dash_clientside.recorder) {
+            console.error("recorder.js not loaded");
+            return playing_status;
+        }
         const isPlaying = playing_status.length > 0;
         const result = window.dash_clientside.recorder.playAudio(n_clicks, volume, isPlaying);
         return result ? ['playing'] : [];
@@ -282,6 +290,10 @@ clientside_callback(
 clientside_callback(
     """
     function(n_clicks, playing_status, tempo, beats, measures_per_pattern, volume, play_hi_tone) {
+        if (!window.dash_clientside || !window.dash_clientside.recorder) {
+            console.error("recorder.js not loaded");
+            return playing_status;
+        }
         const isPlaying = playing_status.length > 0;
         const hi_tone_on = play_hi_tone && play_hi_tone.length > 0;
         const result = window.dash_clientside.recorder.toggleMetronome(
