@@ -14,9 +14,25 @@ import json
 import warnings
 import tempfile
 import os
+from pathlib import Path
 
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
+
+ASSETS_DIR = Path(__file__).resolve().parent / "assets"
+RECORDER_SCRIPT_PATH = ASSETS_DIR / "recorder.js"
+
+
+def load_inline_script(script_path: Path) -> str:
+    try:
+        return script_path.read_text(encoding="utf-8").replace("</script>", r"<\/script>")
+    except Exception as exc:
+        error_text = json.dumps(str(exc))
+        print(f"Failed to load inline recorder script: {exc}")
+        return f"console.error('Failed to load inline recorder script:', {error_text});"
+
+
+RECORDER_INLINE_SCRIPT = load_inline_script(RECORDER_SCRIPT_PATH)
 
 def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
     """
@@ -135,7 +151,32 @@ def normalize_waveform_for_display(y: np.ndarray) -> np.ndarray:
     return y_norm
 
 
-app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = Dash(
+    __name__,
+    external_stylesheets=[dbc.themes.BOOTSTRAP],
+    assets_ignore=r"recorder(?:_bundle)?\.js"
+)
+
+app.index_string = f"""
+<!DOCTYPE html>
+<html>
+    <head>
+        {{%metas%}}
+        <title>{{%title%}}</title>
+        {{%favicon%}}
+        {{%css%}}
+        <script>{RECORDER_INLINE_SCRIPT}</script>
+    </head>
+    <body>
+        {{%app_entry%}}
+        <footer>
+            {{%config%}}
+            {{%scripts%}}
+            {{%renderer%}}
+        </footer>
+    </body>
+</html>
+"""
 
 app.layout = dbc.Container([
     dbc.Row([
