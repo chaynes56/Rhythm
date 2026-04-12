@@ -22,6 +22,9 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 RECORDER_SCRIPT_PATH = ASSETS_DIR / "recorder.js"
+WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.020
+WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
+WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 
 
 def load_inline_script(script_path: Path) -> str:
@@ -158,6 +161,56 @@ def normalize_waveform_for_display(y: np.ndarray) -> np.ndarray:
     return y_norm
 
 
+def smooth_waveform_for_display(y: np.ndarray,
+                                window_size: int = WAVEFORM_DISPLAY_SMOOTHING_WINDOW) -> np.ndarray:
+    """
+    Light smoothing for display before downsampling.
+    """
+    if y.size == 0:
+        return y
+
+    window_size = max(1, int(window_size))
+    if window_size <= 1 or y.size < window_size:
+        return y.astype(np.float32, copy=False)
+
+    if window_size % 2 == 0:
+        window_size += 1
+
+    kernel = np.ones(window_size, dtype=np.float32) / float(window_size)
+    y_smooth = np.convolve(y.astype(np.float32, copy=False), kernel, mode="same")
+    return y_smooth.astype(np.float32, copy=False)
+
+
+def downsample_waveform_preserve_peaks(time: np.ndarray, y: np.ndarray,
+                                       factor: int = WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Downsample waveform for plotting while preserving local min/max peaks.
+    """
+    factor = max(1, int(factor))
+    if factor <= 1 or len(y) <= factor:
+        return time, y
+
+    bucket_size = factor
+    time_out: list[float] = []
+    y_out: list[float] = []
+
+    for start in range(0, len(y), bucket_size):
+        end = min(start + bucket_size, len(y))
+        chunk = y[start:end]
+        chunk_time = time[start:end]
+        if chunk.size == 0:
+            continue
+
+        min_idx = int(np.argmin(chunk))
+        max_idx = int(np.argmax(chunk))
+        ordered = sorted((min_idx, max_idx)) if min_idx != max_idx else [min_idx]
+        for idx in ordered:
+            time_out.append(float(chunk_time[idx]))
+            y_out.append(float(chunk[idx]))
+
+    return np.array(time_out), np.array(y_out, dtype=np.float32)
+
+
 app = Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
@@ -187,7 +240,7 @@ app.index_string = f"""
 
 app.layout = dbc.Container([
     dbc.Row([
-        dbc.Col(html.H1("Rhythm Analysis App"), className="text-center mb-4")
+        dbc.Col(html.H1("Rhythm Analysis"), className="text-center mb-4")
     ]),
 
     # Waveform first, full width
@@ -206,6 +259,47 @@ app.layout = dbc.Container([
             ),
         ], width=12)
     ], className="mb-4"),
+
+    dbc.Row([
+        dbc.Col([
+            dbc.Card([
+                dbc.CardHeader("Analysis"),
+                dbc.CardBody([
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Subdivisions / beat", className="small"),
+                            dcc.Dropdown(
+                                id="subdivisions-per-beat",
+                                options=[{"label": str(i), "value": i} for i in
+                                         range(1, 7)],
+                                value=4,
+                                clearable=False,
+                                style={"width": "110px"},
+                            ),
+                        ], width="auto"),
+                        dbc.Col(
+                            html.Div([
+                                html.Div("Beats after first measure",
+                                         className="small text-muted"),
+                                html.Div("—", id="beats-after-first-measure",
+                                         className="fw-semibold")
+                            ], id="beats-analysis-block"),
+                            width="auto"
+                        ),
+                        dbc.Col(
+                            html.Div([
+                                html.Div("Pulses after first measure",
+                                         className="small text-muted"),
+                                html.Div("—", id="pulses-after-first-measure",
+                                         className="fw-semibold")
+                            ], id="pulses-analysis-block"),
+                            width="auto"
+                        ),
+                    ], align="end", className="g-3"),
+                ]),
+            ], className="mb-4"),
+        ], width=12)
+    ]),
 
     dbc.Row([
         dbc.Col([
@@ -245,7 +339,7 @@ app.layout = dbc.Container([
                 ]),
             ], className="mb-4"),
             dbc.Card([
-                dbc.CardHeader("Metronome Settings"),
+                dbc.CardHeader("Metronome"),
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
@@ -275,10 +369,10 @@ app.layout = dbc.Container([
                             ),
                         ], width="auto"),
                         dbc.Col([
-                            dcc.Checklist(
+                            dbc.Switch(
                                 id="play-hi-tone",
-                                options=[{"label": "Play High Tone", "value": "on"}],
-                                value=["on"],
+                                label="Play High Tone",
+                                value=True,
                                 style={"marginTop": "20px"}
                             ),
                         ], width="auto"),
@@ -364,7 +458,7 @@ clientside_callback(
             return playing_status;
         }
         const isPlaying = playing_status.length > 0;
-        const hi_tone_on = play_hi_tone && play_hi_tone.length > 0;
+        const hi_tone_on = !!play_hi_tone;
         const result = window.recorderControls.toggleMetronome(
             n_clicks, isPlaying, tempo, beats, measures_per_pattern, volume, hi_tone_on
         );
@@ -474,6 +568,19 @@ clientside_callback(
     Input("waveform-visible-store", "data"),
 )
 
+clientside_callback(
+    """
+    function(waveform_visible) {
+        const hiddenStyle = { visibility: 'hidden' };
+        const visibleStyle = { visibility: 'visible' };
+        return waveform_visible ? [visibleStyle, visibleStyle] : [hiddenStyle, hiddenStyle];
+    }
+    """,
+    Output("beats-analysis-block", "style"),
+    Output("pulses-analysis-block", "style"),
+    Input("waveform-visible-store", "data"),
+)
+
 
 # Debug callback to watch audio-data-store changes
 @app.callback(
@@ -552,6 +659,35 @@ def update_play_button(playing_value):
     if "playing" in playing_value:
         return "Stop Playback", "secondary"
     return "Play Recording", "success"
+
+
+@app.callback(
+    Output("beats-after-first-measure", "children"),
+    Output("pulses-after-first-measure", "children"),
+    Input("audio-store", "data"),
+    State("tempo-slider", "value"),
+    State("beats-per-measure", "value")
+)
+def update_analysis_counts(audio_json, tempo_value, beats_per_measure_value):
+    if not audio_json:
+        return "—", "—"
+
+    try:
+        data = json.loads(audio_json)
+        tempo = data.get("tempo", tempo_value) or tempo_value or 120
+        beats_per_measure = data.get("beats_per_measure",
+                                     beats_per_measure_value) or beats_per_measure_value or 4
+        first_measure_duration = (60.0 / float(tempo)) * float(beats_per_measure)
+
+        beat_times = np.array(data.get("metronome_times", []), dtype=float)
+        pulse_times = np.array(data.get("beat_times", []), dtype=float)
+
+        beats_after = int(np.sum(beat_times >= first_measure_duration - 1e-9))
+        pulses_after = int(np.sum(pulse_times >= first_measure_duration - 1e-9))
+        return str(beats_after), str(pulses_after)
+    except Exception as exc:
+        print(f"update_analysis_counts: {exc}")
+        return "—", "—"
 
 
 @app.callback(
@@ -637,15 +773,10 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         metronome_times = np.arange(0, duration, seconds_per_beat)
 
         # Create waveform figure
-        time = np.linspace(0, duration, num=len(y))
-        # Downsample for display if too large
-        if len(y) > 10000:
-            skip = len(y) // 10000
-            time_display = time[::skip]
-            y_display = y[::skip]
-        else:
-            time_display = time
-            y_display = y
+        time = np.linspace(0, duration, num=len(y), endpoint=False)
+        time = time - WAVEFORM_DISPLAY_SHIFT_SECONDS
+        y_for_display = smooth_waveform_for_display(y)
+        time_display, y_display = downsample_waveform_preserve_peaks(time, y_for_display)
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform",
@@ -659,7 +790,7 @@ def process_audio(base64_audio, tempo, beats_per_measure):
             y=[max(y_display) * 1.1 if i % beats_per_measure == 0 else max(
                 y_display) * 1.05 for i in range(len(metronome_times))],
             mode='markers',
-            name='Metronome',
+            name='Beats',
             marker=dict(color=metronome_colors, symbol='diamond')
         ))
 
@@ -787,14 +918,10 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
         y = normalize_waveform_for_display(y)
 
         duration = len(y) / sr
-        time = np.linspace(0, duration, num=len(y))
-        if len(y) > 10000:
-            skip = len(y) // 10000
-            time_display = time[::skip]
-            y_display = y[::skip]
-        else:
-            time_display = time
-            y_display = y
+        time = np.linspace(0, duration, num=len(y), endpoint=False)
+        time = time - WAVEFORM_DISPLAY_SHIFT_SECONDS
+        y_for_display = smooth_waveform_for_display(y)
+        time_display, y_display = downsample_waveform_preserve_peaks(time, y_for_display)
 
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform",
@@ -812,7 +939,7 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
                 y=[max(y_display) * 1.1 if i % bpm == 0 else max(y_display) * 1.05 for i
                    in range(len(metronome_times))],
                 mode='markers',
-                name='Metronome',
+                name='Beats',
                 marker=dict(color=metronome_colors, symbol='diamond')
             ))
 

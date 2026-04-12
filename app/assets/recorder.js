@@ -14,6 +14,7 @@ let metronomeClickBuffers = null;
 let metronomeBufferContext = null;
 let metronomeAudioUrls = null;
 let metronomeAutoStartedByRecording = false;
+let preserveMetronomeStartOffset = false;
 let metronomeState = {
     beatCount: 0,
     measureCount: 0,
@@ -201,7 +202,12 @@ const recorderControls = {
                     // Set up to start at the beginning of the last measure of the pattern
                     metronomeState.beatCount = (measuresPerPattern - 1) * metronomeState.beatsPerMeasure;
                     metronomeState.measureCount = measuresPerPattern - 1;
+                    preserveMetronomeStartOffset = true;
                     console.log("Pattern offset: starting at measure", metronomeState.measureCount + 1, "of pattern");
+                } else {
+                    metronomeState.beatCount = 0;
+                    metronomeState.measureCount = 0;
+                    preserveMetronomeStartOffset = false;
                 }
                 // Trigger metronome start by clicking the button
                 const metronomeBtn = document.getElementById('metronome-btn');
@@ -561,8 +567,16 @@ const recorderControls = {
                     return;
                 }
 
-                metronomeState.beatCount = 0;
-                metronomeState.measureCount = 0;
+                if (preserveMetronomeStartOffset) {
+                    console.log("Preserving recording-start metronome offset", {
+                        beatCount: metronomeState.beatCount,
+                        measureCount: metronomeState.measureCount
+                    });
+                    preserveMetronomeStartOffset = false;
+                } else {
+                    metronomeState.beatCount = 0;
+                    metronomeState.measureCount = 0;
+                }
 
                 // Warm up the context and prepare for scheduling
                 console.log(`Starting metronome with Web Audio scheduler at ${tempo} BPM (${secondsPerBeat.toFixed(3)}s per beat)`);
@@ -661,6 +675,7 @@ const recorderControls = {
                 });
                 activeMetronomeAudios = [];
                 metronomeAutoStartedByRecording = false;
+                preserveMetronomeStartOffset = false;
                 console.log("Stopped metronome");
             }
             return false;
