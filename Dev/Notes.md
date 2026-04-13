@@ -1,7 +1,19 @@
 # Development notes
 
 # TODO
-- See Rhythm App Notes.md in Obsidian favorites.
+-
+# Pattern display
+```aiignore
+import plotly.graph_objects as go
+
+colors = ['lavender', 'lightgrey'] * 5 # Repeat colors for the number of columns
+fig = go.Figure(data=[go.Table(
+    header=dict(values=['A', 'B', 'C', 'D'], fill_color='paleturquoise'),
+    cells=dict(values=[[100, 90, 80, 90], [95, 85, 75, 95], [80, 100, 90, 80], [75, 95, 85, 75]],
+               fill_color=[colors[0], colors[1], colors[0], colors[1]]) # Apply per column
+)])
+fig.show()
+```
 # Junie agent request
 This project is to develop a Plotly/Dash app providing guidance to percussionists. 
 Begin by creating an app that can record audio from the player's

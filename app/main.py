@@ -684,6 +684,7 @@ def update_analysis_counts(audio_json, tempo_value, beats_per_measure_value):
 
         beats_after = int(np.sum(beat_times >= first_measure_duration - 1e-9))
         pulses_after = int(np.sum(pulse_times >= first_measure_duration - 1e-9))
+        # TODO add subdivision analysis
         return str(beats_after), str(pulses_after)
     except Exception as exc:
         print(f"update_analysis_counts: {exc}")
