@@ -10,5 +10,4 @@ TODO: Provide instructions for major browsers...
 
 Thanks to Rhythm Arise for the [patterns](https://github.com/RhythmArise/Patterns). 
 
-Please report any issues or suggestions to the [issue tracker](https://github.
-com/chaynes56/RhythmAnalyzer/issues).
+Please report any issues or suggestions to the [issue tracker](https://github.com/chaynes56/Rhythm/issues).
