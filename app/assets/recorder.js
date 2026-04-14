@@ -15,6 +15,12 @@ let metronomeBufferContext = null;
 let metronomeAudioUrls = null;
 let metronomeAutoStartedByRecording = false;
 let preserveMetronomeStartOffset = false;
+let recordingDelayTimeout = null;
+let recordingTimeout = null;
+let recordingWarningTimeout = null;
+let recordingStream = null;
+let pendingRecordingRequestId = 0;
+let currentRecordingPhase = 'idle';
 let metronomeState = {
     beatCount: 0,
     measureCount: 0,
@@ -90,16 +96,583 @@ function clickHiddenButton(buttonId) {
     button.click();
 }
 
-function stopMetronomeIfAutoStartedByRecording() {
-    if (!metronomeAutoStartedByRecording || !metronomeInterval) {
+function setDashInputValue(elementId, value) {
+    const input = document.getElementById(elementId);
+    if (!input) {
+        console.warn(`Missing Dash sync input: ${elementId}`);
         return;
     }
 
-    const metronomeBtn = document.getElementById('metronome-btn');
-    metronomeAutoStartedByRecording = false;
-    if (metronomeBtn) {
-        metronomeBtn.click();
+    const nextValue = value == null ? '' : String(value);
+    const prototype = Object.getPrototypeOf(input);
+    const valueSetter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set
+        || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+
+    if (valueSetter) {
+        valueSetter.call(input, nextValue);
+    } else {
+        input.value = nextValue;
     }
+
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+}
+
+function setRecordingPhase(phase) {
+    currentRecordingPhase = phase || 'idle';
+    setDashInputValue('recording-phase-sync', currentRecordingPhase);
+}
+
+function setMetronomePlayingState(isPlaying) {
+    setDashInputValue('metronome-state-sync', isPlaying ? 'playing' : '');
+    if (!isPlaying) {
+        resetBeatIndicators();
+    }
+}
+
+function resetBeatIndicators() {
+    const beatsPerMeasure = Math.max(1, Number(metronomeState.beatsPerMeasure) || 1);
+    for (let i = 0; i < beatsPerMeasure; i++) {
+        const box = document.getElementById(`beat-box-${i}`);
+        if (!box) {
+            continue;
+        }
+        box.style.backgroundColor = '#f8f9fa';
+        box.style.color = '#495057';
+        box.style.borderColor = '#adb5bd';
+    }
+}
+
+function highlightBeatIndicator(activeBeatIndex) {
+    const beatsPerMeasure = Math.max(1, Number(metronomeState.beatsPerMeasure) || 1);
+    for (let i = 0; i < beatsPerMeasure; i++) {
+        const box = document.getElementById(`beat-box-${i}`);
+        if (!box) {
+            continue;
+        }
+
+        if (i === activeBeatIndex) {
+            box.style.backgroundColor = '#198754';
+            box.style.color = '#ffffff';
+            box.style.borderColor = '#198754';
+        } else {
+            box.style.backgroundColor = '#f8f9fa';
+            box.style.color = '#495057';
+            box.style.borderColor = '#adb5bd';
+        }
+    }
+}
+
+function clearRecordingTimers() {
+    if (recordingDelayTimeout) {
+        clearTimeout(recordingDelayTimeout);
+        recordingDelayTimeout = null;
+    }
+    if (recordingTimeout) {
+        clearTimeout(recordingTimeout);
+        recordingTimeout = null;
+    }
+    if (recordingWarningTimeout) {
+        clearTimeout(recordingWarningTimeout);
+        recordingWarningTimeout = null;
+    }
+}
+
+function cleanupRecordingStream() {
+    if (recordingStream) {
+        try {
+            recordingStream.getTracks().forEach(track => track.stop());
+        } catch (err) {
+            console.warn('Error stopping recording stream:', err);
+        }
+        recordingStream = null;
+    }
+}
+
+function ensureAudioContext() {
+    if (!audioContext || audioContext.state === 'closed') {
+        console.log('Creating new AudioContext...');
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return audioContext;
+}
+
+function updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn) {
+    const parsedTempo = Number(tempo);
+    const parsedBeats = Number(beatsPerMeasure);
+    const parsedMeasures = Number(measuresPerPattern);
+    const parsedVolume = Number(volume);
+
+    metronomeState.tempo = Number.isFinite(parsedTempo) && parsedTempo > 0 ? parsedTempo : 120;
+    metronomeState.beatsPerMeasure = Number.isFinite(parsedBeats) && parsedBeats > 0 ? parsedBeats : 4;
+    metronomeState.measuresPerPattern = Number.isFinite(parsedMeasures) && parsedMeasures > 0 ? parsedMeasures : 1;
+    metronomeState.volume = Number.isFinite(parsedVolume) ? parsedVolume : 0.5;
+    metronomeState.hiToneOn = (hiToneOn !== false);
+}
+
+function getMetronomeBeatState() {
+    const positionInMeasure = metronomeState.beatCount % metronomeState.beatsPerMeasure;
+    const positionInPattern = metronomeState.measureCount % metronomeState.measuresPerPattern;
+
+    let toneKey = 'high';
+    let shouldPlay = true;
+
+    if (positionInMeasure === 0 && positionInPattern === 0) {
+        toneKey = 'low';
+    } else if (positionInMeasure === 0) {
+        toneKey = 'mid';
+    } else if (!metronomeState.hiToneOn) {
+        shouldPlay = false;
+    }
+
+    return { positionInMeasure, toneKey, shouldPlay };
+}
+
+function advanceMetronomePosition(positionInMeasure) {
+    highlightBeatIndicator(positionInMeasure);
+    metronomeState.beatCount += 1;
+    if (metronomeState.beatCount % metronomeState.beatsPerMeasure === 0) {
+        metronomeState.measureCount += 1;
+    }
+}
+
+function playScheduledTone(scheduledTime = null) {
+    try {
+        const ctx = ensureAudioContext();
+        if (ctx.state === 'closed') {
+            console.error('AudioContext is closed, cannot play tone');
+            return;
+        }
+
+        ensureMetronomeClickBuffers(ctx);
+
+        const { positionInMeasure, toneKey, shouldPlay } = getMetronomeBeatState();
+        const toneTime = (Number.isFinite(scheduledTime) && scheduledTime >= ctx.currentTime)
+            ? scheduledTime
+            : ctx.currentTime;
+
+        if (shouldPlay) {
+            const source = ctx.createBufferSource();
+            const gain = ctx.createGain();
+
+            source.buffer = metronomeClickBuffers[toneKey];
+
+            gain.gain.cancelScheduledValues(toneTime);
+            gain.gain.setValueAtTime(0.0001, toneTime);
+            gain.gain.linearRampToValueAtTime(metronomeState.volume, toneTime + 0.005);
+            gain.gain.exponentialRampToValueAtTime(0.0001, toneTime + 0.1);
+
+            source.connect(gain);
+            gain.connect(ctx.destination);
+
+            const nodeRecord = { source, gain };
+            activeMetronomeNodes.push(nodeRecord);
+            source.onended = () => {
+                try {
+                    source.disconnect();
+                    gain.disconnect();
+                } catch (disconnectErr) {
+                    console.warn('Metronome node disconnect warning:', disconnectErr);
+                }
+                cleanupMetronomeNode(nodeRecord);
+            };
+
+            source.start(toneTime);
+        }
+
+        advanceMetronomePosition(positionInMeasure);
+    } catch (err) {
+        console.error('Error playing tone:', err);
+    }
+}
+
+function playHtmlTone() {
+    try {
+        ensureMetronomeAudioUrls();
+        const { positionInMeasure, toneKey, shouldPlay } = getMetronomeBeatState();
+
+        if (shouldPlay) {
+            const audio = new Audio(metronomeAudioUrls[toneKey]);
+            audio.preload = 'auto';
+            audio.volume = metronomeState.volume;
+            activeMetronomeAudios.push(audio);
+            audio.addEventListener('ended', () => cleanupMetronomeAudio(audio), { once: true });
+            audio.play().catch(err => {
+                console.error('HTMLAudio metronome playback error:', err);
+                cleanupMetronomeAudio(audio);
+            });
+        }
+
+        advanceMetronomePosition(positionInMeasure);
+    } catch (err) {
+        console.error('Error playing HTMLAudio metronome tone:', err);
+    }
+}
+
+function stopMetronomePlayback() {
+    if (metronomeInterval) {
+        clearInterval(metronomeInterval);
+    }
+    metronomeInterval = null;
+    metronomeScheduler = null;
+
+    activeMetronomeNodes.forEach(({ source, gain }) => {
+        try {
+            source.onended = null;
+            source.stop();
+        } catch (stopErr) {
+            console.warn('Metronome node stop warning:', stopErr);
+        }
+        try {
+            source.disconnect();
+            gain.disconnect();
+        } catch (disconnectErr) {
+            console.warn('Metronome node disconnect warning:', disconnectErr);
+        }
+    });
+    activeMetronomeNodes = [];
+
+    activeMetronomeAudios.forEach(audio => {
+        try {
+            audio.pause();
+            audio.currentTime = 0;
+        } catch (audioErr) {
+            console.warn('Metronome audio stop warning:', audioErr);
+        }
+    });
+    activeMetronomeAudios = [];
+
+    preserveMetronomeStartOffset = false;
+    setMetronomePlayingState(false);
+    console.log('Stopped metronome');
+}
+
+function startMetronomePlayback(options = {}) {
+    const { preserveOffset = false } = options;
+    const ctx = ensureAudioContext();
+    const secondsPerBeat = 60.0 / metronomeState.tempo;
+    const useHtmlAudioMetronome = shouldUseHtmlAudioMetronome();
+
+    const startScheduler = () => {
+        if (preserveOffset) {
+            console.log('Preserving recording-start metronome offset', {
+                beatCount: metronomeState.beatCount,
+                measureCount: metronomeState.measureCount
+            });
+        } else {
+            metronomeState.beatCount = 0;
+            metronomeState.measureCount = 0;
+        }
+
+        preserveMetronomeStartOffset = false;
+        resetBeatIndicators();
+
+        console.log(`Starting metronome with Web Audio scheduler at ${metronomeState.tempo} BPM (${secondsPerBeat.toFixed(3)}s per beat)`);
+
+        if (useHtmlAudioMetronome) {
+            console.log('Using HTMLAudio metronome fallback', {
+                host: window.location ? window.location.hostname : '',
+                vendor: navigator.vendor || '',
+                userAgent: navigator.userAgent || ''
+            });
+            playHtmlTone();
+            let nextScheduledTimeMs = performance.now() + (secondsPerBeat * 1000);
+
+            metronomeScheduler = setInterval(() => {
+                try {
+                    const nowMs = performance.now();
+                    while (nextScheduledTimeMs <= nowMs + 30) {
+                        playHtmlTone();
+                        nextScheduledTimeMs += secondsPerBeat * 1000;
+                    }
+                } catch (err) {
+                    console.error('Error in HTMLAudio metronome scheduler:', err);
+                }
+            }, 20);
+
+            metronomeInterval = metronomeScheduler;
+            setMetronomePlayingState(true);
+            return { firstBeatDelayMs: 0, secondsPerBeat };
+        }
+
+        const firstToneDelaySeconds = 0.02;
+        const firstToneTime = ctx.currentTime + firstToneDelaySeconds;
+        playScheduledTone(firstToneTime);
+
+        let nextScheduledTime = firstToneTime + secondsPerBeat;
+        metronomeScheduler = setInterval(() => {
+            try {
+                const now = ctx.currentTime;
+                while (nextScheduledTime <= now + 0.050) {
+                    playScheduledTone(nextScheduledTime);
+                    nextScheduledTime += secondsPerBeat;
+                }
+            } catch (err) {
+                console.error('Error in metronome scheduler:', err);
+            }
+        }, secondsPerBeat * 500);
+
+        metronomeInterval = metronomeScheduler;
+        setMetronomePlayingState(true);
+        return { firstBeatDelayMs: firstToneDelaySeconds * 1000, secondsPerBeat };
+    };
+
+    if (ctx.state === 'suspended') {
+        console.log('Resuming suspended AudioContext before starting metronome...');
+        return ctx.resume().then(() => {
+            console.log('AudioContext resumed successfully');
+            return startScheduler();
+        }).catch(err => {
+            console.error('Failed to resume AudioContext:', err);
+            return { firstBeatDelayMs: 0, secondsPerBeat };
+        });
+    }
+
+    return Promise.resolve(startScheduler());
+}
+
+function buildRecorderOptions() {
+    const types = [
+        'audio/wav',
+        'audio/webm',
+        'audio/webm;codecs=opus',
+        'audio/ogg;codecs=opus',
+        'audio/ogg',
+        'audio/mp4'
+    ];
+
+    const options = {
+        audioBitsPerSecond: 128000
+    };
+
+    for (const type of types) {
+        if (MediaRecorder.isTypeSupported(type)) {
+            console.log('Using supported MIME type:', type);
+            options.mimeType = type;
+            break;
+        }
+    }
+
+    if (!options.mimeType) {
+        console.warn('No supported MIME type found, using default');
+    }
+
+    return options;
+}
+
+function configureMediaRecorder(stream) {
+    mediaRecorder = new MediaRecorder(stream, buildRecorderOptions());
+    audioChunks = [];
+    recordingDiagnostics = {
+        chunks: [],
+        lastChunkTime: Date.now(),
+        totalDuration: 0,
+        gapDetected: false,
+        largestGap: 0
+    };
+
+    mediaRecorder.addEventListener('dataavailable', event => {
+        audioChunks.push(event.data);
+
+        const now = Date.now();
+        const timeSinceLastChunk = now - recordingDiagnostics.lastChunkTime;
+        recordingDiagnostics.chunks.push({
+            size: event.data.size,
+            timeSinceLastChunk: timeSinceLastChunk,
+            timestamp: now
+        });
+        recordingDiagnostics.lastChunkTime = now;
+        recordingDiagnostics.totalDuration += timeSinceLastChunk;
+
+        if (timeSinceLastChunk > 250) {
+            recordingDiagnostics.gapDetected = true;
+            recordingDiagnostics.largestGap = Math.max(recordingDiagnostics.largestGap, timeSinceLastChunk);
+            console.warn(`Recording gap detected: ${timeSinceLastChunk}ms (chunk size: ${event.data.size} bytes)`);
+        }
+    });
+
+    mediaRecorder.addEventListener('stop', () => {
+        clearRecordingTimers();
+        console.log('Recording stopped. Processing audio...');
+        console.log('=== RECORDING BUFFER DIAGNOSTICS ===');
+        console.log(`Total chunks: ${audioChunks.length}`);
+        console.log(`Total duration: ${recordingDiagnostics.totalDuration}ms`);
+        console.log(`Gap detected: ${recordingDiagnostics.gapDetected}`);
+        console.log(`Largest gap: ${recordingDiagnostics.largestGap}ms`);
+        console.log('Chunk sizes:', recordingDiagnostics.chunks.map(c => c.size).join(', '));
+        console.log('====================================');
+
+        const reader = new FileReader();
+        const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
+        const decodeCtx = new (window.AudioContext || window.webkitAudioContext)();
+        reader.readAsArrayBuffer(audioBlob);
+        reader.onloadend = () => {
+            decodeCtx.decodeAudioData(reader.result).then((audioBuffer) => {
+                const rawData = audioBuffer.getChannelData(0);
+                const wavData = encodeWAV(rawData, audioBuffer.sampleRate);
+                const wavBlob = new Blob([wavData], { type: 'audio/wav' });
+
+                const wavReader = new FileReader();
+                wavReader.readAsDataURL(wavBlob);
+                wavReader.onloadend = () => {
+                    window.lastRecordedAudio = wavReader.result;
+                    window.recordedAudioData = wavReader.result;
+                    console.log('Converted to WAV, length:', wavReader.result.length);
+                    clickHiddenButton('audio-process-btn');
+                };
+            }).catch((err) => {
+                console.error('decodeAudioData failed:', err);
+            }).finally(() => {
+                if (decodeCtx && decodeCtx.state !== 'closed') {
+                    decodeCtx.close().catch(() => {});
+                }
+            });
+        };
+    });
+}
+
+function cancelPendingRecording() {
+    pendingRecordingRequestId += 1;
+    clearRecordingTimers();
+    cleanupRecordingStream();
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+        try {
+            mediaRecorder.stop();
+        } catch (err) {
+            console.warn('Error stopping inactive recorder:', err);
+        }
+    }
+    mediaRecorder = null;
+
+    if (metronomeAutoStartedByRecording) {
+        stopMetronomePlayback();
+        metronomeAutoStartedByRecording = false;
+    }
+    setRecordingPhase('idle');
+}
+
+function beginActiveRecording(requestId) {
+    if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay' || !mediaRecorder) {
+        return;
+    }
+
+    try {
+        mediaRecorder.start(100);
+        console.log('MediaRecorder started with timeslice=100ms after measure delay');
+        setRecordingPhase('recording');
+
+        const maxRecordingTime = 60000;
+        const warningTime = 55000;
+        let warningGiven = false;
+
+        recordingTimeout = setTimeout(() => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                console.log('Automatic stop: Recording reached maximum time limit (60 seconds)');
+                window.recorderControls.playStopBeep();
+                mediaRecorder.stop();
+                cleanupRecordingStream();
+                if (metronomeAutoStartedByRecording) {
+                    stopMetronomePlayback();
+                    metronomeAutoStartedByRecording = false;
+                }
+                setRecordingPhase('idle');
+                window.recorderControls.showAutoStopMessage();
+            }
+        }, maxRecordingTime);
+
+        recordingWarningTimeout = setTimeout(() => {
+            if (mediaRecorder && mediaRecorder.state === 'recording' && !warningGiven) {
+                warningGiven = true;
+                console.log('Warning: Recording will auto-stop in 5 seconds');
+                window.recorderControls.playWarningBeep();
+            }
+        }, warningTime);
+    } catch (err) {
+        console.error('Error starting delayed recording:', err);
+        cancelPendingRecording();
+    }
+}
+
+function stopActiveRecording() {
+    console.log('Stopping recording...');
+    clearRecordingTimers();
+
+    if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+    }
+
+    cleanupRecordingStream();
+    if (metronomeAutoStartedByRecording) {
+        stopMetronomePlayback();
+        metronomeAutoStartedByRecording = false;
+    }
+    setRecordingPhase('idle');
+}
+
+function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn) {
+    console.log('Starting recording with measure delay...', {
+        tempo,
+        beatsPerMeasure,
+        measuresPerPattern,
+        volume,
+        hiToneOn
+    });
+
+    setRecordingPhase('delay');
+    clearRecordingTimers();
+    pendingRecordingRequestId += 1;
+    const requestId = pendingRecordingRequestId;
+
+    updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn);
+
+    const audioConstraints = {
+        audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            sampleRate: { ideal: 48000 }
+        }
+    };
+
+    navigator.mediaDevices.getUserMedia(audioConstraints)
+        .then(stream => {
+            if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay') {
+                stream.getTracks().forEach(track => track.stop());
+                return;
+            }
+
+            recordingStream = stream;
+            configureMediaRecorder(stream);
+
+            stopMetronomePlayback();
+            metronomeAutoStartedByRecording = true;
+
+            const patternMeasures = metronomeState.measuresPerPattern || 1;
+            if (patternMeasures > 1) {
+                metronomeState.beatCount = (patternMeasures - 1) * metronomeState.beatsPerMeasure;
+                metronomeState.measureCount = patternMeasures - 1;
+                preserveMetronomeStartOffset = true;
+                console.log('Pattern offset: starting at measure', metronomeState.measureCount + 1, 'of pattern');
+            } else {
+                metronomeState.beatCount = 0;
+                metronomeState.measureCount = 0;
+                preserveMetronomeStartOffset = false;
+            }
+
+            startMetronomePlayback({ preserveOffset: patternMeasures > 1 }).then(({ firstBeatDelayMs, secondsPerBeat }) => {
+                if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay') {
+                    return;
+                }
+
+                const measureDelayMs = firstBeatDelayMs + (metronomeState.beatsPerMeasure * secondsPerBeat * 1000);
+                recordingDelayTimeout = setTimeout(() => beginActiveRecording(requestId), measureDelayMs);
+            });
+        })
+        .catch(err => {
+            console.error('Error accessing microphone:', err);
+            alert('Error accessing microphone: ' + err.message);
+            cancelPendingRecording();
+        });
 }
 
 function isSafariBrowser() {
@@ -185,203 +758,26 @@ function ensureMetronomeClickBuffers(ctx) {
 
 try {
 const recorderControls = {
-    toggleRecording: function(n_clicks, is_recording) {
-        console.log("toggleRecording: n_clicks=", n_clicks, "is_recording=", is_recording);
-        if (!n_clicks) return is_recording;
+    toggleRecording: function(n_clicks, recordingPhase, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn) {
+        console.log('toggleRecording: n_clicks=', n_clicks, 'recordingPhase=', recordingPhase);
+        if (!n_clicks) {
+            return currentRecordingPhase === 'recording';
+        }
 
-        if (!is_recording) {
-            console.log("Starting recording...");
-
-            // Auto-start metronome if not already playing
-            // If patterns > 1, start at the beginning of the last measure in the pattern
-            if (!metronomeInterval) {
-                console.log("Auto-starting metronome with recording...");
-                metronomeAutoStartedByRecording = true;
-                const measuresPerPattern = metronomeState.measuresPerPattern || 1;
-                if (measuresPerPattern > 1) {
-                    // Set up to start at the beginning of the last measure of the pattern
-                    metronomeState.beatCount = (measuresPerPattern - 1) * metronomeState.beatsPerMeasure;
-                    metronomeState.measureCount = measuresPerPattern - 1;
-                    preserveMetronomeStartOffset = true;
-                    console.log("Pattern offset: starting at measure", metronomeState.measureCount + 1, "of pattern");
-                } else {
-                    metronomeState.beatCount = 0;
-                    metronomeState.measureCount = 0;
-                    preserveMetronomeStartOffset = false;
-                }
-                // Trigger metronome start by clicking the button
-                const metronomeBtn = document.getElementById('metronome-btn');
-                if (metronomeBtn) {
-                    metronomeBtn.click();
-                }
-            }
-
-            // Request specific audio constraints to ensure consistent audio stream.
-            // Use 'ideal' for sampleRate so Firefox/Safari don't throw OverconstrainedError
-            // if the exact rate is unavailable.
-            const audioConstraints = {
-                audio: {
-                    echoCancellation: false,
-                    noiseSuppression: false,
-                    autoGainControl: false,
-                    sampleRate: { ideal: 48000 }
-                }
-            };
-
-            navigator.mediaDevices.getUserMedia(audioConstraints)
-                .then(stream => {
-                    const types = [
-                        'audio/wav',
-                        'audio/webm',
-                        'audio/webm;codecs=opus',
-                        'audio/ogg;codecs=opus',
-                        'audio/ogg',
-                        'audio/mp4'
-                    ];
-
-                    let options = {
-                        audioBitsPerSecond: 128000  // Ensure consistent bitrate
-                    };
-                    let selectedMimeType = null;
-                    for (const type of types) {
-                        if (MediaRecorder.isTypeSupported(type)) {
-                            console.log("Using supported MIME type:", type);
-                            selectedMimeType = type;
-                            options.mimeType = type;
-                            break;
-                        }
-                    }
-
-                    if (!selectedMimeType) {
-                        console.warn("No supported MIME type found, using default");
-                    }
-
-                    mediaRecorder = new MediaRecorder(stream, options);
-
-                    // Reset diagnostics for this recording session
-                    recordingDiagnostics = {
-                        chunks: [],
-                        lastChunkTime: Date.now(),
-                        totalDuration: 0,
-                        gapDetected: false,
-                        largestGap: 0
-                    };
-
-                    // Use small timeslice to ensure continuous, consistent chunks
-                    // This prevents buffer buildup and ensures even audio capture
-                    mediaRecorder.start(100);  // 100ms timeslice for consistent chunks
-                    audioChunks = [];
-                    console.log("MediaRecorder started with timeslice=100ms, constraints:", audioConstraints);
-
-                    const maxRecordingTime = 60000;
-                    const warningTime = 55000;
-                    let warningGiven = false;
-
-                    const recordingTimeout = setTimeout(() => {
-                        if (mediaRecorder && mediaRecorder.state === 'recording') {
-                            console.log("Automatic stop: Recording reached maximum time limit (60 seconds)");
-                            window.recorderControls.playStopBeep();
-                            mediaRecorder.stop();
-                            stream.getTracks().forEach(track => track.stop());
-                            stopMetronomeIfAutoStartedByRecording();
-                            window.recorderControls.showAutoStopMessage();
-                        }
-                    }, maxRecordingTime);
-
-                    const warningTimeout = setTimeout(() => {
-                        if (mediaRecorder && mediaRecorder.state === 'recording' && !warningGiven) {
-                            warningGiven = true;
-                            console.log("Warning: Recording will auto-stop in 5 seconds");
-                            window.recorderControls.playWarningBeep();
-                        }
-                    }, warningTime);
-
-                    mediaRecorder.addEventListener("dataavailable", event => {
-                        audioChunks.push(event.data);
-
-                        // Diagnostics: Track chunk timing
-                        const now = Date.now();
-                        const timeSinceLastChunk = now - recordingDiagnostics.lastChunkTime;
-                        recordingDiagnostics.chunks.push({
-                            size: event.data.size,
-                            timeSinceLastChunk: timeSinceLastChunk,
-                            timestamp: now
-                        });
-                        recordingDiagnostics.lastChunkTime = now;
-                        recordingDiagnostics.totalDuration += timeSinceLastChunk;
-
-                        // Detect gaps (>250ms would indicate dropout)
-                        if (timeSinceLastChunk > 250) {
-                            recordingDiagnostics.gapDetected = true;
-                            recordingDiagnostics.largestGap = Math.max(recordingDiagnostics.largestGap, timeSinceLastChunk);
-                            console.warn(`Recording gap detected: ${timeSinceLastChunk}ms (chunk size: ${event.data.size} bytes)`);
-                        }
-                    });
-
-                    mediaRecorder.addEventListener("stop", () => {
-                        clearTimeout(recordingTimeout);
-                        clearTimeout(warningTimeout);
-                        console.log("Recording stopped. Processing audio...");
-
-                        // Log buffer diagnostics
-                        console.log("=== RECORDING BUFFER DIAGNOSTICS ===");
-                        console.log(`Total chunks: ${audioChunks.length}`);
-                        console.log(`Total duration: ${recordingDiagnostics.totalDuration}ms`);
-                        console.log(`Gap detected: ${recordingDiagnostics.gapDetected}`);
-                        console.log(`Largest gap: ${recordingDiagnostics.largestGap}ms`);
-                        console.log(`Chunk sizes:`, recordingDiagnostics.chunks.map(c => c.size).join(', '));
-                        console.log("====================================");
-
-                        // Convert WebM chunks to PCM and then to WAV
-                        const reader = new FileReader();
-                        const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
-
-                        // Create audio context to decode and re-encode as WAV
-                        const decodeCtx = new (window.AudioContext || window.webkitAudioContext)();
-                        reader.readAsArrayBuffer(audioBlob);
-                        reader.onloadend = () => {
-                            // Use Promise form of decodeAudioData for cross-browser support
-                            // (callback form is deprecated in Firefox/Safari)
-                            decodeCtx.decodeAudioData(reader.result).then((audioBuffer) => {
-                                // Get raw PCM data as Float32Array - do NOT convert to plain Array,
-                                // that doubles memory and causes tab crashes in Firefox/Safari.
-                                const rawData = audioBuffer.getChannelData(0); // mono, Float32Array
-                                const wavData = encodeWAV(rawData, audioBuffer.sampleRate);
-                                const wavBlob = new Blob([wavData], { type: 'audio/wav' });
-
-                                const wavReader = new FileReader();
-                                wavReader.readAsDataURL(wavBlob);
-                                wavReader.onloadend = () => {
-                                    window.lastRecordedAudio = wavReader.result;
-                                    window.recordedAudioData = wavReader.result;
-                                    console.log("Converted to WAV, length:", wavReader.result.length);
-
-                                    const hiddenBtn = document.getElementById('audio-process-btn');
-                                    if (hiddenBtn) {
-                                        hiddenBtn.click();
-                                    }
-                                };
-                            }).catch((err) => {
-                                console.error("decodeAudioData failed:", err);
-                            });
-                        };
-                    });
-                }).catch(err => {
-                    console.error("Error accessing microphone:", err);
-                    alert("Error accessing microphone: " + err.message);
-                });
-            return true;
-        } else {
-            console.log("Stopping recording...");
-            if (mediaRecorder && mediaRecorder.state !== "inactive") {
-                mediaRecorder.stop();
-                if (mediaRecorder.stream) {
-                    mediaRecorder.stream.getTracks().forEach(track => track.stop());
-                }
-            }
-            stopMetronomeIfAutoStartedByRecording();
+        const phase = recordingPhase || currentRecordingPhase || 'idle';
+        if (phase === 'delay') {
+            console.log('Cancelling measure delay');
+            cancelPendingRecording();
             return false;
         }
+
+        if (phase === 'recording') {
+            stopActiveRecording();
+            return false;
+        }
+
+        startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn);
+        return true;
     },
 
     playAudio: function(n_clicks, volume, is_playing) {
@@ -431,255 +827,18 @@ const recorderControls = {
 
         if (!n_clicks) return is_playing;
 
-        // Defensive defaults to avoid silent output from undefined/null state values.
-        tempo = Number.isFinite(tempo) ? tempo : 120;
-        beatsPerMeasure = Number.isFinite(beatsPerMeasure) ? beatsPerMeasure : 4;
-        measuresPerPattern = Number.isFinite(measuresPerPattern) ? measuresPerPattern : 1;
-        volume = Number.isFinite(volume) ? volume : 0.5;
-        hiToneOn = (hiToneOn !== false);
-
-        // Store current state for later use
-        metronomeState.tempo = tempo;
-        metronomeState.beatsPerMeasure = beatsPerMeasure;
-        metronomeState.measuresPerPattern = measuresPerPattern;
-        metronomeState.volume = volume;
-        metronomeState.hiToneOn = hiToneOn;
-
-        if (!audioContext || audioContext.state === 'closed') {
-            console.log("Creating new AudioContext...");
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        }
+        updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn);
 
         if (!is_playing) {
-            const secondsPerBeat = 60.0 / tempo;
-            const useHtmlAudioMetronome = shouldUseHtmlAudioMetronome();
-
-            const playTone = (scheduledTime = null) => {
-                try {
-                    if (audioContext.state === 'closed') {
-                        console.error("AudioContext is closed, cannot play tone");
-                        return;
-                    }
-
-                    ensureMetronomeClickBuffers(audioContext);
-
-                    const toneTime = (Number.isFinite(scheduledTime) && scheduledTime >= audioContext.currentTime)
-                        ? scheduledTime
-                        : audioContext.currentTime;
-
-                    const source = audioContext.createBufferSource();
-                    const gain = audioContext.createGain();
-
-                    let toneKey = 'high';
-                    let shouldPlay = true;
-
-                    const positionInMeasure = metronomeState.beatCount % metronomeState.beatsPerMeasure;
-                    const positionInPattern = metronomeState.measureCount % metronomeState.measuresPerPattern;
-
-                    // Determine tone type
-                    if (positionInMeasure === 0 && positionInPattern === 0) {
-                        // First beat of pattern: low tone
-                        toneKey = 'low';
-                    } else if (positionInMeasure === 0) {
-                        // First beat of measure (not pattern start): mid-tone
-                        toneKey = 'mid';
-                    } else if (!metronomeState.hiToneOn) {
-                        // Not a measure-start beat and hi-tone is off: silence
-                        shouldPlay = false;
-                    }
-
-                    if (shouldPlay) {
-                        source.buffer = metronomeClickBuffers[toneKey];
-
-                        gain.gain.cancelScheduledValues(toneTime);
-                        gain.gain.setValueAtTime(0.0001, toneTime);
-                        gain.gain.linearRampToValueAtTime(metronomeState.volume, toneTime + 0.005);
-                        gain.gain.exponentialRampToValueAtTime(0.0001, toneTime + 0.1);
-
-                        source.connect(gain);
-                        gain.connect(audioContext.destination);
-
-                        const nodeRecord = { source, gain };
-                        activeMetronomeNodes.push(nodeRecord);
-                        source.onended = () => {
-                            try {
-                                source.disconnect();
-                                gain.disconnect();
-                            } catch (disconnectErr) {
-                                console.warn("Metronome node disconnect warning:", disconnectErr);
-                            }
-                            cleanupMetronomeNode(nodeRecord);
-                        };
-
-                        source.start(toneTime);
-                    }
-
-                    metronomeState.beatCount++;
-                    if (metronomeState.beatCount % metronomeState.beatsPerMeasure === 0) {
-                        metronomeState.measureCount++;
-                    }
-                } catch (err) {
-                    console.error("Error playing tone:", err);
-                }
-            };
-
-            const playHtmlTone = () => {
-                try {
-                    ensureMetronomeAudioUrls();
-
-                    let toneKey = 'high';
-                    let shouldPlay = true;
-
-                    const positionInMeasure = metronomeState.beatCount % metronomeState.beatsPerMeasure;
-                    const positionInPattern = metronomeState.measureCount % metronomeState.measuresPerPattern;
-
-                    if (positionInMeasure === 0 && positionInPattern === 0) {
-                        toneKey = 'low';
-                    } else if (positionInMeasure === 0) {
-                        toneKey = 'mid';
-                    } else if (!metronomeState.hiToneOn) {
-                        shouldPlay = false;
-                    }
-
-                    if (shouldPlay) {
-                        const audio = new Audio(metronomeAudioUrls[toneKey]);
-                        audio.preload = 'auto';
-                        audio.volume = metronomeState.volume;
-                        activeMetronomeAudios.push(audio);
-                        audio.addEventListener('ended', () => cleanupMetronomeAudio(audio), { once: true });
-                        audio.play().catch(err => {
-                            console.error("HTMLAudio metronome playback error:", err);
-                            cleanupMetronomeAudio(audio);
-                        });
-                    }
-
-                    metronomeState.beatCount++;
-                    if (metronomeState.beatCount % metronomeState.beatsPerMeasure === 0) {
-                        metronomeState.measureCount++;
-                    }
-                } catch (err) {
-                    console.error("Error playing HTMLAudio metronome tone:", err);
-                }
-            };
-
-            const startMetronomeScheduler = () => {
-                if (metronomeInterval) {
-                    return;
-                }
-
-                if (preserveMetronomeStartOffset) {
-                    console.log("Preserving recording-start metronome offset", {
-                        beatCount: metronomeState.beatCount,
-                        measureCount: metronomeState.measureCount
-                    });
-                    preserveMetronomeStartOffset = false;
-                } else {
-                    metronomeState.beatCount = 0;
-                    metronomeState.measureCount = 0;
-                }
-
-                // Warm up the context and prepare for scheduling
-                console.log(`Starting metronome with Web Audio scheduler at ${tempo} BPM (${secondsPerBeat.toFixed(3)}s per beat)`);
-
-                if (useHtmlAudioMetronome) {
-                    console.log("Using HTMLAudio metronome fallback", {
-                        host: window.location ? window.location.hostname : "",
-                        vendor: navigator.vendor || "",
-                        userAgent: navigator.userAgent || ""
-                    });
-                    playHtmlTone();
-                    let nextScheduledTimeMs = performance.now() + (secondsPerBeat * 1000);
-
-                    metronomeScheduler = setInterval(() => {
-                        try {
-                            const nowMs = performance.now();
-                            while (nextScheduledTimeMs <= nowMs + 30) {
-                                playHtmlTone();
-                                nextScheduledTimeMs += secondsPerBeat * 1000;
-                            }
-                        } catch (err) {
-                            console.error("Error in HTMLAudio metronome scheduler:", err);
-                        }
-                    }, 20);
-
-                    metronomeInterval = metronomeScheduler;
-                    return;
-                }
-
-                // In Safari, scheduling the first tone a hair ahead is more reliable than "now".
-                const firstToneTime = audioContext.currentTime + 0.02;
-                playTone(firstToneTime);
-
-                // Use Web Audio scheduler for subsequent beats (much more accurate than setInterval)
-                // Schedule next beat times using audioContext.currentTime for precise timing
-                let nextScheduledTime = firstToneTime + secondsPerBeat;
-
-                metronomeScheduler = setInterval(() => {
-                    try {
-                        const now = audioContext.currentTime;
-                        // Schedule all beats that are due (handles brief interruptions)
-                        while (nextScheduledTime <= now + 0.050) {  // 50ms lookahead
-                            // Always trigger each due beat exactly once.
-                            // If overdue, play immediately; if in lookahead window, schedule precisely.
-                            playTone(nextScheduledTime);
-                            nextScheduledTime += secondsPerBeat;
-                        }
-                    } catch (err) {
-                        console.error("Error in metronome scheduler:", err);
-                    }
-                }, secondsPerBeat * 500);  // Check frequency: half the beat interval for precision
-
-                metronomeInterval = metronomeScheduler; // Keep for compatibility
-            };
-
-            if (audioContext.state === 'suspended') {
-                console.log("Resuming suspended AudioContext before starting metronome...");
-                audioContext.resume().then(() => {
-                    console.log("AudioContext resumed successfully");
-                    startMetronomeScheduler();
-                }).catch(err => {
-                    console.error("Failed to resume AudioContext:", err);
-                });
-            } else {
-                startMetronomeScheduler();
-            }
-
+            metronomeAutoStartedByRecording = false;
+            stopMetronomePlayback();
+            startMetronomePlayback({ preserveOffset: false });
             return true;
-        } else {
-            if (metronomeInterval) {
-                clearInterval(metronomeInterval);
-                metronomeInterval = null;
-                metronomeScheduler = null;
-                activeMetronomeNodes.forEach(({ source, gain }) => {
-                    try {
-                        source.onended = null;
-                        source.stop();
-                    } catch (stopErr) {
-                        console.warn("Metronome node stop warning:", stopErr);
-                    }
-                    try {
-                        source.disconnect();
-                        gain.disconnect();
-                    } catch (disconnectErr) {
-                        console.warn("Metronome node disconnect warning:", disconnectErr);
-                    }
-                });
-                activeMetronomeNodes = [];
-                activeMetronomeAudios.forEach(audio => {
-                    try {
-                        audio.pause();
-                        audio.currentTime = 0;
-                    } catch (audioErr) {
-                        console.warn("Metronome audio stop warning:", audioErr);
-                    }
-                });
-                activeMetronomeAudios = [];
-                metronomeAutoStartedByRecording = false;
-                preserveMetronomeStartOffset = false;
-                console.log("Stopped metronome");
-            }
-            return false;
         }
+
+        metronomeAutoStartedByRecording = false;
+        stopMetronomePlayback();
+        return false;
     },
 
     playStopBeep: function() {

@@ -16,6 +16,18 @@ x     x     x
 3,2,3
 1 e & a 2 e & a
 x     x   x
+
+3/2 Clave
+1 e & a 2 e & a 3 e & a 4 e & a
+x     x     x       x   x
+
+Gravity Grooves
+1 e & a 2 e & a 3 e & a 4 e & a
+B
+B   B
+B B B
+B                           B
+B                           B B
 """
 # TODO add more patterns
 

@@ -22,9 +22,10 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
 ASSETS_DIR = Path(__file__).resolve().parent / "assets"
 RECORDER_SCRIPT_PATH = ASSETS_DIR / "recorder.js"
-WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.020
+WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.040
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
+AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
 
 
 def load_inline_script(script_path: Path) -> str:
@@ -211,6 +212,97 @@ def downsample_waveform_preserve_peaks(time: np.ndarray, y: np.ndarray,
     return np.array(time_out), np.array(y_out, dtype=np.float32)
 
 
+def trim_audio_tail(y: np.ndarray, sr: int,
+                    trim_seconds: float = AUDIO_STOP_CLICK_TRIM_SECONDS) -> np.ndarray:
+    if y.size == 0 or trim_seconds <= 0 or sr <= 0:
+        return y
+
+    trim_samples = int(round(float(sr) * float(trim_seconds)))
+    if trim_samples <= 0 or trim_samples >= len(y):
+        return y
+
+    return y[:-trim_samples]
+
+
+def serialize_audio_to_base64_wav(y: np.ndarray, sr: int) -> str:
+    with io.BytesIO() as buffer:
+        sf.write(buffer, y, sr, format="WAV", subtype="PCM_16")
+        wav_bytes = buffer.getvalue()
+    encoded = base64.b64encode(wav_bytes).decode("ascii")
+    return f"data:audio/wav;base64,{encoded}"
+
+
+def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
+                          beat_times: np.ndarray, beats_per_measure: int) -> go.Figure:
+    duration = len(y) / sr if sr else 0.0
+    time = np.linspace(0, duration, num=len(y), endpoint=False)
+    time = time - WAVEFORM_DISPLAY_SHIFT_SECONDS
+    y_for_display = smooth_waveform_for_display(y)
+    time_display, y_display = downsample_waveform_preserve_peaks(time, y_for_display)
+
+    if y_display.size == 0:
+        y_display = np.array([0.0], dtype=np.float32)
+        time_display = np.array([0.0], dtype=np.float32)
+
+    y_max = float(np.max(y_display))
+    y_min = float(np.min(y_display))
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform",
+                             line=dict(color='blue')))
+
+    metronome_colors = ['red' if i % beats_per_measure == 0 else 'orange' for i in
+                        range(len(metronome_times))]
+    fig.add_trace(go.Scatter(
+        x=metronome_times,
+        y=[y_max * 1.1 if i % beats_per_measure == 0 else y_max * 1.05 for i in
+           range(len(metronome_times))],
+        mode='markers',
+        name='Beats',
+        marker=dict(color=metronome_colors, symbol='diamond')
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=beat_times,
+        y=[y_min * 1.1] * len(beat_times),
+        mode='markers',
+        name='Pulses',
+        marker=dict(color='green', symbol='circle')
+    ))
+
+    fig.update_layout(
+        xaxis_title="Time (s)",
+        yaxis_title="Normalized Amplitude",
+        yaxis_range=[-1.1, 1.1],
+        dragmode="pan",
+        template="plotly_white",
+        margin=dict(l=40, r=20, t=20, b=40),
+    )
+    return fig
+
+
+def build_beat_indicator_boxes(beats_per_measure: int) -> list[html.Div]:
+    count = max(1, int(beats_per_measure or 1))
+    return [
+        html.Div(
+            str(index + 1),
+            id=f"beat-box-{index}",
+            className="beat-indicator-box d-flex align-items-center justify-content-center",
+            style={
+                "width": "28px",
+                "height": "28px",
+                "border": "1px solid #adb5bd",
+                "borderRadius": "4px",
+                "backgroundColor": "#f8f9fa",
+                "color": "#495057",
+                "fontSize": "0.8rem",
+                "fontWeight": "600",
+            }
+        )
+        for index in range(count)
+    ]
+
+
 app = Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
@@ -376,6 +468,14 @@ app.layout = dbc.Container([
                                 style={"marginTop": "20px"}
                             ),
                         ], width="auto"),
+                        dbc.Col([
+                            html.Label("Beat", className="small d-block"),
+                            html.Div(
+                                id="beat-indicator-container",
+                                children=build_beat_indicator_boxes(4),
+                                className="d-flex gap-1 align-items-center",
+                            ),
+                        ], width="auto"),
                     ], align="end", className="mb-3"),
                     dcc.Checklist(id="is-metronome-playing",
                                   options=[{"label": "Playing", "value": "playing"}],
@@ -400,13 +500,20 @@ app.layout = dbc.Container([
 
     # Hidden components for data storage and communication
     dcc.Store(id="audio-store"),
+    dcc.Store(id="recording-phase-store", data="idle"),
     dcc.Store(id="waveform-visible-store", data=False),
     dcc.Store(id="metronome-points-store"),
     dcc.Store(id="pulse-points-store"),
     dcc.Store(id="audio-data-store"),
+    dcc.Store(id="record-command-store"),
+    dcc.Store(id="metronome-command-store"),
     dbc.Button("Playback Ended", id="playback-ended-btn",
                style={"display": "none"}, n_clicks=0),
     dcc.Input(id="playback-sync", type="text", style={"display": "none"}),
+    dcc.Input(id="recording-phase-sync", type="text", value="idle",
+              style={"display": "none"}),
+    dcc.Input(id="metronome-state-sync", type="text", value="",
+              style={"display": "none"}),
     dbc.Button("Process", id="audio-process-btn", style={"display": "none"},
                n_clicks=0),
     dcc.Download(id="download-audio"),
@@ -416,20 +523,34 @@ app.layout = dbc.Container([
 # Clientside callbacks for recording and playback
 clientside_callback(
     """
-    function(n_clicks, recording_status) {
+    function(n_clicks, recording_phase, tempo, beats, measuresPerPattern, volume, playHiTone) {
         if (!window.recorderControls) {
             console.error("recorder.js not loaded");
-            return recording_status;
+            return window.dash_clientside.no_update;
         }
         if (n_clicks) {
-            return window.recorderControls.toggleRecording(n_clicks, recording_status.length > 0) ? ['recording'] : [];
+            window.recorderControls.toggleRecording(
+                n_clicks,
+                recording_phase,
+                tempo,
+                beats,
+                measuresPerPattern,
+                volume,
+                !!playHiTone
+            );
         }
-        return recording_status;
+        return window.dash_clientside.no_update;
     }
     """,
-    Output("is-recording", "value"),
+    Output("record-command-store", "data"),
     Input("record-btn", "n_clicks"),
-    State("is-recording", "value"),
+    State("recording-phase-store", "data"),
+    State("tempo-slider", "value"),
+    State("beats-per-measure", "value"),
+    State("measures-per-pattern", "value"),
+    State("metronome-vol", "value"),
+    State("play-hi-tone", "value"),
+    prevent_initial_call=True,
 )
 
 clientside_callback(
@@ -455,17 +576,19 @@ clientside_callback(
     function(n_clicks, playing_status, tempo, beats, measures_per_pattern, volume, play_hi_tone) {
         if (!window.recorderControls) {
             console.error("recorder.js not loaded");
-            return playing_status;
+            return window.dash_clientside.no_update;
         }
         const isPlaying = playing_status.length > 0;
         const hi_tone_on = !!play_hi_tone;
-        const result = window.recorderControls.toggleMetronome(
+        if (n_clicks) {
+            window.recorderControls.toggleMetronome(
             n_clicks, isPlaying, tempo, beats, measures_per_pattern, volume, hi_tone_on
-        );
-        return result ? ['playing'] : [];
+            );
+        }
+        return window.dash_clientside.no_update;
     }
     """,
-    Output("is-metronome-playing", "value"),
+    Output("metronome-command-store", "data"),
     Input("metronome-btn", "n_clicks"),
     State("is-metronome-playing", "value"),
     State("tempo-slider", "value"),
@@ -473,6 +596,40 @@ clientside_callback(
     State("measures-per-pattern", "value"),
     State("metronome-vol", "value"),
     State("play-hi-tone", "value"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
+    function(phaseValue) {
+        if (!phaseValue) {
+            return window.dash_clientside.no_update;
+        }
+        return phaseValue;
+    }
+    """,
+    Output("recording-phase-store", "data"),
+    Input("recording-phase-sync", "value"),
+)
+
+clientside_callback(
+    """
+    function(phaseValue) {
+        return phaseValue === 'recording' ? ['recording'] : [];
+    }
+    """,
+    Output("is-recording", "value"),
+    Input("recording-phase-store", "data"),
+)
+
+clientside_callback(
+    """
+    function(metronomeStateValue) {
+        return metronomeStateValue === 'playing' ? ['playing'] : [];
+    }
+    """,
+    Output("is-metronome-playing", "value"),
+    Input("metronome-state-sync", "value"),
 )
 
 clientside_callback(
@@ -514,15 +671,15 @@ clientside_callback(
 
 clientside_callback(
     """
-    function(recording_status) {
-        if (recording_status && recording_status.length > 0) {
+    function(recording_phase) {
+        if (recording_phase && recording_phase !== 'idle') {
             return false;
         }
         return window.dash_clientside.no_update;
     }
     """,
     Output("waveform-visible-store", "data", allow_duplicate=True),
-    Input("is-recording", "value"),
+    Input("recording-phase-store", "data"),
     prevent_initial_call=True,
 )
 
@@ -543,13 +700,13 @@ clientside_callback(
 
 clientside_callback(
     """
-    function(recording_status, waveform_visible) {
+    function(recording_phase, waveform_visible) {
         const baseStyle = {
             height: '260px',
             visibility: 'hidden'
         };
 
-        if (recording_status && recording_status.length > 0) {
+        if (recording_phase && recording_phase !== 'idle') {
             return baseStyle;
         }
 
@@ -564,7 +721,7 @@ clientside_callback(
     }
     """,
     Output("waveform-graph", "style"),
-    Input("is-recording", "value"),
+    Input("recording-phase-store", "data"),
     Input("waveform-visible-store", "data"),
 )
 
@@ -593,6 +750,25 @@ def debug_audio_store(data):
         raise PreventUpdate
     print(f"DEBUG: audio-data-store changed! Data length: {len(data)}")
     return f"audio-store-update-{len(data)}"
+
+
+@app.callback(
+    Output("beat-indicator-container", "children"),
+    Input("beats-per-measure", "value")
+)
+def update_beat_indicator_boxes(beats_per_measure):
+    return build_beat_indicator_boxes(beats_per_measure)
+
+
+# noinspection PyUnusedLocal
+@app.callback(
+    Output("status-msg", "children", allow_duplicate=True),
+    Input("record-btn", "n_clicks"),
+    prevent_initial_call=True
+)
+def clear_msg_on_record(n_clicks):
+    """Clear status message when user clicks record button"""
+    return ""
 
 
 # noinspection PyUnusedLocal
@@ -642,10 +818,12 @@ def update_metronome_button(playing_value):
 @app.callback(
     Output("record-btn", "children"),
     Output("record-btn", "color"),
-    Input("is-recording", "value")
+    Input("recording-phase-store", "data")
 )
-def update_record_button(recording_value):
-    if "recording" in recording_value:
+def update_record_button(recording_phase):
+    if recording_phase == "delay":
+        return "Measure Delay", "warning"
+    if recording_phase == "recording":
         return "Stop Recording", "secondary"
     return "Start Recording", "danger"
 
@@ -747,9 +925,11 @@ def process_audio(base64_audio, tempo, beats_per_measure):
             print(
                 f"process_audio: Loaded with librosa, sr={sr}, duration={len(y) / sr:.2f}s")
 
-        # Convert to mono if stereo, then normalize for display
+        # Convert to mono and trim stop-click tail before display/analysis/save
         if len(y.shape) > 1:
             y = y.mean(axis=1)
+        y = trim_audio_tail(np.asarray(y, dtype=np.float32), sr)
+        trimmed_audio_base64 = serialize_audio_to_base64_wav(y, sr)
         y = normalize_waveform_for_display(y)
 
         # Pulse analysis
@@ -773,49 +953,11 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         seconds_per_beat = 60.0 / tempo
         metronome_times = np.arange(0, duration, seconds_per_beat)
 
-        # Create waveform figure
-        time = np.linspace(0, duration, num=len(y), endpoint=False)
-        time = time - WAVEFORM_DISPLAY_SHIFT_SECONDS
-        y_for_display = smooth_waveform_for_display(y)
-        time_display, y_display = downsample_waveform_preserve_peaks(time, y_for_display)
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform",
-                                 line=dict(color='blue')))
-
-        # Add metronome points
-        metronome_colors = ['red' if i % beats_per_measure == 0 else 'orange' for i in
-                            range(len(metronome_times))]
-        fig.add_trace(go.Scatter(
-            x=metronome_times,
-            y=[max(y_display) * 1.1 if i % beats_per_measure == 0 else max(
-                y_display) * 1.05 for i in range(len(metronome_times))],
-            mode='markers',
-            name='Beats',
-            marker=dict(color=metronome_colors, symbol='diamond')
-        ))
-
-        # Add pulse points
-        fig.add_trace(go.Scatter(
-            x=beat_times,
-            y=[min(y_display) * 1.1] * len(beat_times),
-            mode='markers',
-            name='Pulses',
-            marker=dict(color='green', symbol='circle')
-        ))
-
-        fig.update_layout(
-            xaxis_title="Time (s)",
-            yaxis_title="Normalized Amplitude",
-            yaxis_range=[-1.1, 1.1],
-            dragmode="pan",
-            template="plotly_white",
-            margin=dict(l=40, r=20, t=20, b=40),
-        )
+        fig = build_waveform_figure(y, sr, metronome_times, beat_times, beats_per_measure)
 
         # Prepare data for saving
         save_data = {
-            "audio": base64_audio,
+            "audio": trimmed_audio_base64,
             "tempo": tempo,
             "beats_per_measure": beats_per_measure,
             "metronome_times": metronome_times.tolist(),
@@ -919,48 +1061,11 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
         y = normalize_waveform_for_display(y)
 
         duration = len(y) / sr
-        time = np.linspace(0, duration, num=len(y), endpoint=False)
-        time = time - WAVEFORM_DISPLAY_SHIFT_SECONDS
-        y_for_display = smooth_waveform_for_display(y)
-        time_display, y_display = downsample_waveform_preserve_peaks(time, y_for_display)
-
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform",
-                                 line=dict(color='blue')))
 
         metronome_times = np.array(data.get("metronome_times", []))
         beat_times = np.array(data.get("beat_times", []))
         bpm = data.get("beats_per_measure", beats_per_measure_slider)
-
-        if len(metronome_times) > 0:
-            metronome_colors = ['red' if i % bpm == 0 else 'orange' for i in
-                                range(len(metronome_times))]
-            fig.add_trace(go.Scatter(
-                x=metronome_times,
-                y=[max(y_display) * 1.1 if i % bpm == 0 else max(y_display) * 1.05 for i
-                   in range(len(metronome_times))],
-                mode='markers',
-                name='Beats',
-                marker=dict(color=metronome_colors, symbol='diamond')
-            ))
-
-        if len(beat_times) > 0:
-            fig.add_trace(go.Scatter(
-                x=beat_times,
-                y=[min(y_display) * 1.1] * len(beat_times),
-                mode='markers',
-                name='Pulses',
-                marker=dict(color='green', symbol='circle')
-            ))
-
-        fig.update_layout(
-            xaxis_title="Time (s)",
-            yaxis_title="Normalized Amplitude",
-            yaxis_range=[-1.1, 1.1],
-            dragmode="pan",
-            template="plotly_white",
-            margin=dict(l=40, r=20, t=20, b=40),
-        )
+        fig = build_waveform_figure(y, sr, metronome_times, beat_times, bpm)
 
         print(
             f"load_recording: Successfully processed audio, duration={duration:.2f}s, sr={sr}")
