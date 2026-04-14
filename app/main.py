@@ -281,26 +281,35 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
     return fig
 
 
-def build_beat_indicator_boxes(beats_per_measure: int) -> list[html.Div]:
-    count = max(1, int(beats_per_measure or 1))
-    return [
-        html.Div(
-            str(index + 1),
-            id=f"beat-box-{index}",
-            className="beat-indicator-box d-flex align-items-center justify-content-center",
-            style={
-                "width": "28px",
-                "height": "28px",
-                "border": "1px solid #adb5bd",
-                "borderRadius": "4px",
-                "backgroundColor": "#f8f9fa",
-                "color": "#495057",
-                "fontSize": "0.8rem",
-                "fontWeight": "600",
-            }
+def build_beat_indicator_boxes(beats_per_measure: int, measures_per_pattern: int = 1) -> list[html.Div]:
+    beats = max(1, int(beats_per_measure or 1))
+    measures = max(1, int(measures_per_pattern or 1))
+
+    rows = []
+    for m in range(measures):
+        row = html.Div(
+            [
+                html.Div(
+                    str(b + 1),
+                    id=f"beat-box-{m}-{b}",
+                    className="beat-indicator-box d-flex align-items-center justify-content-center",
+                    style={
+                        "width": "28px",
+                        "height": "28px",
+                        "border": "1px solid #adb5bd",
+                        "borderRadius": "4px",
+                        "backgroundColor": "#f8f9fa",
+                        "color": "#495057",
+                        "fontSize": "0.8rem",
+                        "fontWeight": "600",
+                    }
+                )
+                for b in range(beats)
+            ],
+            className="d-flex gap-1 align-items-center mb-1"
         )
-        for index in range(count)
-    ]
+        rows.append(row)
+    return rows
 
 
 app = Dash(
@@ -476,8 +485,8 @@ app.layout = dbc.Container([
                             html.Label("Beat", className="small d-block"),
                             html.Div(
                                 id="beat-indicator-container",
-                                children=build_beat_indicator_boxes(4),
-                                className="d-flex gap-1 align-items-center",
+                                children=build_beat_indicator_boxes(4, 1),
+                                className="d-flex flex-column",
                             ),
                         ], width="auto"),
                     ], align="end", className="mb-3"),
@@ -758,10 +767,11 @@ def debug_audio_store(data):
 
 @app.callback(
     Output("beat-indicator-container", "children"),
-    Input("beats-per-measure", "value")
+    Input("beats-per-measure", "value"),
+    Input("measures-per-pattern", "value"),
 )
-def update_beat_indicator_boxes(beats_per_measure):
-    return build_beat_indicator_boxes(beats_per_measure)
+def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern):
+    return build_beat_indicator_boxes(beats_per_measure, measures_per_pattern)
 
 
 # noinspection PyUnusedLocal

@@ -132,33 +132,39 @@ function setMetronomePlayingState(isPlaying) {
 
 function resetBeatIndicators() {
     const beatsPerMeasure = Math.max(1, Number(metronomeState.beatsPerMeasure) || 1);
-    for (let i = 0; i < beatsPerMeasure; i++) {
-        const box = document.getElementById(`beat-box-${i}`);
-        if (!box) {
-            continue;
-        }
-        box.style.backgroundColor = '#f8f9fa';
-        box.style.color = '#495057';
-        box.style.borderColor = '#adb5bd';
-    }
-}
-
-function highlightBeatIndicator(activeBeatIndex) {
-    const beatsPerMeasure = Math.max(1, Number(metronomeState.beatsPerMeasure) || 1);
-    for (let i = 0; i < beatsPerMeasure; i++) {
-        const box = document.getElementById(`beat-box-${i}`);
-        if (!box) {
-            continue;
-        }
-
-        if (i === activeBeatIndex) {
-            box.style.backgroundColor = '#198754';
-            box.style.color = '#ffffff';
-            box.style.borderColor = '#198754';
-        } else {
+    const measuresPerPattern = Math.max(1, Number(metronomeState.measuresPerPattern) || 1);
+    for (let m = 0; m < measuresPerPattern; m++) {
+        for (let b = 0; b < beatsPerMeasure; b++) {
+            const box = document.getElementById(`beat-box-${m}-${b}`);
+            if (!box) {
+                continue;
+            }
             box.style.backgroundColor = '#f8f9fa';
             box.style.color = '#495057';
             box.style.borderColor = '#adb5bd';
+        }
+    }
+}
+
+function highlightBeatIndicator(activeMeasureIndex, activeBeatIndex) {
+    const beatsPerMeasure = Math.max(1, Number(metronomeState.beatsPerMeasure) || 1);
+    const measuresPerPattern = Math.max(1, Number(metronomeState.measuresPerPattern) || 1);
+    for (let m = 0; m < measuresPerPattern; m++) {
+        for (let b = 0; b < beatsPerMeasure; b++) {
+            const box = document.getElementById(`beat-box-${m}-${b}`);
+            if (!box) {
+                continue;
+            }
+
+            if (m === activeMeasureIndex && b === activeBeatIndex) {
+                box.style.backgroundColor = '#198754';
+                box.style.color = '#ffffff';
+                box.style.borderColor = '#198754';
+            } else {
+                box.style.backgroundColor = '#f8f9fa';
+                box.style.color = '#495057';
+                box.style.borderColor = '#adb5bd';
+            }
         }
     }
 }
@@ -229,7 +235,8 @@ function getMetronomeBeatState() {
 }
 
 function advanceMetronomePosition(positionInMeasure) {
-    highlightBeatIndicator(positionInMeasure);
+    const positionInPattern = metronomeState.measureCount % metronomeState.measuresPerPattern;
+    highlightBeatIndicator(positionInPattern, positionInMeasure);
     metronomeState.beatCount += 1;
     if (metronomeState.beatCount % metronomeState.beatsPerMeasure === 0) {
         metronomeState.measureCount += 1;
