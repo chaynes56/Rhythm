@@ -331,9 +331,13 @@ app.index_string = f"""
 """
 
 app.layout = dbc.Container([
+    html.Div(
+        html.A("Help", href="https://github.com/chaynes56/Rhythm/blob/main/README.md", target="_blank"),
+        style={"position": "absolute", "top": "10px", "right": "20px", "zIndex": "1000"}
+    ),
     dbc.Row([
-        dbc.Col(html.H1("Rhythm Analysis"), className="text-center mb-4")
-    ]),
+        dbc.Col(html.H1("Rhythm Analysis"), className="text-center mb-4"),
+    ], className="position-relative"),
 
     # Waveform first, full width
     dbc.Row([

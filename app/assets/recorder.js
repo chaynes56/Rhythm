@@ -919,6 +919,26 @@ const recorderControls = {
         } catch (err) {
             console.error("Error showing auto-stop message:", err);
         }
+    },
+    triggerPermissionDialog: function() {
+        console.log("Triggering permission dialog silently...");
+        const audioConstraints = {
+            audio: {
+                echoCancellation: false,
+                noiseSuppression: false,
+                autoGainControl: false,
+                sampleRate: { ideal: 48000 }
+            }
+        };
+
+        navigator.mediaDevices.getUserMedia(audioConstraints)
+            .then(stream => {
+                console.log("Permission granted or already present (silent trigger)");
+                stream.getTracks().forEach(track => track.stop());
+            })
+            .catch(err => {
+                console.warn("Silent permission trigger failed (user may have denied):", err);
+            });
     }
 };
 
@@ -926,6 +946,17 @@ window.recorderControls = recorderControls;
 window.dash_clientside = window.dash_clientside || {};
 window.dash_clientside.recorder = recorderControls;
 console.log("recorder.js: recorderControls initialized successfully.");
+
+// Trigger permission dialog on load
+if (typeof window !== 'undefined') {
+    window.addEventListener('load', () => {
+        setTimeout(() => {
+            if (window.recorderControls && window.recorderControls.triggerPermissionDialog) {
+                window.recorderControls.triggerPermissionDialog();
+            }
+        }, 1000); // Short delay to ensure browser context is ready
+    });
+}
 } catch (initErr) {
     console.error("recorder.js: CRITICAL - failed to initialize recorder namespace:", initErr, initErr.stack);
     // Install stubs so Dash doesn't cascade-crash on undefined.method() calls
