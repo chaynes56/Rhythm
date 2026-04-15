@@ -299,15 +299,21 @@ function playHtmlTone() {
         const { positionInMeasure, toneKey, shouldPlay } = getMetronomeBeatState();
 
         if (shouldPlay) {
-            const audio = new Audio(metronomeAudioUrls[toneKey]);
+            const audio = new Audio();
+            audio.src = metronomeAudioUrls[toneKey];
             audio.preload = 'auto';
             audio.volume = metronomeState.volume;
+            // Add playsinline just in case, though it's for video
+            audio.setAttribute('playsinline', 'true');
             activeMetronomeAudios.push(audio);
             audio.addEventListener('ended', () => cleanupMetronomeAudio(audio), { once: true });
-            audio.play().catch(err => {
-                console.error('HTMLAudio metronome playback error:', err);
-                cleanupMetronomeAudio(audio);
-            });
+            const playPromise = audio.play();
+            if (playPromise !== undefined) {
+                playPromise.catch(err => {
+                    console.error('HTMLAudio metronome playback error:', err);
+                    cleanupMetronomeAudio(audio);
+                });
+            }
         }
 
         advanceMetronomePosition(positionInMeasure);
@@ -359,6 +365,11 @@ function startMetronomePlayback(options = {}) {
     const ctx = ensureAudioContext();
     const secondsPerBeat = 60.0 / metronomeState.tempo;
     const useHtmlAudioMetronome = shouldUseHtmlAudioMetronome();
+
+    // In Safari, we might need to "unlock" the audio context and HTML audio.
+    if (ctx.state === 'suspended') {
+        ctx.resume().catch(err => console.warn('AudioContext resume failed:', err));
+    }
 
     const startScheduler = () => {
         if (preserveOffset) {
@@ -686,9 +697,10 @@ function isSafariBrowser() {
     const ua = navigator.userAgent || "";
     const vendor = navigator.vendor || "";
     const hasSafariInUa = /Safari/i.test(ua);
-    const excludedBrowsers = /Chrome|Chromium|CriOS|Firefox|FxiOS|Edg\//i.test(ua);
+    const excludedBrowsers = /Chrome|Chromium|CriOS|GSA|Firefox|FxiOS|Edg\//i.test(ua);
     const appleVendor = /Apple/i.test(vendor);
-    return (hasSafariInUa && !excludedBrowsers) || appleVendor;
+    const isSafari = (hasSafariInUa && !excludedBrowsers) || appleVendor;
+    return isSafari;
 }
 
 function shouldUseHtmlAudioMetronome() {
@@ -696,11 +708,14 @@ function shouldUseHtmlAudioMetronome() {
     const ua = navigator.userAgent || "";
     const isFirefox = /Firefox|FxiOS/i.test(ua);
     const safariLike = isSafariBrowser();
-    const isPlotlyCloud = /(?:^|\.)plotly\.app$/i.test(host);
+    const isPlotlyCloud = /(?:^|\.)(?:plotly\.app|dash\.app|plotly\.host)$/i.test(host);
+    const useHtmlFallback = safariLike || (isPlotlyCloud && !isFirefox);
+
+    console.log(`shouldUseHtmlAudioMetronome: host=${host}, safariLike=${safariLike}, isPlotlyCloud=${isPlotlyCloud}, isFirefox=${isFirefox}, useHtmlFallback=${useHtmlFallback}`);
 
     // Safari local works with the HTMLAudio fallback, and Safari on plotly.app
     // may present a UA string that misses the narrower Safari test.
-    return safariLike || (isPlotlyCloud && !isFirefox);
+    return useHtmlFallback;
 }
 
 function createClickSamples(frequency, duration = 0.1, sampleRate = 44100) {

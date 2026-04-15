@@ -29,13 +29,19 @@ AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
 
 
 def load_inline_script(script_path: Path) -> str:
-    try:
-        return script_path.read_text(encoding="utf-8").replace("</script>",
-                                                               r"<\/script>")
-    except Exception as exc:
-        error_text = json.dumps(str(exc))
-        print(f"Failed to load inline recorder script: {exc}")
-        return f"console.error('Failed to load inline recorder script:', {error_text});"
+    candidates = [
+        script_path,
+        Path(__file__).parent / "assets" / script_path.name,
+        Path("app/assets") / script_path.name,
+        Path("assets") / script_path.name,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            content = candidate.read_text(encoding="utf-8")
+            print(f"Loaded inline script from: {candidate.resolve()}")
+            return content.replace("</script>", r"<\/script>")
+    tried = ", ".join(str(p.resolve()) for p in candidates)
+    raise FileNotFoundError(f"recorder.js not found. Paths tried: {tried}")
 
 
 RECORDER_INLINE_SCRIPT = load_inline_script(RECORDER_SCRIPT_PATH)
