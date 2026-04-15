@@ -20,30 +20,12 @@ from dash.exceptions import PreventUpdate
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-RECORDER_SCRIPT_PATH = Path(__file__).parent / "recorder.js"
 WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.040
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
 
-
-def load_inline_script(script_path: Path) -> str:
-    candidates = [
-        script_path,
-        Path(__file__).parent / "assets" / script_path.name,
-        Path("app/assets") / script_path.name,
-        Path("assets") / script_path.name,
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            content = candidate.read_text(encoding="utf-8")
-            print(f"Loaded inline script from: {candidate.resolve()}")
-            return content.replace("</script>", r"<\/script>")
-    tried = ", ".join(str(p.resolve()) for p in candidates)
-    raise FileNotFoundError(f"recorder.js not found. Paths tried: {tried}")
-
-
-RECORDER_INLINE_SCRIPT = load_inline_script(RECORDER_SCRIPT_PATH)
+RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(encoding="utf-8").replace("</script>", r"<\/script>")
 
 
 def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
