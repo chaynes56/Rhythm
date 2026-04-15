@@ -575,6 +575,7 @@ function beginActiveRecording(requestId) {
     }
 
     try {
+        recordingDiagnostics.lastChunkTime = Date.now();
         mediaRecorder.start(100);
         console.log('MediaRecorder started with timeslice=100ms after measure delay');
         setRecordingPhase('recording');

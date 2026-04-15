@@ -370,20 +370,16 @@ app.layout = dbc.Container([
                         ], width="auto"),
                         dbc.Col(
                             html.Div([
-                                html.Div("Beats after first measure",
-                                         className="small text-muted"),
-                                html.Div("—", id="beats-after-first-measure",
-                                         className="fw-semibold")
-                            ], id="beats-analysis-block"),
-                            width="auto"
-                        ),
-                        dbc.Col(
-                            html.Div([
-                                html.Div("Pulses after first measure",
-                                         className="small text-muted"),
-                                html.Div("—", id="pulses-after-first-measure",
-                                         className="fw-semibold")
-                            ], id="pulses-analysis-block"),
+                                html.Div([
+                                    html.Span("—", id="beats-after-first-measure", className="fw-semibold me-2"),
+                                    html.Span("Beats after first measure", className="small text-muted"),
+                                ]),
+                                html.Div([
+                                    html.Span("—", id="pulses-after-first-measure", className="fw-semibold me-2"),
+                                    html.Span("Pulses after first measure", className="small text-muted"),
+                                ]),
+                                html.Div("more data to come", className="small text-muted fst-italic"),
+                            ], id="analysis-data-block"),
                             width="auto"
                         ),
                     ], align="end", className="g-3"),
@@ -727,13 +723,10 @@ clientside_callback(
 clientside_callback(
     """
     function(waveform_visible) {
-        const hiddenStyle = { visibility: 'hidden' };
-        const visibleStyle = { visibility: 'visible' };
-        return waveform_visible ? [visibleStyle, visibleStyle] : [hiddenStyle, hiddenStyle];
+        return { visibility: waveform_visible ? 'visible' : 'hidden' };
     }
     """,
-    Output("beats-analysis-block", "style"),
-    Output("pulses-analysis-block", "style"),
+    Output("analysis-data-block", "style"),
     Input("waveform-visible-store", "data"),
 )
 
