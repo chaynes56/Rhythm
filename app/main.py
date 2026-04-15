@@ -20,8 +20,7 @@ from dash.exceptions import PreventUpdate
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-ASSETS_DIR = Path(__file__).resolve().parent / "assets"
-RECORDER_SCRIPT_PATH = ASSETS_DIR / "recorder.js"
+RECORDER_SCRIPT_PATH = Path(__file__).parent / "recorder.js"
 WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.040
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
@@ -321,7 +320,6 @@ def build_beat_indicator_boxes(beats_per_measure: int, measures_per_pattern: int
 app = Dash(
     __name__,
     external_stylesheets=[dbc.themes.BOOTSTRAP],
-    assets_ignore=r"recorder(?:_bundle)?\.js"
 )
 
 app.index_string = f"""
