@@ -14,6 +14,7 @@ import librosa
 import numpy as np
 import plotly.graph_objects as go
 import soundfile as sf
+from scipy.signal import welch as scipy_welch, resample as scipy_resample
 from dash import Dash, dcc, html, Input, Output, State, clientside_callback
 from dash.exceptions import PreventUpdate
 
@@ -24,6 +25,15 @@ WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.040
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
+
+# Spectrum analysis
+FFT_DOWNSAMPLE_RATE = 4000      # Hz  — resample target; Nyquist = 2 kHz
+FFT_MIN_WINDOW_SECONDS = 10.0   # s   — min Welch segment length (~0.1 Hz low-end resolution)
+FFT_MAX_DISPLAY_FREQ_HZ = 1000  # Hz  — upper display limit
+FFT_SEGMENT_OVERLAP = 0.5       # fraction — Welch segment overlap
+FFT_DISPLAY_POINTS = 500        # log-spaced output points for serialisation
+SPECTRUM_GRAPH_HEIGHT_PX = 160  # px
+SPECTRUM_GRAPH_WIDTH_PX = 340   # px
 
 RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(encoding="utf-8").replace("</script>", r"<\/script>")
 
@@ -219,6 +229,66 @@ def serialize_audio_to_base64_wav(y: np.ndarray, sr: int) -> str:
     return f"data:audio/wav;base64,{encoded}"
 
 
+def compute_spectrum(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Compute power spectral density via Welch's method.
+    Downsamples to FFT_DOWNSAMPLE_RATE, uses segments of at least
+    FFT_MIN_WINDOW_SECONDS padded to the next power of two.
+    Returns (freqs, psd) log-spaced over (0, FFT_MAX_DISPLAY_FREQ_HZ].
+    """
+    sr_int = int(round(float(sr)))
+    if sr_int > FFT_DOWNSAMPLE_RATE:
+        n_out = int(round(len(y) * FFT_DOWNSAMPLE_RATE / sr_int))
+        y_ds = scipy_resample(y.astype(np.float32), n_out)
+        sr_ds = FFT_DOWNSAMPLE_RATE
+    else:
+        y_ds = y.astype(np.float32)
+        sr_ds = sr_int
+
+    min_samples = int(FFT_MIN_WINDOW_SECONDS * sr_ds)
+    nperseg = int(2 ** np.ceil(np.log2(max(min_samples, 8))))
+
+    if len(y_ds) < nperseg:
+        y_ds = np.pad(y_ds, (0, nperseg - len(y_ds)))
+
+    noverlap = int(nperseg * FFT_SEGMENT_OVERLAP)
+    freqs_raw, psd_raw = scipy_welch(
+        y_ds, fs=sr_ds, nperseg=nperseg, noverlap=noverlap,
+        window='hann', detrend='constant', scaling='density',
+    )
+
+    mask = (freqs_raw > 0) & (freqs_raw <= FFT_MAX_DISPLAY_FREQ_HZ)
+    freqs_raw = freqs_raw[mask]
+    psd_raw = np.maximum(psd_raw[mask], 1e-24)
+
+    if len(freqs_raw) == 0:
+        return np.array([]), np.array([])
+
+    display_freqs = np.logspace(
+        np.log10(freqs_raw[0]), np.log10(freqs_raw[-1]), FFT_DISPLAY_POINTS
+    )
+    display_psd = np.maximum(np.interp(display_freqs, freqs_raw, psd_raw), 1e-24)
+    return display_freqs, display_psd
+
+
+def build_spectrum_figure(freqs: np.ndarray, psd: np.ndarray) -> go.Figure:
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=freqs, y=psd,
+        mode='lines',
+        line=dict(color='purple', width=1),
+        showlegend=False,
+    ))
+    fig.update_layout(
+        xaxis=dict(type='log', title='Hz'),
+        yaxis=dict(type='log', title='Power'),
+        dragmode='pan',
+        template='plotly_white',
+        margin=dict(l=45, r=10, t=10, b=40),
+    )
+    return fig
+
+
 def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
                           beat_times: np.ndarray, beats_per_measure: int) -> go.Figure:
     duration = len(y) / sr if sr else 0.0
@@ -371,18 +441,30 @@ app.layout = dbc.Container([
                         dbc.Col(
                             html.Div([
                                 html.Div([
-                                    html.Span("—", id="beats-after-first-measure", className="fw-semibold me-2"),
-                                    html.Span("Beats after first measure", className="small text-muted"),
+                                    html.Span("—", id="beat-count", className="fw-semibold me-2"),
+                                    html.Span("Beats", className="small text-muted"),
                                 ]),
                                 html.Div([
-                                    html.Span("—", id="pulses-after-first-measure", className="fw-semibold me-2"),
-                                    html.Span("Pulses after first measure", className="small text-muted"),
+                                    html.Span("—", id="pulse-count", className="fw-semibold me-2"),
+                                    html.Span("Pulses", className="small text-muted"),
                                 ]),
                                 html.Div("more data to come", className="small text-muted fst-italic"),
                             ], id="analysis-data-block"),
                             width="auto"
                         ),
-                    ], align="end", className="g-3"),
+                        dbc.Col(
+                            dcc.Graph(
+                                id="spectrum-graph",
+                                style={
+                                    "height": f"{SPECTRUM_GRAPH_HEIGHT_PX}px",
+                                    "width": f"{SPECTRUM_GRAPH_WIDTH_PX}px",
+                                    "visibility": "hidden",
+                                },
+                                config={"scrollZoom": True, "displayModeBar": False},
+                            ),
+                            width="auto",
+                        ),
+                    ], align="center", className="g-3"),
                 ]),
             ], className="mb-4"),
         ], width=12)
@@ -721,12 +803,17 @@ clientside_callback(
 )
 
 clientside_callback(
-    """
-    function(waveform_visible) {
-        return { visibility: waveform_visible ? 'visible' : 'hidden' };
-    }
+    f"""
+    function(waveform_visible) {{
+        const v = waveform_visible ? 'visible' : 'hidden';
+        return [
+            {{ visibility: v }},
+            {{ height: '{SPECTRUM_GRAPH_HEIGHT_PX}px', width: '{SPECTRUM_GRAPH_WIDTH_PX}px', visibility: v }},
+        ];
+    }}
     """,
     Output("analysis-data-block", "style"),
+    Output("spectrum-graph", "style"),
     Input("waveform-visible-store", "data"),
 )
 
@@ -833,30 +920,39 @@ def update_play_button(playing_value):
 
 
 @app.callback(
-    Output("beats-after-first-measure", "children"),
-    Output("pulses-after-first-measure", "children"),
+    Output("spectrum-graph", "figure"),
     Input("audio-store", "data"),
-    State("tempo-slider", "value"),
-    State("beats-per-measure", "value")
 )
-def update_analysis_counts(audio_json, tempo_value, beats_per_measure_value):
+def update_spectrum(audio_json):
+    if not audio_json:
+        return go.Figure()
+    try:
+        data = json.loads(audio_json)
+        freqs = np.array(data.get("spectrum_freqs", []))
+        psd = np.array(data.get("spectrum_psd", []))
+        if len(freqs) == 0:
+            return go.Figure()
+        return build_spectrum_figure(freqs, psd)
+    except Exception as e:
+        print(f"update_spectrum: {e}")
+        return go.Figure()
+
+
+@app.callback(
+    Output("beat-count", "children"),
+    Output("pulse-count", "children"),
+    Input("audio-store", "data"),
+)
+def update_analysis_counts(audio_json):
     if not audio_json:
         return "—", "—"
 
     try:
         data = json.loads(audio_json)
-        tempo = data.get("tempo", tempo_value) or tempo_value or 120
-        beats_per_measure = data.get("beats_per_measure",
-                                     beats_per_measure_value) or beats_per_measure_value or 4
-        first_measure_duration = (60.0 / float(tempo)) * float(beats_per_measure)
-
-        beat_times = np.array(data.get("metronome_times", []), dtype=float)
-        pulse_times = np.array(data.get("beat_times", []), dtype=float)
-
-        beats_after = int(np.sum(beat_times >= first_measure_duration - 1e-9))
-        pulses_after = int(np.sum(pulse_times >= first_measure_duration - 1e-9))
+        beat_count = len(data.get("metronome_times", []))
+        pulse_count = len(data.get("beat_times", []))
         # TODO add subdivision analysis
-        return str(beats_after), str(pulses_after)
+        return str(beat_count), str(pulse_count)
     except Exception as exc:
         print(f"update_analysis_counts: {exc}")
         return "—", "—"
@@ -922,6 +1018,11 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         if len(y.shape) > 1:
             y = y.mean(axis=1)
         y = trim_audio_tail(np.asarray(y, dtype=np.float32), sr)
+        try:
+            spec_freqs, spec_psd = compute_spectrum(y, sr)
+        except Exception as spec_err:
+            print(f"process_audio: spectrum failed: {spec_err}")
+            spec_freqs, spec_psd = np.array([]), np.array([])
         trimmed_audio_base64 = serialize_audio_to_base64_wav(y, sr)
         y = normalize_waveform_for_display(y)
 
@@ -954,7 +1055,9 @@ def process_audio(base64_audio, tempo, beats_per_measure):
             "tempo": tempo,
             "beats_per_measure": beats_per_measure,
             "metronome_times": metronome_times.tolist(),
-            "beat_times": beat_times.tolist()
+            "beat_times": beat_times.tolist(),
+            "spectrum_freqs": spec_freqs.tolist(),
+            "spectrum_psd": spec_psd.tolist(),
         }
 
         # Log success but don't show message (waveform appearing is enough feedback)
@@ -1051,6 +1154,12 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
 
         if len(y.shape) > 1:
             y = y.mean(axis=1)
+        try:
+            spec_freqs, spec_psd = compute_spectrum(y, sr)
+            data["spectrum_freqs"] = spec_freqs.tolist()
+            data["spectrum_psd"] = spec_psd.tolist()
+        except Exception as spec_err:
+            print(f"load_recording: spectrum failed: {spec_err}")
         y = normalize_waveform_for_display(y)
 
         duration = len(y) / sr
