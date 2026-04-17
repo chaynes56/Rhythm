@@ -445,7 +445,8 @@ app.layout = dbc.Container([
                                     html.Span("Beats", className="small text-muted"),
                                 ]),
                                 html.Div([
-                                    html.Span("—", id="pulse-count", className="fw-semibold me-2"),
+                                    html.Span("—", id="pulse-count",
+                                              className="fw-semibold me-2"),
                                     html.Span("Pulses", className="small text-muted"),
                                 ]),
                                 html.Div("more data to come", className="small text-muted fst-italic"),
