@@ -14,9 +14,9 @@ import librosa
 import numpy as np
 import plotly.graph_objects as go
 import soundfile as sf
-from scipy.signal import welch as scipy_welch, resample as scipy_resample
 from dash import Dash, dcc, html, Input, Output, State, clientside_callback
 from dash.exceptions import PreventUpdate
+from scipy.signal import welch as scipy_welch, resample as scipy_resample
 
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
@@ -27,15 +27,16 @@ WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
 
 # Spectrum analysis
-FFT_DOWNSAMPLE_RATE = 4000      # Hz  — resample target; Nyquist = 2 kHz
-FFT_MIN_WINDOW_SECONDS = 10.0   # s   — min Welch segment length (~0.1 Hz low-end resolution)
+FFT_DOWNSAMPLE_RATE = 4000  # Hz  — resample target; Nyquist = 2 kHz
+FFT_MIN_WINDOW_SECONDS = 10.0  # s — min Welch segment length (~0.1 Hz low-end resolution)
 FFT_MAX_DISPLAY_FREQ_HZ = 1000  # Hz  — upper display limit
-FFT_SEGMENT_OVERLAP = 0.5       # fraction — Welch segment overlap
-FFT_DISPLAY_POINTS = 500        # log-spaced output points for serialisation
+FFT_SEGMENT_OVERLAP = 0.5  # fraction — Welch segment overlap
+FFT_DISPLAY_POINTS = 500  # log-spaced output points for serialization
 SPECTRUM_GRAPH_HEIGHT_PX = 160  # px
-SPECTRUM_GRAPH_WIDTH_PX = 340   # px
+SPECTRUM_GRAPH_WIDTH_PX = 340  # px
 
-RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(encoding="utf-8").replace("</script>", r"<\/script>")
+RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(
+    encoding="utf-8").replace("</script>", r"<\/script>")
 
 
 def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
@@ -45,7 +46,7 @@ def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
     Args:
         audio_bytes: Raw audio bytes from recording
         max_duration: Maximum allowed audio duration in seconds (default 10 min)
-        timeout_seconds: Timeout for librosa.load (default 120 sec for recordings up to 60s)
+        timeout_seconds: Timeout for librosa.load (default 120 sec)
 
     Returns:
         tuple: (y, sr) audio array and sample rate, or None if fails
@@ -56,7 +57,7 @@ def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
 
     def load_with_librosa():
         try:
-            # Detect format from magic bytes
+            # Detect a format from magic bytes
             suffix = '.webm'  # default
             if audio_bytes.startswith(b'RIFF') and b'WAVE' in audio_bytes[:12]:
                 suffix = '.wav'
@@ -180,7 +181,8 @@ def smooth_waveform_for_display(y: np.ndarray,
 
 
 def downsample_waveform_preserve_peaks(time: np.ndarray, y: np.ndarray,
-                                       factor: int = WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR) -> tuple[np.ndarray, np.ndarray]:
+                                       factor: int = WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR) -> \
+tuple[np.ndarray, np.ndarray]:
     """
     Downsample waveform for plotting while preserving local min/max peaks.
     """
@@ -338,7 +340,8 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
     return fig
 
 
-def build_beat_indicator_boxes(beats_per_measure: int, measures_per_pattern: int = 1) -> list[html.Div]:
+def build_beat_indicator_boxes(beats_per_measure: int, measures_per_pattern: int = 1) -> \
+list[html.Div]:
     beats = max(1, int(beats_per_measure or 1))
     measures = max(1, int(measures_per_pattern or 1))
 
@@ -397,7 +400,8 @@ app.index_string = f"""
 
 app.layout = dbc.Container([
     html.Div(
-        html.A("Help", href="https://github.com/chaynes56/Rhythm/blob/main/README.md", target="_blank"),
+        html.A("Help", href="https://github.com/chaynes56/Rhythm/blob/main/README.md",
+               target="_blank"),
         style={"position": "absolute", "top": "10px", "right": "20px", "zIndex": "1000"}
     ),
     dbc.Row([
@@ -409,7 +413,8 @@ app.layout = dbc.Container([
         dbc.Col([
             dcc.Graph(
                 id="waveform-graph",
-                style={"height": "260px", "visibility": "hidden"},  # ~6:1+ on typical desktop widths
+                style={"height": "260px", "visibility": "hidden"},
+                # ~6:1+ on typical desktop widths
                 config={
                     "scrollZoom": True,
                     "displayModeBar": True,
@@ -441,7 +446,8 @@ app.layout = dbc.Container([
                         dbc.Col(
                             html.Div([
                                 html.Div([
-                                    html.Span("—", id="beat-count", className="fw-semibold me-2"),
+                                    html.Span("—", id="beat-count",
+                                              className="fw-semibold me-2"),
                                     html.Span("Beats", className="small text-muted"),
                                 ]),
                                 html.Div([
@@ -449,7 +455,8 @@ app.layout = dbc.Container([
                                               className="fw-semibold me-2"),
                                     html.Span("Pulses", className="small text-muted"),
                                 ]),
-                                html.Div("more data to come", className="small text-muted fst-italic"),
+                                html.Div("more data to come",
+                                         className="small text-muted fst-italic"),
                             ], id="analysis-data-block"),
                             width="auto"
                         ),
@@ -848,7 +855,7 @@ def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern):
     prevent_initial_call=True
 )
 def clear_msg_on_record(n_clicks):
-    """Clear status message when user clicks record button"""
+    """Clear the status message when a user clicks the record button"""
     return ""
 
 
@@ -859,7 +866,7 @@ def clear_msg_on_record(n_clicks):
     prevent_initial_call=True
 )
 def clear_msg_on_play(n_clicks):
-    """Clear status message when user clicks play button"""
+    """Clear status message when a user clicks the play button"""
     return ""
 
 
@@ -870,7 +877,7 @@ def clear_msg_on_play(n_clicks):
     prevent_initial_call=True
 )
 def clear_msg_on_save(n_clicks):
-    """Clear status message when user clicks save button"""
+    """Clear the status message when the user clicks the save button"""
     return ""
 
 
@@ -881,7 +888,7 @@ def clear_msg_on_save(n_clicks):
     prevent_initial_call=True
 )
 def clear_msg_on_load(n_clicks):
-    """Clear status message when user clicks load button"""
+    """Clear the status message when the user clicks the load button"""
     return ""
 
 
@@ -947,7 +954,6 @@ def update_spectrum(audio_json):
 def update_analysis_counts(audio_json):
     if not audio_json:
         return "—", "—"
-
     try:
         data = json.loads(audio_json)
         beat_count = len(data.get("metronome_times", []))
@@ -997,13 +1003,13 @@ def process_audio(base64_audio, tempo, beats_per_measure):
             print(
                 f"process_audio: Loaded with soundfile, sr={sr}, duration={len(y) / sr:.2f}s")
         except Exception as sf_error:
-            # If soundfile fails, try librosa which can handle WebM, OGG, etc.
+            # If the soundfile fails, try librosa which can handle WebM, OGG, etc.
             print(f"Soundfile failed: {sf_error}. Trying librosa...")
 
             # For large recordings, use timeout
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
-                # Don't show error message for auto-stop timeout - just log it
+                # Don't show an error message for auto-stop timeout - just log it
                 print(
                     f"process_audio: Audio loading timeout (likely due to large file size)")
                 return None, False, go.Figure(), ""
@@ -1048,7 +1054,8 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         seconds_per_beat = 60.0 / tempo
         metronome_times = np.arange(0, duration, seconds_per_beat)
 
-        fig = build_waveform_figure(y, sr, metronome_times, beat_times, beats_per_measure)
+        fig = build_waveform_figure(y, sr, metronome_times, beat_times,
+                                    beats_per_measure)
 
         # Prepare data for saving
         save_data = {
@@ -1061,7 +1068,7 @@ def process_audio(base64_audio, tempo, beats_per_measure):
             "spectrum_psd": spec_psd.tolist(),
         }
 
-        # Log success but don't show message (waveform appearing is enough feedback)
+        # Log success but don't show a message (waveform appearing is enough feedback)
         print(
             f"process_audio: Successfully processed recording, duration={duration:.2f}s")
         return json.dumps(save_data), True, fig, ""
@@ -1072,7 +1079,7 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         print(error_msg)
         import traceback
         traceback.print_exc()
-        # Don't show error message to user - just log it
+        # Don't show an error message to the user - just log it
         return None, False, go.Figure(), ""
 
 
@@ -1095,11 +1102,10 @@ def save_recording(n_clicks, audio_json):
     Output("waveform-graph", "figure", allow_duplicate=True),
     Output("status-msg", "children"),
     Input("upload-audio", "contents"),
-    State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
     prevent_initial_call=True
 )
-def load_recording(contents, tempo_slider, beats_per_measure_slider):
+def load_recording(contents, beats_per_measure_slider):
     if not contents:
         return None, False, go.Figure(), ""
 
@@ -1124,7 +1130,7 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
         base64_audio = data["audio"]
         # Set global for playback
         # This will be passed to recorder.js if we use another clientside callback or similar.
-        # But here we are in server side. We need to pass it to JS.
+        # But here we are on the server side. We need to pass it to JS.
         if ',' in base64_audio:
             header, audio_data = base64_audio.split(',')
         else:
@@ -1139,7 +1145,7 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
                 y, sr = sf.read(f)
             print(f"load_recording: Loaded with soundfile, sr={sr}")
         except Exception as sf_error:
-            # If soundfile fails, try librosa which can handle WebM, OGG, etc.
+            # If the soundfile fails, try librosa which can handle WebM, OGG, etc.
             print(f"Soundfile failed: {sf_error}. Trying librosa with timeout...")
 
             # For large recordings, use timeout
@@ -1175,7 +1181,7 @@ def load_recording(contents, tempo_slider, beats_per_measure_slider):
         print(
             f"load_recording: Returning data with {len(metronome_times)} metronome points, {len(beat_times)} beat points")
 
-        # Don't show success message (waveform appearing is enough feedback)
+        # Don't show a success message (waveform appearing is enough feedback)
         return json.dumps(data), True, fig, ""
     except Exception as e:
         print(f"Error loading recording: {e}")
