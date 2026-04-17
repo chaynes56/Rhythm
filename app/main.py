@@ -29,11 +29,12 @@ AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
 # Spectrum analysis
 FFT_DOWNSAMPLE_RATE = 4000  # Hz  — resample target; Nyquist = 2 kHz
 FFT_MIN_WINDOW_SECONDS = 10.0  # s — min Welch segment length (~0.1 Hz low-end resolution)
+FFT_MIN_DISPLAY_FREQ_HZ = 0.5   # Hz  — lower display limit
 FFT_MAX_DISPLAY_FREQ_HZ = 1000  # Hz  — upper display limit
 FFT_SEGMENT_OVERLAP = 0.5  # fraction — Welch segment overlap
 FFT_DISPLAY_POINTS = 500  # log-spaced output points for serialization
 SPECTRUM_GRAPH_HEIGHT_PX = 160  # px
-SPECTRUM_GRAPH_WIDTH_PX = 340  # px
+SPECTRUM_GRAPH_WIDTH_PX = 500  # px FIXME wider
 
 RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(
     encoding="utf-8").replace("</script>", r"<\/script>")
@@ -182,7 +183,7 @@ def smooth_waveform_for_display(y: np.ndarray,
 
 def downsample_waveform_preserve_peaks(time: np.ndarray, y: np.ndarray,
                                        factor: int = WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR) -> \
-tuple[np.ndarray, np.ndarray]:
+        tuple[np.ndarray, np.ndarray]:
     """
     Downsample waveform for plotting while preserving local min/max peaks.
     """
@@ -259,7 +260,7 @@ def compute_spectrum(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
         window='hann', detrend='constant', scaling='density',
     )
 
-    mask = (freqs_raw > 0) & (freqs_raw <= FFT_MAX_DISPLAY_FREQ_HZ)
+    mask = (freqs_raw >= FFT_MIN_DISPLAY_FREQ_HZ) & (freqs_raw <= FFT_MAX_DISPLAY_FREQ_HZ)
     freqs_raw = freqs_raw[mask]
     psd_raw = np.maximum(psd_raw[mask], 1e-24)
 
@@ -282,7 +283,7 @@ def build_spectrum_figure(freqs: np.ndarray, psd: np.ndarray) -> go.Figure:
         showlegend=False,
     ))
     fig.update_layout(
-        xaxis=dict(type='log', title='Hz'),
+        xaxis=dict(type='log', title='Hz', range=[np.log10(FFT_MIN_DISPLAY_FREQ_HZ), np.log10(FFT_MAX_DISPLAY_FREQ_HZ)]),
         yaxis=dict(type='log', title='Power'),
         dragmode='pan',
         template='plotly_white',
@@ -341,7 +342,7 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
 
 
 def build_beat_indicator_boxes(beats_per_measure: int, measures_per_pattern: int = 1) -> \
-list[html.Div]:
+        list[html.Div]:
     beats = max(1, int(beats_per_measure or 1))
     measures = max(1, int(measures_per_pattern or 1))
 
@@ -446,17 +447,19 @@ app.layout = dbc.Container([
                         dbc.Col(
                             html.Div([
                                 html.Div([
-                                    html.Span("—", id="beat-count",
+                                    html.Span("—", id="counts",
                                               className="fw-semibold me-2"),
-                                    html.Span("Beats", className="small text-muted"),
+                                    html.Span("Beats / Pulses",
+                                              className="small text-muted"),
                                 ]),
+                                html.Div("Subdivision deviation time stats",
+                                         className="small text-muted fst-italic"),
                                 html.Div([
                                     html.Span("—", id="pulse-count",
                                               className="fw-semibold me-2"),
-                                    html.Span("Pulses", className="small text-muted"),
+                                    html.Span("mean / std in milliseconds",
+                                              className="small text-muted"),
                                 ]),
-                                html.Div("more data to come",
-                                         className="small text-muted fst-italic"),
                             ], id="analysis-data-block"),
                             width="auto"
                         ),
@@ -947,19 +950,28 @@ def update_spectrum(audio_json):
 
 
 @app.callback(
-    Output("beat-count", "children"),
+    Output("counts", "children"),
     Output("pulse-count", "children"),
     Input("audio-store", "data"),
+    State("subdivisions-per-beat", "value"),
 )
-def update_analysis_counts(audio_json):
+def update_analysis_counts(audio_json, subdivisions_per_beat):
     if not audio_json:
         return "—", "—"
     try:
         data = json.loads(audio_json)
         beat_count = len(data.get("metronome_times", []))
-        pulse_count = len(data.get("beat_times", []))
-        # TODO add subdivision analysis
-        return str(beat_count), str(pulse_count)
+        beat_times = data.get("beat_times", [])
+        pulse_count = len(beat_times)
+        # beats_per_measure = data.get("beats_per_measure")
+        dt = 60 / data.get("tempo") / subdivisions_per_beat  # seconds per subdivision
+        # deviations from the start of each subdivision in milliseconds
+        deviations = np.array([((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
+        mean = deviations.mean()
+        std = deviations.std()
+        maximum = deviations.max()  # TODO display max and median
+        median = np.median(beat_times)
+        return f"{beat_count} / {pulse_count}", f"{round(mean)} / {round(std)}"
     except Exception as exc:
         print(f"update_analysis_counts: {exc}")
         return "—", "—"
