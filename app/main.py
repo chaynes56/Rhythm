@@ -27,14 +27,14 @@ WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
 
 # Spectrum analysis
-FFT_DOWNSAMPLE_RATE = 4000  # Hz  — resample target; Nyquist = 2 kHz
+FFT_DOWNSAMPLE_RATE = 4000  # Hz — resample target; Nyquist = 2 kHz
 FFT_MIN_WINDOW_SECONDS = 10.0  # s — min Welch segment length (~0.1 Hz low-end resolution)
-FFT_MIN_DISPLAY_FREQ_HZ = 0.5   # Hz  — lower display limit
-FFT_MAX_DISPLAY_FREQ_HZ = 1000  # Hz  — upper display limit
+FFT_MIN_DISPLAY_FREQ_HZ = 0.5  # Hz — lower display limit
+FFT_MAX_DISPLAY_FREQ_HZ = 1000  # Hz — upper display limit
 FFT_SEGMENT_OVERLAP = 0.5  # fraction — Welch segment overlap
 FFT_DISPLAY_POINTS = 500  # log-spaced output points for serialization
 SPECTRUM_GRAPH_HEIGHT_PX = 160  # px
-SPECTRUM_GRAPH_WIDTH_PX = 500  # px FIXME wider
+SPECTRUM_GRAPH_WIDTH_PX = 500  # px
 
 RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(
     encoding="utf-8").replace("</script>", r"<\/script>")
