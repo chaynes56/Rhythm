@@ -445,22 +445,10 @@ app.layout = dbc.Container([
                             ),
                         ], width="auto"),
                         dbc.Col(
-                            html.Div([
-                                html.Div([
-                                    html.Span("—", id="counts",
-                                              className="fw-semibold me-2"),
-                                    html.Span("Beats / Pulses",
-                                              className="small text-muted"),
-                                ]),
-                                html.Div("Subdivision deviation time stats",
-                                         className="small text-muted fst-italic"),
-                                html.Div([
-                                    html.Span("—", id="pulse-count",
-                                              className="fw-semibold me-2"),
-                                    html.Span("mean / std in milliseconds",
-                                              className="small text-muted"),
-                                ]),
-                            ], id="analysis-data-block"),
+                            dcc.Markdown(
+                                id="analysis-data-block",
+                                style={"width": "400px", "height": "200px"},
+                            ),
                             width="auto"
                         ),
                         dbc.Col(
@@ -950,31 +938,36 @@ def update_spectrum(audio_json):
 
 
 @app.callback(
-    Output("counts", "children"),
-    Output("pulse-count", "children"),
+    Output("analysis-data-block", "children"),
     Input("audio-store", "data"),
     State("subdivisions-per-beat", "value"),
 )
-def update_analysis_counts(audio_json, subdivisions_per_beat):
+def update_analysis(audio_json, subdivisions_per_beat):
     if not audio_json:
-        return "—", "—"
+        return ""
     try:
         data = json.loads(audio_json)
         beat_count = len(data.get("metronome_times", []))
         beat_times = data.get("beat_times", [])
         pulse_count = len(beat_times)
-        # beats_per_measure = data.get("beats_per_measure")
         dt = 60 / data.get("tempo") / subdivisions_per_beat  # seconds per subdivision
-        # deviations from the start of each subdivision in milliseconds
+        # beats_per_measure = data.get("beats_per_measure")
+        # Deviations from the start of each subdivision in milliseconds
         deviations = np.array([((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
         mean = deviations.mean()
         std = deviations.std()
-        maximum = deviations.max()  # TODO display max and median
-        median = np.median(beat_times)
-        return f"{beat_count} / {pulse_count}", f"{round(mean)} / {round(std)}"
+        maximum = deviations.max()
+        median = np.median(deviations)
+        markdown_text = f"""**{pulse_count}** pulses detected in **{beat_count}** 
+        beats.  \n The following statistics reflect time deviations from  \n the 
+        start of each **{round(dt * 1000)}** millisecond subdivision.  \n **{round(mean)}** 
+        mean, **{round(std)}** standard deviation  \n **{round(median)}** median,
+        **{round(maximum)}** maximum
+        """  # FIXME some stats are wrong, calibrate time offset
+        return markdown_text
     except Exception as exc:
         print(f"update_analysis_counts: {exc}")
-        return "—", "—"
+        return ""
 
 
 @app.callback(
