@@ -26,6 +26,9 @@ WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
 
+# Set to False to disable spectrum computation and hide the spectrum display area
+SHOW_SPECTRUM = True
+
 # Spectrum analysis
 FFT_DOWNSAMPLE_RATE = 4000  # Hz — resample target; Nyquist = 2 kHz
 FFT_MIN_WINDOW_SECONDS = 10.0  # s — min Welch segment length (~0.1 Hz low-end resolution)
@@ -451,7 +454,7 @@ app.layout = dbc.Container([
                             ),
                             width="auto"
                         ),
-                        dbc.Col(
+                        *([dbc.Col(
                             dcc.Graph(
                                 id="spectrum-graph",
                                 style={
@@ -462,7 +465,7 @@ app.layout = dbc.Container([
                                 config={"scrollZoom": True, "displayModeBar": False},
                             ),
                             width="auto",
-                        ),
+                        )] if SHOW_SPECTRUM else []),
                     ], align="center", className="g-3"),
                 ]),
             ], className="mb-4"),
@@ -801,20 +804,31 @@ clientside_callback(
     Input("waveform-visible-store", "data"),
 )
 
-clientside_callback(
-    f"""
-    function(waveform_visible) {{
-        const v = waveform_visible ? 'visible' : 'hidden';
-        return [
-            {{ visibility: v }},
-            {{ height: '{SPECTRUM_GRAPH_HEIGHT_PX}px', width: '{SPECTRUM_GRAPH_WIDTH_PX}px', visibility: v }},
-        ];
-    }}
-    """,
-    Output("analysis-data-block", "style"),
-    Output("spectrum-graph", "style"),
-    Input("waveform-visible-store", "data"),
-)
+if SHOW_SPECTRUM:
+    clientside_callback(
+        f"""
+        function(waveform_visible) {{
+            const v = waveform_visible ? 'visible' : 'hidden';
+            return [
+                {{ visibility: v }},
+                {{ height: '{SPECTRUM_GRAPH_HEIGHT_PX}px', width: '{SPECTRUM_GRAPH_WIDTH_PX}px', visibility: v }},
+            ];
+        }}
+        """,
+        Output("analysis-data-block", "style"),
+        Output("spectrum-graph", "style"),
+        Input("waveform-visible-store", "data"),
+    )
+else:
+    clientside_callback(
+        """
+        function(waveform_visible) {
+            return { visibility: waveform_visible ? 'visible' : 'hidden' };
+        }
+        """,
+        Output("analysis-data-block", "style"),
+        Input("waveform-visible-store", "data"),
+    )
 
 
 # Debug callback to watch audio-data-store changes
@@ -918,23 +932,24 @@ def update_play_button(playing_value):
     return "Play Recording", "success"
 
 
-@app.callback(
-    Output("spectrum-graph", "figure"),
-    Input("audio-store", "data"),
-)
-def update_spectrum(audio_json):
-    if not audio_json:
-        return go.Figure()
-    try:
-        data = json.loads(audio_json)
-        freqs = np.array(data.get("spectrum_freqs", []))
-        psd = np.array(data.get("spectrum_psd", []))
-        if len(freqs) == 0:
+if SHOW_SPECTRUM:
+    @app.callback(
+        Output("spectrum-graph", "figure"),
+        Input("audio-store", "data"),
+    )
+    def update_spectrum(audio_json):
+        if not audio_json:
             return go.Figure()
-        return build_spectrum_figure(freqs, psd)
-    except Exception as e:
-        print(f"update_spectrum: {e}")
-        return go.Figure()
+        try:
+            data = json.loads(audio_json)
+            freqs = np.array(data.get("spectrum_freqs", []))
+            psd = np.array(data.get("spectrum_psd", []))
+            if len(freqs) == 0:
+                return go.Figure()
+            return build_spectrum_figure(freqs, psd)
+        except Exception as e:
+            print(f"update_spectrum: {e}")
+            return go.Figure()
 
 
 @app.callback(
@@ -1030,10 +1045,13 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         if len(y.shape) > 1:
             y = y.mean(axis=1)
         y = trim_audio_tail(np.asarray(y, dtype=np.float32), sr)
-        try:
-            spec_freqs, spec_psd = compute_spectrum(y, sr)
-        except Exception as spec_err:
-            print(f"process_audio: spectrum failed: {spec_err}")
+        if SHOW_SPECTRUM:
+            try:
+                spec_freqs, spec_psd = compute_spectrum(y, sr)
+            except Exception as spec_err:
+                print(f"process_audio: spectrum failed: {spec_err}")
+                spec_freqs, spec_psd = np.array([]), np.array([])
+        else:
             spec_freqs, spec_psd = np.array([]), np.array([])
         trimmed_audio_base64 = serialize_audio_to_base64_wav(y, sr)
         y = normalize_waveform_for_display(y)
@@ -1166,12 +1184,13 @@ def load_recording(contents, beats_per_measure_slider):
 
         if len(y.shape) > 1:
             y = y.mean(axis=1)
-        try:
-            spec_freqs, spec_psd = compute_spectrum(y, sr)
-            data["spectrum_freqs"] = spec_freqs.tolist()
-            data["spectrum_psd"] = spec_psd.tolist()
-        except Exception as spec_err:
-            print(f"load_recording: spectrum failed: {spec_err}")
+        if SHOW_SPECTRUM:
+            try:
+                spec_freqs, spec_psd = compute_spectrum(y, sr)
+                data["spectrum_freqs"] = spec_freqs.tolist()
+                data["spectrum_psd"] = spec_psd.tolist()
+            except Exception as spec_err:
+                print(f"load_recording: spectrum failed: {spec_err}")
         y = normalize_waveform_for_display(y)
 
         duration = len(y) / sr
