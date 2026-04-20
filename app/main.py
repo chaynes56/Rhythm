@@ -25,6 +25,10 @@ WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.040
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
+BEAT_MIN_AMPLITUDE_FRACTION = 0.1  # drop beats below this fraction of the normalized
+# peak
+BEAT_MIN_SPACING_SECONDS = 0.05  # 0.05 drop beats within this many seconds of a prior
+# beat
 
 # Set to False to disable spectrum computation and hide the spectrum display area
 SHOW_SPECTRUM = True
@@ -235,6 +239,36 @@ def serialize_audio_to_base64_wav(y: np.ndarray, sr: int) -> str:
     return f"data:audio/wav;base64,{encoded}"
 
 
+def filter_beat_times(beat_times: np.ndarray, onset_env_norm: np.ndarray,
+                      onset_frames: np.ndarray) -> np.ndarray:
+    """
+    Remove beats that fail either quality criterion (applied in order):
+      1. Onset envelope value at the detected frame < BEAT_MIN_AMPLITUDE_FRACTION of peak.
+         Uses the normalized onset envelope (peaks at 1.0), not the raw waveform, to avoid
+         sampling a near-zero instantaneous value on an oscillating signal.
+      2. Beat follows a prior surviving beat by less than BEAT_MIN_SPACING_SECONDS.
+         (Primary spacing enforcement is via the `wait` arg in onset_detect; this is a safety net.)
+    """
+    if len(beat_times) == 0:
+        return beat_times
+
+    frames = np.clip(onset_frames, 0, len(onset_env_norm) - 1)
+    amplitudes = onset_env_norm[frames]
+
+    kept: list[float] = []
+    last_kept_time = -np.inf
+    for t, amp in zip(beat_times, amplitudes):
+        if amp < BEAT_MIN_AMPLITUDE_FRACTION:
+            print(f"  drop beat t={t:.3f}s onset_env={amp:.3f} (below amplitude threshold {BEAT_MIN_AMPLITUDE_FRACTION})")
+            continue
+        if t - last_kept_time < BEAT_MIN_SPACING_SECONDS:
+            print(f"  drop beat t={t:.3f}s onset_env={amp:.3f} (within {(t - last_kept_time)*1000:.1f}ms of prior beat)")
+            continue
+        kept.append(t)
+        last_kept_time = t
+    return np.array(kept, dtype=np.float64)
+
+
 def compute_spectrum(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
     """
     Compute power spectral density via Welch's method.
@@ -263,7 +297,8 @@ def compute_spectrum(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
         window='hann', detrend='constant', scaling='density',
     )
 
-    mask = (freqs_raw >= FFT_MIN_DISPLAY_FREQ_HZ) & (freqs_raw <= FFT_MAX_DISPLAY_FREQ_HZ)
+    mask = (freqs_raw >= FFT_MIN_DISPLAY_FREQ_HZ) & (
+                freqs_raw <= FFT_MAX_DISPLAY_FREQ_HZ)
     freqs_raw = freqs_raw[mask]
     psd_raw = np.maximum(psd_raw[mask], 1e-24)
 
@@ -286,7 +321,8 @@ def build_spectrum_figure(freqs: np.ndarray, psd: np.ndarray) -> go.Figure:
         showlegend=False,
     ))
     fig.update_layout(
-        xaxis=dict(type='log', title='Hz', range=[np.log10(FFT_MIN_DISPLAY_FREQ_HZ), np.log10(FFT_MAX_DISPLAY_FREQ_HZ)]),
+        xaxis=dict(type='log', title='Hz', range=[np.log10(FFT_MIN_DISPLAY_FREQ_HZ),
+                                                  np.log10(FFT_MAX_DISPLAY_FREQ_HZ)]),
         yaxis=dict(type='log', title='Power'),
         dragmode='pan',
         template='plotly_white',
@@ -1058,19 +1094,25 @@ def process_audio(base64_audio, tempo, beats_per_measure):
 
         # Pulse analysis
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+        onset_env_norm = onset_env / (onset_env.max() + 1e-12)
 
         # These 2 lines of code are causing a worker crash on cloud,
         # log shows numba/llvmlite JIT compile path.
         # tempo_detected, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, bpm=tempo)
         # beat_times = librosa.frames_to_time(beats, sr=sr)
-        # ...So replacing beat tracking with simpler onset detection
+        # ...So replacing beat tracking with simpler onset detection.
+        # `wait` enforces BEAT_MIN_SPACING_SECONDS at source (in frames at hop_length=512).
+        hop_length = 512  # librosa default
+        wait_frames = max(1, int(BEAT_MIN_SPACING_SECONDS * sr / hop_length))
         onset_frames = librosa.onset.onset_detect(
-            onset_envelope=onset_env,
+            onset_envelope=onset_env_norm,
             sr=sr,
             units="frames",
-            backtrack=False
+            backtrack=False,
+            wait=wait_frames,
         )
         beat_times = librosa.frames_to_time(onset_frames, sr=sr)
+        beat_times = filter_beat_times(beat_times, onset_env_norm, onset_frames)
 
         # Metronome points (ideal points based on tempo)
         duration = len(y) / sr
