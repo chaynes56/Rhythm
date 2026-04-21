@@ -32,6 +32,8 @@ BEAT_MIN_SPACING_SECONDS = 0.05  # 0.05 drop beats within this many seconds of a
 
 # Set to False to disable spectrum computation and hide the spectrum display area
 SHOW_SPECTRUM = True
+# Set to False to hide the onset envelope overlay on the waveform
+SHOW_ONSET_ENVELOPE = True
 
 # Spectrum analysis
 FFT_DOWNSAMPLE_RATE = 4000  # Hz — resample target; Nyquist = 2 kHz
@@ -332,7 +334,9 @@ def build_spectrum_figure(freqs: np.ndarray, psd: np.ndarray) -> go.Figure:
 
 
 def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
-                          beat_times: np.ndarray, beats_per_measure: int) -> go.Figure:
+                          beat_times: np.ndarray, beats_per_measure: int,
+                          onset_env_norm: np.ndarray | None = None,
+                          hop_length: int = 512) -> go.Figure:
     duration = len(y) / sr if sr else 0.0
     time = np.linspace(0, duration, num=len(y), endpoint=False)
     time = time - WAVEFORM_DISPLAY_SHIFT_SECONDS
@@ -349,6 +353,19 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
     fig = go.Figure()
     fig.add_trace(go.Scatter(x=time_display, y=y_display, name="Waveform",
                              line=dict(color='blue')))
+
+    if onset_env_norm is not None and len(onset_env_norm) > 0:
+        env_times = librosa.frames_to_time(
+            np.arange(len(onset_env_norm)), sr=sr, hop_length=hop_length
+        ) - WAVEFORM_DISPLAY_SHIFT_SECONDS
+        # Scale envelope to the positive half of the waveform y-range
+        env_scaled = onset_env_norm * y_max
+        fig.add_trace(go.Scatter(
+            x=env_times, y=env_scaled,
+            name="Onset env",
+            line=dict(color='magenta', width=1),
+            opacity=0.7,
+        ))
 
     metronome_colors = ['red' if i % beats_per_measure == 0 else 'orange' for i in
                         range(len(metronome_times))]
@@ -1120,7 +1137,9 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         metronome_times = np.arange(0, duration, seconds_per_beat)
 
         fig = build_waveform_figure(y, sr, metronome_times, beat_times,
-                                    beats_per_measure)
+                                    beats_per_measure,
+                                    onset_env_norm if SHOW_ONSET_ENVELOPE else None,
+                                    hop_length)
 
         # Prepare data for saving
         save_data = {

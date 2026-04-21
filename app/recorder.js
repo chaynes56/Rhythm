@@ -8,6 +8,7 @@ let audioContext;
 let metronomeInterval;
 let metronomeScheduler = null; // Web Audio scheduler for precise timing
 let currentAudio = null;
+let lastPlayNClicks = null;  // null = not yet seen; sync to current n_clicks on first call
 let activeMetronomeNodes = [];
 let activeMetronomeAudios = [];
 let metronomeClickBuffers = null;
@@ -819,7 +820,18 @@ const recorderControls = {
             return false;
         }
 
-        if (!is_playing && window.lastRecordedAudio) {
+        // Only start playback on a genuinely new button click. This prevents
+        // auto-playback after a hot-reload reconnect, where is_playing resets to
+        // false (memory store cleared) but window.lastRecordedAudio still holds
+        // the previous recording and the stale n_clicks value re-fires the callback.
+        // On the very first call after script load we sync lastPlayNClicks to the
+        // current n_clicks without acting, so only a subsequent increment triggers play.
+        if (lastPlayNClicks === null) {
+            lastPlayNClicks = n_clicks || 0;
+            return false;
+        }
+        if (!is_playing && window.lastRecordedAudio && n_clicks > lastPlayNClicks) {
+            lastPlayNClicks = n_clicks;
             currentAudio = new Audio(window.lastRecordedAudio);
             currentAudio.volume = (volume !== undefined && volume !== null) ? volume : 1.0;
             console.log("Playing audio with volume:", currentAudio.volume);
