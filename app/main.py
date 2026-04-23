@@ -21,11 +21,11 @@ from scipy.signal import welch as scipy_welch, resample as scipy_resample
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.040
+WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.061
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
-BEAT_MIN_AMPLITUDE_FRACTION = 0.1  # drop beats below this fraction of the normalized
+BEAT_MIN_AMPLITUDE_FRACTION = 0.4  # drop beats below this fraction of the normalized
 # peak
 BEAT_MIN_SPACING_SECONDS = 0.05  # 0.05 drop beats within this many seconds of a prior
 # beat
@@ -338,8 +338,7 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
                           onset_env_norm: np.ndarray | None = None,
                           hop_length: int = 512) -> go.Figure:
     duration = len(y) / sr if sr else 0.0
-    time = np.linspace(0, duration, num=len(y), endpoint=False)
-    time = time - WAVEFORM_DISPLAY_SHIFT_SECONDS
+    time = np.linspace(0, duration, num=len(y), endpoint=False) - WAVEFORM_DISPLAY_SHIFT_SECONDS
     y_for_display = smooth_waveform_for_display(y)
     time_display, y_display = downsample_waveform_preserve_peaks(time, y_for_display)
 
@@ -1130,6 +1129,7 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         )
         beat_times = librosa.frames_to_time(onset_frames, sr=sr)
         beat_times = filter_beat_times(beat_times, onset_env_norm, onset_frames)
+        beat_times = beat_times - WAVEFORM_DISPLAY_SHIFT_SECONDS
 
         # Metronome points (ideal points based on tempo)
         duration = len(y) / sr
