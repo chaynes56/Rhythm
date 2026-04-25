@@ -1008,6 +1008,19 @@ if SHOW_SPECTRUM:
             return go.Figure()
 
 
+clientside_callback(
+    """
+    function(data) {
+        if (!data) return window.dash_clientside.no_update;
+        return "Analyzing\u2026";
+    }
+    """,
+    Output("analysis-data-block", "children", allow_duplicate=True),
+    Input("audio-data-store", "data"),
+    prevent_initial_call=True,
+)
+
+
 @app.callback(
     Output("analysis-data-block", "children"),
     Input("audio-store", "data"),
