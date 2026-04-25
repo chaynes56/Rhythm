@@ -21,7 +21,10 @@ The Analysis section is generally of more interest than the waveform, but wavefo
 inspection may on occasion be useful. A mouse (or touch) drag can move the waveform 
 around. To the right of the waveform, above its legend, are five widgets allowing
 detailed inspection. After clicking (or touching) the zoom feature, you can select 
-(or pinch) a portion of the waveform to be inspected closely .  
+(or pinch) a portion of the waveform to be inspected closely.  
+
+Recording length is limited to 10 minutes. A variety of factors make significantly
+longer recordings difficult, especially with mobile devices. 
 
 Thanks to RhythmArise for the [patterns](https://github.com/RhythmArise/Patterns). 
 

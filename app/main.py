@@ -341,6 +341,9 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
     time = np.linspace(0, duration, num=len(y), endpoint=False) - WAVEFORM_DISPLAY_SHIFT_SECONDS
     y_for_display = smooth_waveform_for_display(y)
     time_display, y_display = downsample_waveform_preserve_peaks(time, y_for_display)
+    y_peak = float(np.max(np.abs(y_display)))
+    if y_peak > 1e-12:
+        y_display = (y_display / y_peak).astype(np.float32)
 
     if y_display.size == 0:
         y_display = np.array([0.0], dtype=np.float32)
@@ -1109,7 +1112,11 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         y = normalize_waveform_for_display(y)
 
         # Pulse analysis
-        onset_env = librosa.onset.onset_strength(y=y, sr=sr)
+        # Scale hop_length and n_fft to preserve ~11.6ms/frame resolution and ~46ms window
+        # across sample rates (maintains the 4:1 n_fft/hop_length ratio from the 44100 Hz default).
+        hop_length = max(64, int(512 * sr / 44100))
+        n_fft = hop_length * 4
+        onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length, n_fft=n_fft)
         onset_env_norm = onset_env / (onset_env.max() + 1e-12)
 
         # These 2 lines of code are causing a worker crash on cloud,
@@ -1117,18 +1124,20 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         # tempo_detected, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, bpm=tempo)
         # beat_times = librosa.frames_to_time(beats, sr=sr)
         # ...So replacing beat tracking with simpler onset detection.
-        # `wait` enforces BEAT_MIN_SPACING_SECONDS at source (in frames at hop_length=512).
-        hop_length = 512  # librosa default
+        # `wait` enforces BEAT_MIN_SPACING_SECONDS at source (in frames at hop_length).
         wait_frames = max(1, int(BEAT_MIN_SPACING_SECONDS * sr / hop_length))
         onset_frames = librosa.onset.onset_detect(
             onset_envelope=onset_env_norm,
             sr=sr,
+            hop_length=hop_length,
             units="frames",
             backtrack=False,
             wait=wait_frames,
         )
-        beat_times = librosa.frames_to_time(onset_frames, sr=sr)
+        beat_times = librosa.frames_to_time(onset_frames, sr=sr, hop_length=hop_length)
+        print(f"process_audio: onset_detect found {len(onset_frames)} frames, beat_times range [{beat_times.min():.2f}, {beat_times.max():.2f}]s" if len(onset_frames) else "process_audio: onset_detect found 0 frames")
         beat_times = filter_beat_times(beat_times, onset_env_norm, onset_frames)
+        print(f"process_audio: after filter: {len(beat_times)} beats")
         beat_times = beat_times - WAVEFORM_DISPLAY_SHIFT_SECONDS
 
         # Metronome points (ideal points based on tempo)

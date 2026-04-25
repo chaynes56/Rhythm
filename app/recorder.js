@@ -526,9 +526,24 @@ function configureMediaRecorder(stream) {
         const decodeCtx = new (window.AudioContext || window.webkitAudioContext)();
         reader.readAsArrayBuffer(audioBlob);
         reader.onloadend = () => {
+            const RECORD_SAMPLE_RATE = 4000;
+            const RECORD_LPF_HZ = 1800;
+
             decodeCtx.decodeAudioData(reader.result).then((audioBuffer) => {
-                const rawData = audioBuffer.getChannelData(0);
-                const wavData = encodeWAV(rawData, audioBuffer.sampleRate);
+                const targetLength = Math.ceil(audioBuffer.duration * RECORD_SAMPLE_RATE);
+                const offlineCtx = new OfflineAudioContext(1, targetLength, RECORD_SAMPLE_RATE);
+                const source = offlineCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                const lpf = offlineCtx.createBiquadFilter();
+                lpf.type = 'lowpass';
+                lpf.frequency.value = RECORD_LPF_HZ;
+                source.connect(lpf);
+                lpf.connect(offlineCtx.destination);
+                source.start();
+                return offlineCtx.startRendering();
+            }).then((renderedBuffer) => {
+                const rawData = renderedBuffer.getChannelData(0);
+                const wavData = encodeWAV(rawData, RECORD_SAMPLE_RATE);
                 const wavBlob = new Blob([wavData], { type: 'audio/wav' });
 
                 const wavReader = new FileReader();
@@ -581,13 +596,13 @@ function beginActiveRecording(requestId) {
         console.log('MediaRecorder started with timeslice=100ms after measure delay');
         setRecordingPhase('recording');
 
-        const maxRecordingTime = 60000;
-        const warningTime = 55000;
+        const maxRecordingTime = 600000;
+        const warningTime = 570000;
         let warningGiven = false;
 
         recordingTimeout = setTimeout(() => {
             if (mediaRecorder && mediaRecorder.state === 'recording') {
-                console.log('Automatic stop: Recording reached maximum time limit (60 seconds)');
+                console.log('Automatic stop: Recording reached maximum time limit (10 minutes)');
                 window.recorderControls.playStopBeep();
                 mediaRecorder.stop();
                 cleanupRecordingStream();
@@ -603,7 +618,7 @@ function beginActiveRecording(requestId) {
         recordingWarningTimeout = setTimeout(() => {
             if (mediaRecorder && mediaRecorder.state === 'recording' && !warningGiven) {
                 warningGiven = true;
-                console.log('Warning: Recording will auto-stop in 5 seconds');
+                console.log('Warning: Recording will auto-stop in 30 seconds');
                 window.recorderControls.playWarningBeep();
             }
         }, warningTime);
