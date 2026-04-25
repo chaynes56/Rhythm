@@ -21,7 +21,7 @@ from scipy.signal import welch as scipy_welch, resample as scipy_resample
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.061
+WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.056
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
@@ -392,7 +392,8 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
         xaxis_title="Time (s)",
         yaxis_title="Normalized Amplitude",
         yaxis_range=[-1.1, 1.1],
-        dragmode="pan",
+        yaxis_fixedrange=True,
+        dragmode="zoom",
         template="plotly_white",
         margin=dict(l=40, r=20, t=20, b=40),
     )
@@ -1010,33 +1011,52 @@ if SHOW_SPECTRUM:
 @app.callback(
     Output("analysis-data-block", "children"),
     Input("audio-store", "data"),
+    Input("waveform-graph", "relayoutData"),
     State("subdivisions-per-beat", "value"),
 )
-def update_analysis(audio_json, subdivisions_per_beat):
+def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
     if not audio_json:
         return ""
     try:
         data = json.loads(audio_json)
-        beat_count = len(data.get("metronome_times", []))
-        beat_times = data.get("beat_times", [])
+        all_beat_times = data.get("beat_times", [])
+        all_metronome_times = data.get("metronome_times", [])
+
+        # Determine zoom window from relayoutData; fall back to full recording.
+        t_start, t_end = None, None
+        if relayout_data:
+            if "xaxis.range[0]" in relayout_data:
+                t_start = relayout_data["xaxis.range[0]"]
+                t_end = relayout_data["xaxis.range[1]"]
+            elif "xaxis.range" in relayout_data:
+                t_start, t_end = relayout_data["xaxis.range"]
+
+        if t_start is not None and t_end is not None:
+            beat_times = [t for t in all_beat_times if t_start <= t <= t_end]
+            metronome_times = [t for t in all_metronome_times if t_start <= t <= t_end]
+            window_note = f" (zoomed window {t_start:.1f}–{t_end:.1f}s)"
+        else:
+            beat_times = all_beat_times
+            metronome_times = all_metronome_times
+            window_note = ""
+
+        beat_count = len(metronome_times)
         pulse_count = len(beat_times)
         dt = 60 / data.get("tempo") / subdivisions_per_beat  # seconds per subdivision
-        # beats_per_measure = data.get("beats_per_measure")
-        # Deviations from the start of each subdivision in milliseconds
+        if pulse_count == 0:
+            return f"**0** pulses detected in **{beat_count}** beats{window_note}."
         deviations = np.array([((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
         mean = deviations.mean()
         std = deviations.std()
         maximum = deviations.max()
         median = np.median(deviations)
-        markdown_text = f"""**{pulse_count}** pulses detected in **{beat_count}** 
-        beats.  \n The following statistics reflect time deviations from  \n the 
-        start of each **{round(dt * 1000)}** millisecond subdivision.  \n **{round(mean)}** 
-        mean, **{round(std)}** standard deviation  \n **{round(median)}** median,
-        **{round(maximum)}** maximum
+        markdown_text = f"""**{pulse_count}** pulses detected in **{beat_count}** beats{window_note}.  \n
+The following statistics reflect time deviations from the start of each **{round(dt * 1000)}** ms subdivision.  \n
+**{round(mean)}** mean, **{round(std)}** std dev, **{round(median)}** median, **{round(maximum)}** maximum (ms)
         """  # FIXME some stats are wrong, calibrate time offset
         return markdown_text
     except Exception as exc:
-        print(f"update_analysis_counts: {exc}")
+        print(f"update_analysis: {exc}")
         return ""
 
 

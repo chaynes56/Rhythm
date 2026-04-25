@@ -18,13 +18,13 @@ of each measure (that does not also start a pattern), and optionally a high tone
 on each beat that does not start a measure.
 
 The Analysis section is generally of more interest than the waveform, but waveform 
-inspection may on occasion be useful. A mouse (or touch) drag can move the waveform 
-around. To the right of the waveform, above its legend, are five widgets allowing
-detailed inspection. After clicking (or touching) the zoom feature, you can select 
-(or pinch) a portion of the waveform to be inspected closely.  
+inspection may be useful. A mouse (or touch) drag in the waveform selects a portion 
+for zoomed display and the statistics are recomputed for that segment of time. 
+To return to the full waveform, double click the display or tap the home button in 
+the zoom toolbar above the legend to the right of the waveform.  
 
-Recording length is limited to 10 minutes. A variety of factors make significantly
-longer recordings difficult, especially with mobile devices. 
+Recording length is limited to 10 minutes. A variety of factors make 
+longer recordings problematic, especially with mobile devices. 
 
 Thanks to RhythmArise for the [patterns](https://github.com/RhythmArise/Patterns). 
 

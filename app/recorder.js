@@ -32,7 +32,7 @@ let metronomeState = {
     hiToneOn: true
 };
 let toneFrequency = {
-    low: 220,
+    low: 294,
     mid: 440,
     high: 880
 };
