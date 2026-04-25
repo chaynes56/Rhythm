@@ -2,6 +2,8 @@ if (!window.dash_clientside) {
     window.dash_clientside = {};
 }
 
+const METRONOME_TONE_DURATION_S = 0.04; // seconds
+
 let mediaRecorder;
 let audioChunks = [];
 let audioContext;
@@ -34,7 +36,7 @@ let metronomeState = {
 let toneFrequency = {
     low: 294,
     mid: 440,
-    high: 880
+    high: 587
 };
 
 // Diagnostics: Track recording buffer health
@@ -268,7 +270,7 @@ function playScheduledTone(scheduledTime = null) {
             gain.gain.cancelScheduledValues(toneTime);
             gain.gain.setValueAtTime(0.0001, toneTime);
             gain.gain.linearRampToValueAtTime(metronomeState.volume, toneTime + 0.005);
-            gain.gain.exponentialRampToValueAtTime(0.0001, toneTime + 0.1);
+            gain.gain.exponentialRampToValueAtTime(0.0001, toneTime + METRONOME_TONE_DURATION_S);
 
             source.connect(gain);
             gain.connect(ctx.destination);
@@ -735,7 +737,7 @@ function shouldUseHtmlAudioMetronome() {
     return useHtmlFallback;
 }
 
-function createClickSamples(frequency, duration = 0.1, sampleRate = 44100) {
+function createClickSamples(frequency, duration = METRONOME_TONE_DURATION_S, sampleRate = 44100) {
     const frameCount = Math.floor(sampleRate * duration);
     const samples = new Float32Array(frameCount);
 
@@ -766,7 +768,7 @@ function ensureMetronomeAudioUrls() {
     };
 }
 
-function createClickBuffer(ctx, frequency, duration = 0.1) {
+function createClickBuffer(ctx, frequency, duration = METRONOME_TONE_DURATION_S) {
     const sampleRate = ctx.sampleRate;
     const frameCount = Math.floor(sampleRate * duration);
     const buffer = ctx.createBuffer(1, frameCount, sampleRate);
