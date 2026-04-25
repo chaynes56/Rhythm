@@ -599,13 +599,11 @@ function beginActiveRecording(requestId) {
         setRecordingPhase('recording');
 
         const maxRecordingTime = 600000;
-        const warningTime = 570000;
-        let warningGiven = false;
 
         recordingTimeout = setTimeout(() => {
             if (mediaRecorder && mediaRecorder.state === 'recording') {
                 console.log('Automatic stop: Recording reached maximum time limit (10 minutes)');
-                window.recorderControls.playStopBeep();
+                window.recorderControls.playEndAlarm();
                 mediaRecorder.stop();
                 cleanupRecordingStream();
                 if (metronomeAutoStartedByRecording) {
@@ -616,14 +614,6 @@ function beginActiveRecording(requestId) {
                 window.recorderControls.showAutoStopMessage();
             }
         }, maxRecordingTime);
-
-        recordingWarningTimeout = setTimeout(() => {
-            if (mediaRecorder && mediaRecorder.state === 'recording' && !warningGiven) {
-                warningGiven = true;
-                console.log('Warning: Recording will auto-stop in 30 seconds');
-                window.recorderControls.playWarningBeep();
-            }
-        }, warningTime);
     } catch (err) {
         console.error('Error starting delayed recording:', err);
         cancelPendingRecording();
@@ -893,71 +883,35 @@ const recorderControls = {
         return false;
     },
 
-    playStopBeep: function() {
+    playEndAlarm: function() {
         try {
             if (!audioContext || audioContext.state === 'closed') {
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
             }
-
             if (audioContext.state === 'suspended') {
                 audioContext.resume();
             }
-
-            const osc = audioContext.createOscillator();
-            const gain = audioContext.createGain();
-
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(800, audioContext.currentTime);
-            osc.frequency.linearRampToValueAtTime(1200, audioContext.currentTime + 0.5);
-
-            gain.gain.setValueAtTime(0.5, audioContext.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
-
-            osc.connect(gain);
-            gain.connect(audioContext.destination);
-
-            osc.start(audioContext.currentTime);
-            osc.stop(audioContext.currentTime + 0.5);
-
-            console.log("Played stop beep");
-        } catch (err) {
-            console.error("Error playing stop beep:", err);
-        }
-    },
-
-    playWarningBeep: function() {
-        try {
-            if (!audioContext || audioContext.state === 'closed') {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }
-
-            if (audioContext.state === 'suspended') {
-                audioContext.resume();
-            }
-
-            const playBeep = (frequency, delay) => {
+            // Three descending tones — loud and unmistakable
+            const tones = [
+                { freq: 1200, delay: 0.0,  dur: 0.25 },
+                { freq: 900,  delay: 0.3,  dur: 0.25 },
+                { freq: 600,  delay: 0.6,  dur: 0.5  },
+            ];
+            tones.forEach(({ freq, delay, dur }) => {
                 const osc = audioContext.createOscillator();
                 const gain = audioContext.createGain();
-
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(frequency, audioContext.currentTime + delay);
-
-                gain.gain.setValueAtTime(0.3, audioContext.currentTime + delay);
-                gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + delay + 0.15);
-
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(freq, audioContext.currentTime + delay);
+                gain.gain.setValueAtTime(0.8, audioContext.currentTime + delay);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + delay + dur);
                 osc.connect(gain);
                 gain.connect(audioContext.destination);
-
                 osc.start(audioContext.currentTime + delay);
-                osc.stop(audioContext.currentTime + delay + 0.15);
-            };
-
-            playBeep(1000, 0);
-            playBeep(1200, 0.2);
-
-            console.log("Played warning beep");
+                osc.stop(audioContext.currentTime + delay + dur);
+            });
+            console.log("Played end alarm");
         } catch (err) {
-            console.error("Error playing warning beep:", err);
+            console.error("Error playing end alarm:", err);
         }
     },
 
@@ -1016,8 +970,7 @@ if (typeof window !== 'undefined') {
         toggleRecording:    function() { console.error("recorder not initialized"); return false; },
         playAudio:          function() { console.error("recorder not initialized"); return false; },
         toggleMetronome:    function() { console.error("recorder not initialized"); return false; },
-        playStopBeep:       function() {},
-        playWarningBeep:    function() {},
+        playEndAlarm:       function() {},
         showAutoStopMessage:function() {}
     };
     window.dash_clientside = window.dash_clientside || {};

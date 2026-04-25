@@ -27,6 +27,7 @@ the zoom toolbar above the legend to the right of the waveform.
 Recording length is limited to 10 minutes. A variety of factors make 
 longer recordings problematic, especially with mobile devices. 
 
-Thanks to [RhythmArise](https://rhythmarise.com) for the [patterns](https://github.com/RhythmArise/Patterns). 
+Thanks to Julian Douglas of  [RhythmArise](https://rhythmarise.com) for the [patterns]
+(https://github.com/RhythmArise/Patterns). 
 
 Please report any issues or suggestions to the [issue tracker](https://github.com/chaynes56/Rhythm/issues).

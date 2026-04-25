@@ -30,9 +30,9 @@ BEAT_MIN_AMPLITUDE_FRACTION = 0.4  # drop beats below this fraction of the norma
 BEAT_MIN_SPACING_SECONDS = 0.05  # 0.05 drop beats within this many seconds of a prior
 # beat
 
-# Set to False to disable spectrum computation and hide the spectrum display area
+# False to disable spectrum computation and hide the spectrum display area
 SHOW_SPECTRUM = True
-# Set to False to hide the onset envelope overlay on the waveform
+# False to hide the onset envelope overlay on the waveform
 SHOW_ONSET_ENVELOPE = True
 
 # Spectrum analysis
@@ -261,10 +261,12 @@ def filter_beat_times(beat_times: np.ndarray, onset_env_norm: np.ndarray,
     last_kept_time = -np.inf
     for t, amp in zip(beat_times, amplitudes):
         if amp < BEAT_MIN_AMPLITUDE_FRACTION:
-            print(f"  drop beat t={t:.3f}s onset_env={amp:.3f} (below amplitude threshold {BEAT_MIN_AMPLITUDE_FRACTION})")
+            print(
+                f"  drop beat t={t:.3f}s onset_env={amp:.3f} (below amplitude threshold {BEAT_MIN_AMPLITUDE_FRACTION})")
             continue
         if t - last_kept_time < BEAT_MIN_SPACING_SECONDS:
-            print(f"  drop beat t={t:.3f}s onset_env={amp:.3f} (within {(t - last_kept_time)*1000:.1f}ms of prior beat)")
+            print(
+                f"  drop beat t={t:.3f}s onset_env={amp:.3f} (within {(t - last_kept_time) * 1000:.1f}ms of prior beat)")
             continue
         kept.append(t)
         last_kept_time = t
@@ -300,7 +302,7 @@ def compute_spectrum(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
     )
 
     mask = (freqs_raw >= FFT_MIN_DISPLAY_FREQ_HZ) & (
-                freqs_raw <= FFT_MAX_DISPLAY_FREQ_HZ)
+            freqs_raw <= FFT_MAX_DISPLAY_FREQ_HZ)
     freqs_raw = freqs_raw[mask]
     psd_raw = np.maximum(psd_raw[mask], 1e-24)
 
@@ -336,9 +338,11 @@ def build_spectrum_figure(freqs: np.ndarray, psd: np.ndarray) -> go.Figure:
 def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
                           beat_times: np.ndarray, beats_per_measure: int,
                           onset_env_norm: np.ndarray | None = None,
-                          hop_length: int = 512) -> go.Figure:
+                          hop_length: int = 512,
+                          measures_per_pattern: int = 1) -> go.Figure:
     duration = len(y) / sr if sr else 0.0
-    time = np.linspace(0, duration, num=len(y), endpoint=False) - WAVEFORM_DISPLAY_SHIFT_SECONDS
+    time = np.linspace(0, duration, num=len(y),
+                       endpoint=False) - WAVEFORM_DISPLAY_SHIFT_SECONDS
     y_for_display = smooth_waveform_for_display(y)
     time_display, y_display = downsample_waveform_preserve_peaks(time, y_for_display)
     y_peak = float(np.max(np.abs(y_display)))
@@ -369,8 +373,14 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
             opacity=0.7,
         ))
 
-    metronome_colors = ['red' if i % beats_per_measure == 0 else 'orange' for i in
-                        range(len(metronome_times))]
+    mpp = max(1, int(measures_per_pattern or 1))
+    pattern_len = beats_per_measure * mpp
+    metronome_colors = [
+        'red' if i % pattern_len == 0 else
+        'orange' if i % beats_per_measure == 0 else
+        'royalblue'
+        for i in range(len(metronome_times))
+    ]
     fig.add_trace(go.Scatter(
         x=metronome_times,
         y=[y_max * 1.1 if i % beats_per_measure == 0 else y_max * 1.05 for i in
@@ -1007,7 +1017,6 @@ if SHOW_SPECTRUM:
             print(f"update_spectrum: {e}")
             return go.Figure()
 
-
 clientside_callback(
     """
     function(data) {
@@ -1035,7 +1044,7 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         all_beat_times = data.get("beat_times", [])
         all_metronome_times = data.get("metronome_times", [])
 
-        # Determine zoom window from relayoutData; fall back to full recording.
+        # Determine a zoom window from relayoutData; fall back to full recording.
         t_start, t_end = None, None
         if relayout_data:
             if "xaxis.range[0]" in relayout_data:
@@ -1066,7 +1075,7 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         markdown_text = f"""**{pulse_count}** pulses detected in **{beat_count}** beats{window_note}.  \n
 The following statistics reflect time deviations from the start of each **{round(dt * 1000)}** ms subdivision.  \n
 **{round(mean)}** mean, **{round(std)}** std dev, **{round(median)}** median, **{round(maximum)}** maximum (ms)
-        """  # FIXME some stats are wrong, calibrate time offset
+        """
         return markdown_text
     except Exception as exc:
         print(f"update_analysis: {exc}")
@@ -1081,9 +1090,10 @@ The following statistics reflect time deviations from the start of each **{round
     Input("audio-data-store", "data"),
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
+    State("measures-per-pattern", "value"),
     prevent_initial_call=True
 )
-def process_audio(base64_audio, tempo, beats_per_measure):
+def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern):
     print(f"\n{'=' * 60}")
     print(f"PROCESS_AUDIO CALLBACK TRIGGERED!")
     print(f"audio_len={len(base64_audio) if base64_audio else 0}")
@@ -1123,7 +1133,8 @@ def process_audio(base64_audio, tempo, beats_per_measure):
                 return None, False, go.Figure(), ""
 
             if not isinstance(result, tuple) or result[0] is None or result[1] is None:
-                return None, False, go.Figure(), "Error: Failed to process audio. Recording may be corrupted or in unsupported format."
+                msg = "Error: Failed to process audio. Recording may be corrupted or in unsupported format."
+                return None, False, go.Figure(), msg
 
             y, sr = result
             print(
@@ -1146,10 +1157,12 @@ def process_audio(base64_audio, tempo, beats_per_measure):
 
         # Pulse analysis
         # Scale hop_length and n_fft to preserve ~11.6ms/frame resolution and ~46ms window
-        # across sample rates (maintains the 4:1 n_fft/hop_length ratio from the 44100 Hz default).
+        # across sample rates (maintains the 4:1 n_fft/hop_length ratio from the
+        # 44,100 Hz default).
         hop_length = max(64, int(512 * sr / 44100))
         n_fft = hop_length * 4
-        onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length, n_fft=n_fft)
+        onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
+                                                 n_fft=n_fft)
         onset_env_norm = onset_env / (onset_env.max() + 1e-12)
 
         # These 2 lines of code are causing a worker crash on cloud,
@@ -1157,7 +1170,7 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         # tempo_detected, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, bpm=tempo)
         # beat_times = librosa.frames_to_time(beats, sr=sr)
         # ...So replacing beat tracking with simpler onset detection.
-        # `wait` enforces BEAT_MIN_SPACING_SECONDS at source (in frames at hop_length).
+        # `wait` enforces BEAT_MIN_SPACING_SECONDS at a source (in frames at hop_length).
         wait_frames = max(1, int(BEAT_MIN_SPACING_SECONDS * sr / hop_length))
         onset_frames = librosa.onset.onset_detect(
             onset_envelope=onset_env_norm,
@@ -1168,7 +1181,9 @@ def process_audio(base64_audio, tempo, beats_per_measure):
             wait=wait_frames,
         )
         beat_times = librosa.frames_to_time(onset_frames, sr=sr, hop_length=hop_length)
-        print(f"process_audio: onset_detect found {len(onset_frames)} frames, beat_times range [{beat_times.min():.2f}, {beat_times.max():.2f}]s" if len(onset_frames) else "process_audio: onset_detect found 0 frames")
+        print(
+            f"process_audio: onset_detect found {len(onset_frames)} frames, beat_times range [{beat_times.min():.2f}, {beat_times.max():.2f}]s" if len(
+                onset_frames) else "process_audio: onset_detect found 0 frames")
         beat_times = filter_beat_times(beat_times, onset_env_norm, onset_frames)
         print(f"process_audio: after filter: {len(beat_times)} beats")
         beat_times = beat_times - WAVEFORM_DISPLAY_SHIFT_SECONDS
@@ -1181,13 +1196,15 @@ def process_audio(base64_audio, tempo, beats_per_measure):
         fig = build_waveform_figure(y, sr, metronome_times, beat_times,
                                     beats_per_measure,
                                     onset_env_norm if SHOW_ONSET_ENVELOPE else None,
-                                    hop_length)
+                                    hop_length,
+                                    measures_per_pattern)
 
         # Prepare data for saving
         save_data = {
             "audio": trimmed_audio_base64,
             "tempo": tempo,
             "beats_per_measure": beats_per_measure,
+            "measures_per_pattern": measures_per_pattern,
             "metronome_times": metronome_times.tolist(),
             "beat_times": beat_times.tolist(),
             "spectrum_freqs": spec_freqs.tolist(),
@@ -1301,7 +1318,9 @@ def load_recording(contents, beats_per_measure_slider):
         metronome_times = np.array(data.get("metronome_times", []))
         beat_times = np.array(data.get("beat_times", []))
         bpm = data.get("beats_per_measure", beats_per_measure_slider)
-        fig = build_waveform_figure(y, sr, metronome_times, beat_times, bpm)
+        mpp = data.get("measures_per_pattern", 1)
+        fig = build_waveform_figure(y, sr, metronome_times, beat_times, bpm,
+                                    measures_per_pattern=mpp)
 
         print(
             f"load_recording: Successfully processed audio, duration={duration:.2f}s, sr={sr}")
