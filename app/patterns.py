@@ -3,7 +3,7 @@
 
 # Thanks to https://rhythmarise.com/rhythm-vocabulary/ for these patterns.
 
-voicing_key = {
+voicing_code = {  # voicing characters are the keys below
     'x': 'any',
     'B': 'base',
     'l': 'low',
@@ -18,8 +18,9 @@ voicing_key = {
 # by one letter for each measure subdivision. A space follows these letters
 # for readability unless the beat integer has two digits. A pattern line is a
 # sequence of pillars that line up with the corresponding subdivisions letters or
-# beat integer. Each pillar is represented by a single character from voicing_key.
+# beat integer. Each pillar is represented by a voicing character other than space.
 # Multiple pattern lines in a measure line group share the same subdivision line.
+# TODO add more patterns
 patterns_text = """
 3,3,2 (tresillo)
 1 e & a 2 e & a
@@ -53,13 +54,17 @@ B x x x B x x x B x x x B x x x
 1 & 2 & 3 & 4 & 5 & 6 &
 B x B x B x B x B x B x
 """
-# TODO add more patterns
 
-# TODO process text
-# dict: name -> list(measure_group)
+
 # measure_group: { beats: int,
 #                  subdivisions_per_beat: int,
 #                  patterns: list(pattern_string)
 #                }
-# pattern_string: sequence of voicing characters
-patterns = patterns_text
+# pattern_string: string of voicing characters of length subdivisions_per_beat * beats
+def make_patterns(text):  # returns dict: name -> list(measure_group)
+    patterns = {}
+    # TODO process text
+    return patterns
+
+
+patterns = make_patterns(patterns_text)

@@ -6,6 +6,7 @@ import io
 import json
 import os
 import tempfile
+import time
 import warnings
 from pathlib import Path
 
@@ -14,14 +15,14 @@ import librosa
 import numpy as np
 import plotly.graph_objects as go
 import soundfile as sf
-from dash import Dash, dcc, html, Input, Output, State, clientside_callback
+from dash import Dash, ctx, dcc, html, Input, Output, State, clientside_callback
 from dash.exceptions import PreventUpdate
 from scipy.signal import welch as scipy_welch, resample as scipy_resample
 
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.056
+WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.065
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
@@ -1045,8 +1046,9 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         all_metronome_times = data.get("metronome_times", [])
 
         # Determine a zoom window from relayoutData; fall back to full recording.
+        # Ignore stale zoom if triggered by new audio arriving.
         t_start, t_end = None, None
-        if relayout_data:
+        if relayout_data and ctx.triggered_id != "audio-store":
             if "xaxis.range[0]" in relayout_data:
                 t_start = relayout_data["xaxis.range[0]"]
                 t_end = relayout_data["xaxis.range[1]"]
@@ -1074,7 +1076,7 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         median = np.median(deviations)
         markdown_text = f"""**{pulse_count}** pulses detected in **{beat_count}** beats{window_note}.  \n
 The following statistics reflect time deviations from the start of each **{round(dt * 1000)}** ms subdivision.  \n
-**{round(mean)}** mean, **{round(std)}** std dev, **{round(median)}** median, **{round(maximum)}** maximum (ms)
+**{round(mean)}** mean, **{round(median)}** median, **{round(std)}** std dev, **{round(maximum)}** maximum (ms)
         """
         return markdown_text
     except Exception as exc:
@@ -1198,6 +1200,7 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern):
                                     onset_env_norm if SHOW_ONSET_ENVELOPE else None,
                                     hop_length,
                                     measures_per_pattern)
+        fig.update_layout(uirevision=str(time.time()))
 
         # Prepare data for saving
         save_data = {
