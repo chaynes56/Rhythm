@@ -31,7 +31,8 @@ let metronomeState = {
     beatsPerMeasure: 4,
     volume: 0.5,
     tempo: 120,
-    hiToneOn: true
+    hiToneOn: true,
+    onlyLowTone: false
 };
 let toneFrequency = {
     low: 294,
@@ -206,7 +207,7 @@ function ensureAudioContext() {
     return audioContext;
 }
 
-function updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn) {
+function updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
     const parsedTempo = Number(tempo);
     const parsedBeats = Number(beatsPerMeasure);
     const parsedMeasures = Number(measuresPerPattern);
@@ -217,6 +218,7 @@ function updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume
     metronomeState.measuresPerPattern = Number.isFinite(parsedMeasures) && parsedMeasures > 0 ? parsedMeasures : 1;
     metronomeState.volume = Number.isFinite(parsedVolume) ? parsedVolume : 0.5;
     metronomeState.hiToneOn = (hiToneOn !== false);
+    metronomeState.onlyLowTone = !!onlyLowTone;
 }
 
 function getMetronomeBeatState() {
@@ -230,8 +232,9 @@ function getMetronomeBeatState() {
         toneKey = 'low';
     } else if (positionInMeasure === 0) {
         toneKey = 'mid';
-    } else if (!metronomeState.hiToneOn) {
-        shouldPlay = false;
+        if (metronomeState.onlyLowTone) shouldPlay = false;
+    } else {
+        if (metronomeState.onlyLowTone || !metronomeState.hiToneOn) shouldPlay = false;
     }
 
     return { positionInMeasure, toneKey, shouldPlay };
@@ -636,7 +639,7 @@ function stopActiveRecording() {
     setRecordingPhase('idle');
 }
 
-function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn) {
+function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
     console.log('Starting recording with measure delay...', {
         tempo,
         beatsPerMeasure,
@@ -650,7 +653,7 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
     pendingRecordingRequestId += 1;
     const requestId = pendingRecordingRequestId;
 
-    updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn);
+    updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
 
     const audioConstraints = {
         audio: {
@@ -789,7 +792,7 @@ function ensureMetronomeClickBuffers(ctx) {
 
 try {
 const recorderControls = {
-    toggleRecording: function(n_clicks, recordingPhase, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn) {
+    toggleRecording: function(n_clicks, recordingPhase, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
         console.log('toggleRecording: n_clicks=', n_clicks, 'recordingPhase=', recordingPhase);
         if (!n_clicks) {
             return currentRecordingPhase === 'recording';
@@ -807,7 +810,7 @@ const recorderControls = {
             return false;
         }
 
-        startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn);
+        startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
         return true;
     },
 
@@ -862,14 +865,14 @@ const recorderControls = {
         return is_playing;
     },
 
-    toggleMetronome: function(n_clicks, is_playing, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn) {
+    toggleMetronome: function(n_clicks, is_playing, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
         console.log("toggleMetronome: n_clicks=", n_clicks, "is_playing=", is_playing, "tempo=", tempo,
                     "beatsPerMeasure=", beatsPerMeasure, "measuresPerPattern=", measuresPerPattern,
-                    "volume=", volume, "hiToneOn=", hiToneOn);
+                    "volume=", volume, "hiToneOn=", hiToneOn, "onlyLowTone=", onlyLowTone);
 
         if (!n_clicks) return is_playing;
 
-        updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn);
+        updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
 
         if (!is_playing) {
             metronomeAutoStartedByRecording = false;

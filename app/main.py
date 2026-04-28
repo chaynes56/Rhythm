@@ -28,8 +28,9 @@ WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
 BEAT_MIN_AMPLITUDE_FRACTION = 0.4  # drop beats below this fraction of the normalized
 # peak
-BEAT_MIN_SPACING_SECONDS = 0.05  # 0.05 drop beats within this many seconds of a prior
-# beat
+BEAT_MIN_SPACING_SECONDS = 0.05  # drop beats within this many seconds of a prior beat
+METRONOME_END_MARGIN_SECONDS = 0.1  # exclude metronome ticks within this many seconds of
+# the audio end (avoids counting a beat the recording cut off)
 
 # False to disable spectrum computation and hide the spectrum display area
 SHOW_SPECTRUM = True
@@ -594,9 +595,7 @@ app.layout = dbc.Container([
                                 clearable=False,
                                 style={"width": "90px"},
                             ),
-                        ], width="auto"),
-                        dbc.Col([
-                            html.Label("Beats / Measure", className="small"),
+                            html.Label("Beats / Measure", className="small mt-2"),
                             dcc.Dropdown(
                                 id="beats-per-measure",
                                 options=[{"label": str(i), "value": i} for i in
@@ -612,6 +611,11 @@ app.layout = dbc.Container([
                                 label="Play High Tone",
                                 value=True,
                                 style={"marginTop": "20px"}
+                            ),
+                            dbc.Switch(
+                                id="play-only-low-tone",
+                                label="Play Only Low Tone",
+                                value=False,
                             ),
                         ], width="auto"),
                         dbc.Col([
@@ -669,7 +673,7 @@ app.layout = dbc.Container([
 # Clientside callbacks for recording and playback
 clientside_callback(
     """
-    function(n_clicks, recording_phase, tempo, beats, measuresPerPattern, volume, playHiTone) {
+    function(n_clicks, recording_phase, tempo, beats, measuresPerPattern, volume, playHiTone, playOnlyLowTone) {
         if (!window.recorderControls) {
             console.error("recorder.js not loaded");
             return window.dash_clientside.no_update;
@@ -682,7 +686,8 @@ clientside_callback(
                 beats,
                 measuresPerPattern,
                 volume,
-                !!playHiTone
+                !!playHiTone,
+                !!playOnlyLowTone  // true = only low tone plays
             );
         }
         return window.dash_clientside.no_update;
@@ -696,6 +701,7 @@ clientside_callback(
     State("measures-per-pattern", "value"),
     State("metronome-vol", "value"),
     State("play-hi-tone", "value"),
+    State("play-only-low-tone", "value"),
     prevent_initial_call=True,
 )
 
@@ -719,16 +725,16 @@ clientside_callback(
 
 clientside_callback(
     """
-    function(n_clicks, playing_status, tempo, beats, measures_per_pattern, volume, play_hi_tone) {
+    function(n_clicks, playing_status, tempo, beats, measures_per_pattern, volume, play_hi_tone, play_only_low_tone) {
         if (!window.recorderControls) {
             console.error("recorder.js not loaded");
             return window.dash_clientside.no_update;
         }
         const isPlaying = playing_status.length > 0;
-        const hi_tone_on = !!play_hi_tone;
         if (n_clicks) {
             window.recorderControls.toggleMetronome(
-            n_clicks, isPlaying, tempo, beats, measures_per_pattern, volume, hi_tone_on
+                n_clicks, isPlaying, tempo, beats, measures_per_pattern, volume,
+                !!play_hi_tone, !!play_only_low_tone
             );
         }
         return window.dash_clientside.no_update;
@@ -742,6 +748,7 @@ clientside_callback(
     State("measures-per-pattern", "value"),
     State("metronome-vol", "value"),
     State("play-hi-tone", "value"),
+    State("play-only-low-tone", "value"),
     prevent_initial_call=True,
 )
 
@@ -1163,24 +1170,36 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern):
         # 44,100 Hz default).
         hop_length = max(64, int(512 * sr / 44100))
         n_fft = hop_length * 4
-        onset_env = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
-                                                 n_fft=n_fft)
-        onset_env_norm = onset_env / (onset_env.max() + 1e-12)
+        # Wideband spectral flux — good for high-frequency / tonal hits.
+        onset_env_wide = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
+                                                      n_fft=n_fft)
+        # Bass-limited spectral flux (fmax=500 Hz) — captures bass hits that are diluted
+        # when averaged across all mel bands in the wideband envelope.
+        onset_env_bass = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
+                                                      n_fft=n_fft, fmax=500)
+        # Combine raw envelopes before normalising so there is a single global maximum.
+        # Normalising each separately then taking np.maximum creates multiple frames at
+        # exactly 1.0 (one per envelope's peak), which causes peak_pick to suppress an
+        # adjacent beat via the wait window with no console trace.
+        onset_env_norm = onset_env_wide + onset_env_bass
+        onset_env_norm /= (onset_env_norm.max() + 1e-12)
 
         # These 2 lines of code are causing a worker crash on cloud,
         # log shows numba/llvmlite JIT compile path.
         # tempo_detected, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, bpm=tempo)
         # beat_times = librosa.frames_to_time(beats, sr=sr)
         # ...So replacing beat tracking with simpler onset detection.
-        # `wait` enforces BEAT_MIN_SPACING_SECONDS at a source (in frames at hop_length).
-        wait_frames = max(1, int(BEAT_MIN_SPACING_SECONDS * sr / hop_length))
+        # wait=1: only blocks the immediately adjacent frame from being a duplicate peak.
+        # filter_beat_times owns all real spacing and amplitude enforcement; using a large
+        # wait here would blind-gate real beats that follow spurious low-amplitude detections.
         onset_frames = librosa.onset.onset_detect(
             onset_envelope=onset_env_norm,
             sr=sr,
             hop_length=hop_length,
             units="frames",
             backtrack=False,
-            wait=wait_frames,
+            wait=0,
+            delta=0,  # disable mean+delta gate; filter_beat_times enforces amplitude threshold
         )
         beat_times = librosa.frames_to_time(onset_frames, sr=sr, hop_length=hop_length)
         print(
@@ -1193,7 +1212,7 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern):
         # Metronome points (ideal points based on tempo)
         duration = len(y) / sr
         seconds_per_beat = 60.0 / tempo
-        metronome_times = np.arange(0, duration, seconds_per_beat)
+        metronome_times = np.arange(0, duration - METRONOME_END_MARGIN_SECONDS, seconds_per_beat)
 
         fig = build_waveform_figure(y, sr, metronome_times, beat_times,
                                     beats_per_measure,
@@ -1314,6 +1333,16 @@ def load_recording(contents, beats_per_measure_slider):
                 data["spectrum_psd"] = spec_psd.tolist()
             except Exception as spec_err:
                 print(f"load_recording: spectrum failed: {spec_err}")
+
+        hop_length = max(64, int(512 * sr / 44100))
+        n_fft = hop_length * 4
+        onset_env_wide = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
+                                                      n_fft=n_fft)
+        onset_env_bass = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
+                                                      n_fft=n_fft, fmax=500)
+        onset_env_norm = onset_env_wide + onset_env_bass
+        onset_env_norm /= (onset_env_norm.max() + 1e-12)
+
         y = normalize_waveform_for_display(y)
 
         duration = len(y) / sr
@@ -1323,6 +1352,8 @@ def load_recording(contents, beats_per_measure_slider):
         bpm = data.get("beats_per_measure", beats_per_measure_slider)
         mpp = data.get("measures_per_pattern", 1)
         fig = build_waveform_figure(y, sr, metronome_times, beat_times, bpm,
+                                    onset_env_norm if SHOW_ONSET_ENVELOPE else None,
+                                    hop_length,
                                     measures_per_pattern=mpp)
 
         print(
