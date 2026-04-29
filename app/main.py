@@ -6,7 +6,7 @@ import io
 import json
 import os
 import tempfile
-import time
+from time import time as time_now
 import warnings
 from pathlib import Path
 
@@ -22,7 +22,7 @@ from scipy.signal import welch as scipy_welch, resample as scipy_resample
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.065
+WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.06
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
@@ -33,7 +33,7 @@ METRONOME_END_MARGIN_SECONDS = 0.1  # exclude metronome ticks within this many s
 # the audio end (avoids counting a beat the recording cut off)
 
 # False to disable spectrum computation and hide the spectrum display area
-SHOW_SPECTRUM = True
+SHOW_SPECTRUM = False
 # False to hide the onset envelope overlay on the waveform
 SHOW_ONSET_ENVELOPE = True
 
@@ -514,6 +514,7 @@ app.layout = dbc.Container([
                                 clearable=False,
                                 style={"width": "110px"},
                             ),
+                            html.P(id="process-status", className="mt-2 text-muted small"),
                         ], width="auto"),
                         dbc.Col(
                             dcc.Markdown(
@@ -1025,28 +1026,26 @@ if SHOW_SPECTRUM:
             print(f"update_spectrum: {e}")
             return go.Figure()
 
-clientside_callback(
-    """
-    function(data) {
-        if (!data) return window.dash_clientside.no_update;
-        return "Analyzing\u2026";
-    }
-    """,
-    Output("analysis-data-block", "children", allow_duplicate=True),
-    Input("audio-data-store", "data"),
+@app.callback(
+    Output("process-status", "children"),
+    Input("audio-process-btn", "n_clicks"),
     prevent_initial_call=True,
 )
+def show_analyzing_message(_):
+    return "Analyzing\u2026"
 
 
 @app.callback(
     Output("analysis-data-block", "children"),
+    Output("process-status", "children", allow_duplicate=True),
     Input("audio-store", "data"),
     Input("waveform-graph", "relayoutData"),
     State("subdivisions-per-beat", "value"),
+    prevent_initial_call=True,
 )
 def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
     if not audio_json:
-        return ""
+        return "", ""
     try:
         data = json.loads(audio_json)
         all_beat_times = data.get("beat_times", [])
@@ -1075,20 +1074,22 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         pulse_count = len(beat_times)
         dt = 60 / data.get("tempo") / subdivisions_per_beat  # seconds per subdivision
         if pulse_count == 0:
-            return f"**0** pulses detected in **{beat_count}** beats{window_note}."
+            return f"**0** pulses detected in **{beat_count}** beats{window_note}.", ""
         deviations = np.array([((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
         mean = deviations.mean()
         std = deviations.std()
         maximum = deviations.max()
         median = np.median(deviations)
-        markdown_text = f"""**{pulse_count}** pulses detected in **{beat_count}** beats{window_note}.  \n
-The following statistics reflect time deviations from the start of each **{round(dt * 1000)}** ms subdivision.  \n
-**{round(mean)}** mean, **{round(median)}** median, **{round(std)}** std dev, **{round(maximum)}** maximum (ms)
+        markdown_text = f"""**{pulse_count}** pulses detected in **{beat_count}**
+        beats{window_note}, which is **{(pulse_count / beat_count):.2f}** pulses per
+        beat.  \n The following statistics reflect time deviations from the start of
+        each **{round(dt * 1000)}** ms subdivision.  \n **{round(mean)}** mean,
+        **{round(median)}** median, **{round(std)}** std dev, **{round(maximum)}** maximum (ms)
         """
-        return markdown_text
+        return markdown_text, ""
     except Exception as exc:
         print(f"update_analysis: {exc}")
-        return ""
+        return "", ""
 
 
 @app.callback(
@@ -1177,8 +1178,8 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern):
         # when averaged across all mel bands in the wideband envelope.
         onset_env_bass = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
                                                       n_fft=n_fft, fmax=500)
-        # Combine raw envelopes before normalising so there is a single global maximum.
-        # Normalising each separately then taking np.maximum creates multiple frames at
+        # Combine raw envelopes before normalizing so there is a single global maximum.
+        # Normalizing each separately then taking np.maximum creates multiple frames at
         # exactly 1.0 (one per envelope's peak), which causes peak_pick to suppress an
         # adjacent beat via the wait window with no console trace.
         onset_env_norm = onset_env_wide + onset_env_bass
@@ -1199,7 +1200,8 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern):
             units="frames",
             backtrack=False,
             wait=0,
-            delta=0,  # disable mean+delta gate; filter_beat_times enforces amplitude threshold
+            delta=0,
+            # disable mean+delta gate; filter_beat_times enforces amplitude threshold
         )
         beat_times = librosa.frames_to_time(onset_frames, sr=sr, hop_length=hop_length)
         print(
@@ -1212,14 +1214,15 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern):
         # Metronome points (ideal points based on tempo)
         duration = len(y) / sr
         seconds_per_beat = 60.0 / tempo
-        metronome_times = np.arange(0, duration - METRONOME_END_MARGIN_SECONDS, seconds_per_beat)
+        metronome_times = np.arange(0, duration - METRONOME_END_MARGIN_SECONDS,
+                                    seconds_per_beat)
 
         fig = build_waveform_figure(y, sr, metronome_times, beat_times,
                                     beats_per_measure,
                                     onset_env_norm if SHOW_ONSET_ENVELOPE else None,
                                     hop_length,
                                     measures_per_pattern)
-        fig.update_layout(uirevision=str(time.time()))
+        fig.update_layout(uirevision=str(time_now()))
 
         # Prepare data for saving
         save_data = {
