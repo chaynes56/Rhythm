@@ -11,11 +11,13 @@ You may return to this page at any time via the
 
 ## Practical considerations
 
+It takes time to start a plotly.app server, so app loading takes a minute or so, and 
+after the first recording analysis takes several seconds while additional 
+resources are loaded.
+
 App performance is satisfactory with most Wi-Fi connections but may be unsatisfactory 
 with a cellular data connection. Recording and playback are done via the browser, with 
-audio sent to the `plotly.app` server for analysis and display (except for the local 
-server possibility mentioned below). The basic metronome functionality is 
-independent of the server once the app page is loaded.
+audio sent to the `plotly.app` server for analysis.
 
 Browsers need permission to use the microphone. It is usually possible, via an 
 appropriate setting, for the browser to remember this permission for the `plotly.app` 
@@ -24,23 +26,14 @@ domain so it does not need to be granted each time the app is loaded.
   `plotly.app` page, click Allow. 
 - In Safari: `Settings > Websites > Microphone > ...plotly.app > Allow`
 
-Recording length is limited to 10 minutes. Recording stops automatically then, with 
-an alerting tone. A variety of factors make 
-longer recordings problematic, especially with mobile devices.
-
-The technically proficient may download the app from its 
-[GitHub repository](https://github.com/chaynes56/Rhythm) and run it locally (on your 
-own computer) instead of relying on the `plotly.app` server. This might result in 
-better performance. It is also then possible to create custom exercises and additional 
-voicing codes by editing `patterns.py`.
+Recording length is limited to 10 minutes, at which point it stops 
+automatically with an alerting tone.
 
 ## Analysis interpretation
 
-The Analysis section is of primary interest, but waveform 
-inspection may be useful and permits limiting of analysis to a desired interval.
-A mouse (or touch) drag in the waveform selects a portion 
-for zoomed display and the statistics are recomputed for that segment of time. 
-To return to the full waveform, double-click the display or tap the home button in 
+A mouse or touch drag in the waveform selects a portion of time for display, and 
+statistics are recomputed for that segment of time. 
+To return to the full recording, double-click the display or tap the home button in 
 the zoom toolbar above the legend to the right of the waveform. 
 
 Performance analysis is provided in the form of statistics related to the deviation 
@@ -53,6 +46,8 @@ Performance may be better on a computer than a mobile device. Actual performance
 variation of less than 5 ms is excellent, 10 ms is very good, and more than 15 ms 
 is often noticeable.  
 
+Timing errors are indicated in the bar graph below the waveform, and as summary 
+statistics in the Analysis section below the waveform.
 The first statistics presented are the number of pulses and beats in the selected interval.
 When recording just the metronome, these should be the same. When recording a 
 pattern, the ratio of pulses to beats in the pattern should be close to the 
@@ -95,7 +90,15 @@ deviation from the wrong subdivision.
 
   This complexity allows more advanced exercises, but most exercises are a 
   single pattern and a number of patterns are a single measure. 
- 
+
+## Local server
+
+The technically proficient may download the app from its 
+[GitHub repository](https://github.com/chaynes56/Rhythm) and run it locally (on your 
+own computer) instead of relying on the `plotly.app` server. This might result in 
+better performance. It is also then possible to create custom exercises and additional 
+voicing codes by editing `exercises.py`.
+
 ## Credits and comments
 
 Thanks to Julian Douglas of [RhythmArise](https://rhythmarise.com/) for the 

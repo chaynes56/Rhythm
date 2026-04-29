@@ -420,21 +420,21 @@ function startMetronomePlayback(options = {}) {
         }
 
         const firstToneDelaySeconds = 0.02;
-        const firstToneTime = ctx.currentTime + firstToneDelaySeconds;
-        playScheduledTone(firstToneTime);
+        const startTime = ctx.currentTime + firstToneDelaySeconds;
+        playScheduledTone(startTime);
 
-        let nextScheduledTime = firstToneTime + secondsPerBeat;
+        let nextBeatIndex = 1;
         metronomeScheduler = setInterval(() => {
             try {
                 const now = ctx.currentTime;
-                while (nextScheduledTime <= now + 0.050) {
-                    playScheduledTone(nextScheduledTime);
-                    nextScheduledTime += secondsPerBeat;
+                while (startTime + nextBeatIndex * secondsPerBeat <= now + 0.100) {
+                    playScheduledTone(startTime + nextBeatIndex * secondsPerBeat);
+                    nextBeatIndex++;
                 }
             } catch (err) {
                 console.error('Error in metronome scheduler:', err);
             }
-        }, secondsPerBeat * 500);
+        }, 25);
 
         metronomeInterval = metronomeScheduler;
         setMetronomePlayingState(true);

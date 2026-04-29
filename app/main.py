@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!python3
 # Copyright 2026 Christopher T. Haynes. See the project LICENSE file.
 
 import base64
@@ -36,6 +36,10 @@ METRONOME_END_MARGIN_SECONDS = 0.1  # exclude metronome ticks within this many s
 SHOW_SPECTRUM = False
 # False to hide the onset envelope overlay on the waveform
 SHOW_ONSET_ENVELOPE = True
+
+# Deviation graph color thresholds (milliseconds absolute deviation)
+DEVIATION_WARN_MS = 10   # green below this, orange at or above
+DEVIATION_ALERT_MS = 20  # orange below this, red at or above
 
 # Spectrum analysis
 FFT_DOWNSAMPLE_RATE = 4000  # Hz — resample target; Nyquist = 2 kHz
@@ -413,7 +417,7 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
             y=[y_max * 1.05] * len(sub_times),
             mode='markers',
             name='Subdivision',
-            marker=dict(color='black', symbol='line-ns', size=10,
+            marker=dict(color='black', symbol='line-ns', size=6,
                         line=dict(color='black', width=1.5)),
         ))
 
@@ -427,6 +431,8 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
 
     fig.update_layout(
         xaxis_title="Time (s)",
+        xaxis_range=[-WAVEFORM_DISPLAY_SHIFT_SECONDS,
+                     duration - WAVEFORM_DISPLAY_SHIFT_SECONDS],
         yaxis_title="Normalized Amplitude",
         yaxis_range=[-1.1, 1.1],
         yaxis_fixedrange=True,
@@ -521,6 +527,17 @@ app.layout = dbc.Container([
                 },
             ),
         ], width=12)
+    ], className="mb-0"),
+
+    # Deviation graph — aligned under waveform
+    dbc.Row([
+        dbc.Col([
+            dcc.Graph(
+                id="deviation-graph",
+                style={"height": "260px", "visibility": "hidden"},
+                config={"staticPlot": True},
+            ),
+        ], width=12)
     ], className="mb-4"),
 
     dbc.Row([
@@ -539,7 +556,7 @@ app.layout = dbc.Container([
                                 clearable=False,
                                 style={"width": "110px"},
                             ),
-                            html.P(id="process-status", className="mt-2 fw-bold fs-5"),
+                            html.P(id="process-status", className="mt-2 fw-bold fs-6"),
                         ], width="auto"),
                         dbc.Col(
                             dcc.Markdown(
@@ -930,6 +947,16 @@ else:
         Input("waveform-visible-store", "data"),
     )
 
+clientside_callback(
+    """
+    function(waveform_visible) {
+        return { height: '260px', visibility: waveform_visible ? 'visible' : 'hidden' };
+    }
+    """,
+    Output("deviation-graph", "style"),
+    Input("waveform-visible-store", "data"),
+)
+
 
 @app.callback(
     Output("beat-indicator-container", "children"),
@@ -1107,6 +1134,96 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
 
 
 @app.callback(
+    Output("deviation-graph", "figure"),
+    Input("audio-store", "data"),
+    Input("waveform-graph", "relayoutData"),
+    State("subdivisions-per-beat", "value"),
+    prevent_initial_call=True,
+)
+def update_deviation_graph(audio_json, relayout_data, subdivisions_per_beat):
+    if not audio_json:
+        return go.Figure()
+    try:
+        data = json.loads(audio_json)
+        beat_times = np.array(data.get("beat_times", []))
+        tempo = data.get("tempo")
+        duration = data.get("duration")
+        if not tempo or len(beat_times) == 0:
+            return go.Figure()
+
+        spb = int(subdivisions_per_beat or 1)
+        dt = 60.0 / tempo / spb       # seconds per subdivision
+        dt_ms = dt * 1000              # ms per subdivision
+
+        deviations = np.array(
+            [((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times]
+        )
+        abs_dev = np.abs(deviations)
+
+        dot_colors = np.where(
+            abs_dev < DEVIATION_WARN_MS, 'green',
+            np.where(abs_dev < DEVIATION_ALERT_MS, 'orange', 'red')
+        )
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(
+            x=beat_times, y=[0.0] * len(beat_times),
+            mode='markers', name='Pulses',
+            marker=dict(color=dot_colors.tolist(), size=6, symbol='circle'),
+            showlegend=False,
+        ))
+        categories = [
+            ('green',  f'< {DEVIATION_WARN_MS} ms',
+             abs_dev < DEVIATION_WARN_MS),
+            ('orange', f'{DEVIATION_WARN_MS}–{DEVIATION_ALERT_MS} ms',
+             (abs_dev >= DEVIATION_WARN_MS) & (abs_dev < DEVIATION_ALERT_MS)),
+            ('red',    f'≥ {DEVIATION_ALERT_MS} ms',
+             abs_dev >= DEVIATION_ALERT_MS),
+        ]
+        for color, label, mask in categories:
+            x_segs, y_segs = [], []
+            for t, d in zip(beat_times[mask], deviations[mask]):
+                x_segs += [t, t, None]
+                y_segs += [0.0, d, None]
+            fig.add_trace(go.Scatter(
+                x=x_segs, y=y_segs,
+                mode='lines', name=label,
+                line=dict(color=color, width=2),
+            ))
+
+        # Default x range matches the waveform (full recording, with display shift)
+        full_x_range = (
+            [-WAVEFORM_DISPLAY_SHIFT_SECONDS, duration - WAVEFORM_DISPLAY_SHIFT_SECONDS]
+            if duration else None
+        )
+        # Sync x range with waveform zoom
+        x_range = full_x_range
+        if relayout_data and ctx.triggered_id != "audio-store":
+            if "xaxis.range[0]" in relayout_data:
+                x_range = [relayout_data["xaxis.range[0]"],
+                            relayout_data["xaxis.range[1]"]]
+            elif "xaxis.range" in relayout_data:
+                x_range = relayout_data["xaxis.range"]
+            elif "xaxis.autorange" in relayout_data:
+                x_range = full_x_range
+
+        fig.add_hline(y=0, line_width=1, line_color="gray", line_dash="dot")
+        fig.update_layout(
+            xaxis_title="Time (s)",
+            yaxis_title="Deviation (ms)",
+            yaxis_range=[-dt_ms / 2, dt_ms / 2],
+            yaxis_fixedrange=True,
+            dragmode=False,
+            template="plotly_white",
+            margin=dict(l=40, r=20, t=20, b=40),
+            **({"xaxis_range": x_range} if x_range else {}),
+        )
+        return fig
+    except Exception as e:
+        print(f"update_deviation_graph: {e}")
+        return go.Figure()
+
+
+@app.callback(
     Output("audio-store", "data"),
     Output("waveform-visible-store", "data"),
     Output("waveform-graph", "figure"),
@@ -1251,6 +1368,7 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
             "beat_times": beat_times.tolist(),
             "spectrum_freqs": spec_freqs.tolist(),
             "spectrum_psd": spec_psd.tolist(),
+            "duration": duration,
         }
 
         # Log success but don't show a message (waveform appearing is enough feedback)
@@ -1383,6 +1501,7 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat):
         print(
             f"load_recording: Returning data with {len(metronome_times)} metronome points, {len(beat_times)} beat points")
 
+        data["duration"] = duration
         # Don't show a success message (waveform appearing is enough feedback)
         return json.dumps(data), True, fig, ""
     except Exception as e:

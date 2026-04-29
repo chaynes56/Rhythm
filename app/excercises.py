@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!python3
 # Copyright 2026 Christopher T. Haynes. See the project LICENSE file.
 
 # Thanks to https://rhythmarise.com/rhythm-vocabulary/ for these patterns.
@@ -15,10 +15,10 @@ voicing_code = {  # voicing characters are the keys below
 }
 voicing_characters = ''.join(list(voicing_code.keys()))
 
-# exercises_text is a sequence of patterns separated by `---`.
-# Each pattern consists of its name line followed by one or more measure-line groups.
-# Each measure-line group begins with a subdivision line followed by one or more
-# pattern lines. A subdivision line consists of sequential beat integers separated
+# exercises_text is a sequence of exercises separated by `---`.
+# Each exercise consists of a name line followed by one or more patterns.
+# Each pattern begins with a subdivision line followed by one or more
+# measure lines. A subdivision line consists of sequential beat integers separated
 # by one letter for each measure subdivision. A space follows these letters
 # for readability unless the beat integer has two digits. A pattern line is a
 # sequence of pillars that line up with the corresponding subdivisions letters or
@@ -60,13 +60,14 @@ B x B x B x B x B x B x
 """
 
 
-# measure_group: { beats: int,
+# pattern: { beats_per_measure: int,
 #                  subdivisions_per_beat: int,
+#                  measures_per_pattern: int,
 #                  subdivision_line = str,
 #                  patterns: list(pattern_string)
 #                }
 # pattern_string: string of voicing characters of length subdivisions_per_beat * beats
-# exercise_dict: exercise_name -> list(measure_group)
+# exercise_dict: exercise_name -> list(pattern)
 def make_exercises(text):  # -> (list(exercise_name), exercise_dict)
     exercise_name_list = []
     exercise_dict = {}
@@ -74,7 +75,7 @@ def make_exercises(text):  # -> (list(exercise_name), exercise_dict)
         lines = exercise_text.strip().splitlines()
         exercise_name = lines[0].strip()
         exercise_name_list.append(exercise_name)
-        measure_group_list = []
+        pattern_list = []
         subdivisions_per_beat = 0
         num_beats = 0
         patterns = []
@@ -87,31 +88,33 @@ def make_exercises(text):  # -> (list(exercise_name), exercise_dict)
             line = line.strip()
             if not line:  # end of exercise
                 break
-            if line[1::2].strip():  # characters with odd index must be blank
-                error('even position characters must be blank')
-            line = line[::2]  # only use characters with even index
-            if line[0] == '1':  # start a measure_group
+            e_line = line[::2]  # only characters with even index
+            if e_line[0] == '1':  # start a pattern
+                if not ''.join(line[1::2].split()):
+                    error('even position characters must be blank or a digit')
                 patterns = []
-                beat1, _ = line.split("2")
+                beat1, _ = e_line.split("2")
                 subdivisions_per_beat = len(beat1)
-                if not all(c.isdigit() for c in line[::subdivisions_per_beat]):
+                if not all(c.isdigit() for c in e_line[::subdivisions_per_beat]):
                     error('invalid subdivision line beat number')
-                num_beats = int(len(line) / subdivisions_per_beat)
-                if len(line) % subdivisions_per_beat != 0:
+                num_beats = int(len(e_line) / subdivisions_per_beat)
+                if len(e_line) % subdivisions_per_beat != 0:
                     error('invalid subdivision line')
-                measure_group_list.append(
-                    {'beats': num_beats,
+                pattern_list.append(
+                    {'beats_per_measure': num_beats,
                      'subdivisions_per_beat': subdivisions_per_beat,
-                     'subdivision_line': line,
+                     'subdivision_line': e_line,
                      'patterns': patterns
                      })
-            elif not all(c in voicing_characters for c in line[::2]):
-                # characters with even index must be voicing codes
-                error('invalid voicing code')
             else:
-                line += ' ' * (subdivisions_per_beat * num_beats - len(line))
-                patterns.append(line)
-        exercise_dict[exercise_name] = measure_group_list
+                if line[1::2].strip():
+                    error('even position characters must be blank')
+                if not all(c in voicing_characters for c in e_line):
+                    # characters with even index must be voicing codes
+                    error('invalid voicing code')
+                e_line += ' ' * (subdivisions_per_beat * num_beats - len(e_line))
+                patterns.append(e_line)
+        exercise_dict[exercise_name] = pattern_list
     return exercise_name_list, exercise_dict
 
 
@@ -119,3 +122,5 @@ exercises = make_exercises(exercises_text)
 
 if __name__ == '__main__':
     pprint(exercises)
+    print('Done')
+
