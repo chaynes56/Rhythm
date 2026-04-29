@@ -341,7 +341,8 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
                           beat_times: np.ndarray, beats_per_measure: int,
                           onset_env_norm: np.ndarray | None = None,
                           hop_length: int = 512,
-                          measures_per_pattern: int = 1) -> go.Figure:
+                          measures_per_pattern: int = 1,
+                          subdivisions_per_beat: int = 1) -> go.Figure:
     duration = len(y) / sr if sr else 0.0
     time = np.linspace(0, duration, num=len(y),
                        endpoint=False) - WAVEFORM_DISPLAY_SHIFT_SECONDS
@@ -377,20 +378,44 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
 
     mpp = max(1, int(measures_per_pattern or 1))
     pattern_len = beats_per_measure * mpp
-    metronome_colors = [
-        'red' if i % pattern_len == 0 else
-        'orange' if i % beats_per_measure == 0 else
-        'royalblue'
-        for i in range(len(metronome_times))
-    ]
+    pattern_x, measure_x, beat_x = [], [], []
+    for i, t in enumerate(metronome_times):
+        if i % pattern_len == 0:
+            pattern_x.append(t)
+        elif i % beats_per_measure == 0:
+            measure_x.append(t)
+        else:
+            beat_x.append(t)
     fig.add_trace(go.Scatter(
-        x=metronome_times,
-        y=[y_max * 1.1 if i % beats_per_measure == 0 else y_max * 1.05 for i in
-           range(len(metronome_times))],
-        mode='markers',
-        name='Beats',
-        marker=dict(color=metronome_colors, symbol='diamond')
+        x=pattern_x, y=[y_max * 1.1] * len(pattern_x),
+        mode='markers', name='Pattern',
+        marker=dict(color='red', symbol='diamond'),
     ))
+    fig.add_trace(go.Scatter(
+        x=measure_x, y=[y_max * 1.1] * len(measure_x),
+        mode='markers', name='Measure',
+        marker=dict(color='orange', symbol='diamond'),
+    ))
+    fig.add_trace(go.Scatter(
+        x=beat_x, y=[y_max * 1.05] * len(beat_x),
+        mode='markers', name='Beat',
+        marker=dict(color='royalblue', symbol='diamond'),
+    ))
+
+    if subdivisions_per_beat > 1 and len(metronome_times) > 1:
+        sub_times = []
+        for i in range(len(metronome_times) - 1):
+            beat_dur = metronome_times[i + 1] - metronome_times[i]
+            for s in range(1, subdivisions_per_beat):
+                sub_times.append(metronome_times[i] + s * beat_dur / subdivisions_per_beat)
+        fig.add_trace(go.Scatter(
+            x=sub_times,
+            y=[y_max * 1.05] * len(sub_times),
+            mode='markers',
+            name='Subdivision',
+            marker=dict(color='black', symbol='line-ns', size=10,
+                        line=dict(color='black', width=1.5)),
+        ))
 
     fig.add_trace(go.Scatter(
         x=beat_times,
@@ -514,7 +539,7 @@ app.layout = dbc.Container([
                                 clearable=False,
                                 style={"width": "110px"},
                             ),
-                            html.P(id="process-status", className="mt-2 text-muted small"),
+                            html.P(id="process-status", className="mt-2 fw-bold fs-5"),
                         ], width="auto"),
                         dbc.Col(
                             dcc.Markdown(
@@ -906,19 +931,6 @@ else:
     )
 
 
-# Debug callback to watch audio-data-store changes
-@app.callback(
-    Output("playback-sync", "value", allow_duplicate=True),
-    Input("audio-data-store", "data"),
-    prevent_initial_call=True
-)
-def debug_audio_store(data):
-    if not data:
-        raise PreventUpdate
-    print(f"DEBUG: audio-data-store changed! Data length: {len(data)}")
-    return f"audio-store-update-{len(data)}"
-
-
 @app.callback(
     Output("beat-indicator-container", "children"),
     Input("beats-per-measure", "value"),
@@ -1028,10 +1040,12 @@ if SHOW_SPECTRUM:
 
 @app.callback(
     Output("process-status", "children"),
-    Input("audio-process-btn", "n_clicks"),
+    Input("audio-data-store", "data"),
     prevent_initial_call=True,
 )
-def show_analyzing_message(_):
+def show_analyzing_message(data):
+    if not data:
+        raise PreventUpdate
     return "Analyzing\u2026"
 
 
@@ -1101,9 +1115,11 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
     State("measures-per-pattern", "value"),
+    State("subdivisions-per-beat", "value"),
     prevent_initial_call=True
 )
-def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern):
+def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
+                  subdivisions_per_beat):
     print(f"\n{'=' * 60}")
     print(f"PROCESS_AUDIO CALLBACK TRIGGERED!")
     print(f"audio_len={len(base64_audio) if base64_audio else 0}")
@@ -1221,7 +1237,8 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern):
                                     beats_per_measure,
                                     onset_env_norm if SHOW_ONSET_ENVELOPE else None,
                                     hop_length,
-                                    measures_per_pattern)
+                                    measures_per_pattern,
+                                    subdivisions_per_beat)
         fig.update_layout(uirevision=str(time_now()))
 
         # Prepare data for saving
@@ -1271,9 +1288,10 @@ def save_recording(n_clicks, audio_json):
     Output("status-msg", "children"),
     Input("upload-audio", "contents"),
     State("beats-per-measure", "value"),
+    State("subdivisions-per-beat", "value"),
     prevent_initial_call=True
 )
-def load_recording(contents, beats_per_measure_slider):
+def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat):
     if not contents:
         return None, False, go.Figure(), ""
 
@@ -1357,7 +1375,8 @@ def load_recording(contents, beats_per_measure_slider):
         fig = build_waveform_figure(y, sr, metronome_times, beat_times, bpm,
                                     onset_env_norm if SHOW_ONSET_ENVELOPE else None,
                                     hop_length,
-                                    measures_per_pattern=mpp)
+                                    measures_per_pattern=mpp,
+                                    subdivisions_per_beat=subdivisions_per_beat)
 
         print(
             f"load_recording: Successfully processed audio, duration={duration:.2f}s, sr={sr}")
