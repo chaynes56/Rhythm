@@ -47,8 +47,11 @@ variation of less than 5 ms is excellent, 10 ms is very good, and more than 15 m
 is often noticeable.  
 
 Timing errors are indicated in the bar graph below the waveform, and as summary 
-statistics in the Analysis section below the waveform.
-The first statistics presented are the number of pulses and beats in the selected interval.
+statistics in the Analysis section below the waveform. The Training Level selected
+determines the color coding thresholds.
+
+The first statistics presented in the text area 
+are the number of pulses and beats in the selected interval.
 When recording just the metronome, these should be the same. When recording a 
 pattern, the ratio of pulses to beats in the pattern should be close to the 
 indicated pulse to beat ratio. A few missed pulses have little effect on the 

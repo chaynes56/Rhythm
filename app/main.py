@@ -6,9 +6,9 @@ import io
 import json
 import os
 import tempfile
-from time import time as time_now
 import warnings
 from pathlib import Path
+from time import time as time_now
 
 import dash_bootstrap_components as dbc
 import librosa
@@ -22,23 +22,25 @@ from scipy.signal import welch as scipy_welch, resample as scipy_resample
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.06
+WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.064
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
-BEAT_MIN_AMPLITUDE_FRACTION = 0.4  # drop beats below this fraction of the normalized
-# peak
+BEAT_MIN_AMPLITUDE_FRACTION = 0.4  # drop beats < this fraction of the normalized peak
 BEAT_MIN_SPACING_SECONDS = 0.05  # drop beats within this many seconds of a prior beat
 METRONOME_END_MARGIN_SECONDS = 0.1  # exclude metronome ticks within this many seconds of
-# the audio end (avoids counting a beat the recording cut off)
+# the audio end (avoids counting a beat at the recording cutoff)
 
 # False to disable spectrum computation and hide the spectrum display area
 SHOW_SPECTRUM = False
 # False to hide the onset envelope overlay on the waveform
 SHOW_ONSET_ENVELOPE = True
 
-# Deviation graph color thresholds (milliseconds absolute deviation)
-DEVIATION_WARN_MS = 10   # green below this, orange at or above
+# dict: name -> (green cutoff, orange cutoff) red above orange cutoff in ms of
+# mean absolute deviation
+TRAINING_LEVEL = dict(Advanced=(7.5, 15), Intermediate=(10, 15), Novice=(15, 30))
+# Deviation graph color thresholds (millisecond absolute deviation)
+DEVIATION_WARN_MS = 10  # green below this, orange at or above
 DEVIATION_ALERT_MS = 20  # orange below this, red at or above
 
 # Spectrum analysis
@@ -191,9 +193,10 @@ def smooth_waveform_for_display(y: np.ndarray,
     if window_size % 2 == 0:
         window_size += 1
 
-    kernel = np.ones(window_size, dtype=np.float32) / float(window_size)
-    y_smooth = np.convolve(y.astype(np.float32, copy=False), kernel, mode="same")
-    return y_smooth.astype(np.float32, copy=False)
+    kernel = np.full(window_size, 1.0 / window_size, dtype=np.float32)
+    y_float = np.asarray(y, dtype=np.float32)
+    y_smooth = np.convolve(y_float, kernel, mode="same")
+    return np.asarray(y_smooth, dtype=np.float32)
 
 
 def downsample_waveform_preserve_peaks(time: np.ndarray, y: np.ndarray,
@@ -411,7 +414,8 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
         for i in range(len(metronome_times) - 1):
             beat_dur = metronome_times[i + 1] - metronome_times[i]
             for s in range(1, subdivisions_per_beat):
-                sub_times.append(metronome_times[i] + s * beat_dur / subdivisions_per_beat)
+                sub_times.append(
+                    metronome_times[i] + s * beat_dur / subdivisions_per_beat)
         fig.add_trace(go.Scatter(
             x=sub_times,
             y=[y_max * 1.05] * len(sub_times),
@@ -431,14 +435,17 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
 
     fig.update_layout(
         xaxis_title="Time (s)",
-        xaxis_range=[-WAVEFORM_DISPLAY_SHIFT_SECONDS,
-                     duration - WAVEFORM_DISPLAY_SHIFT_SECONDS],
         yaxis_title="Normalized Amplitude",
         yaxis_range=[-1.1, 1.1],
         yaxis_fixedrange=True,
         dragmode="zoom",
         template="plotly_white",
-        margin=dict(l=40, r=20, t=20, b=40),
+        margin=dict(l=60, r=20, t=20, b=40),
+    )
+    fig.update_xaxes(
+        range=[-WAVEFORM_DISPLAY_SHIFT_SECONDS,
+               duration - WAVEFORM_DISPLAY_SHIFT_SECONDS],
+        autorange=False,
     )
     return fig
 
@@ -504,7 +511,8 @@ app.index_string = f"""
 app.layout = dbc.Container([
     html.Div(
         html.A("Help", href="https://github.com/chaynes56/Rhythm/blob/main/README.md",
-               target="_blank"),
+               target="_blank",
+               style={"fontSize": "1.1rem", "fontWeight": "600"}),
         style={"position": "absolute", "top": "10px", "right": "20px", "zIndex": "1000"}
     ),
     dbc.Row([
@@ -518,13 +526,9 @@ app.layout = dbc.Container([
                 id="waveform-graph",
                 style={"height": "260px", "visibility": "hidden"},
                 # ~6:1+ on typical desktop widths
-                config={
-                    "scrollZoom": True,
-                    "displayModeBar": True,
-                    "modeBarButtonsToRemove": ["pan2d", "select2d", "lasso2d",
-                                               "autoScale2d"],
-                    "displaylogo": False
-                },
+                config=dict(scrollZoom=True, displayModeBar=True,  # type: ignore[arg-type]
+                            modeBarButtonsToRemove=["pan2d", "select2d", "lasso2d",
+                                                    "autoScale2d"], displaylogo=False),
             ),
         ], width=12)
     ], className="mb-0"),
@@ -535,7 +539,7 @@ app.layout = dbc.Container([
             dcc.Graph(
                 id="deviation-graph",
                 style={"height": "260px", "visibility": "hidden"},
-                config={"staticPlot": True},
+                config={"staticPlot": True},  # type: ignore[arg-type]
             ),
         ], width=12)
     ], className="mb-4"),
@@ -547,7 +551,18 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
-                            html.Label("Subdivisions / beat", className="small"),
+                            html.Label("Training Level", className="small"),
+                            dcc.Dropdown(
+                                id="training-level",
+                                options=[{"label": k, "value": k} for k in
+                                         TRAINING_LEVEL],
+                                value="Novice",
+                                clearable=False,
+                                style={"width": "140px"},
+                            ),
+                        ], width="auto"),
+                        dbc.Col([
+                            html.Label("Subdivisions / Beat", className="small"),
                             dcc.Dropdown(
                                 id="subdivisions-per-beat",
                                 options=[{"label": str(i), "value": i} for i in
@@ -556,7 +571,6 @@ app.layout = dbc.Container([
                                 clearable=False,
                                 style={"width": "110px"},
                             ),
-                            html.P(id="process-status", className="mt-2 fw-bold fs-6"),
                         ], width="auto"),
                         dbc.Col(
                             dcc.Markdown(
@@ -564,6 +578,10 @@ app.layout = dbc.Container([
                                 style={"width": "400px", "height": "200px"},
                             ),
                             width="auto"
+                        ),
+                        dbc.Col(
+                            html.Div(id="subdivision-table-container"),
+                            width="auto",
                         ),
                         *([dbc.Col(
                             dcc.Graph(
@@ -573,11 +591,12 @@ app.layout = dbc.Container([
                                     "width": f"{SPECTRUM_GRAPH_WIDTH_PX}px",
                                     "visibility": "hidden",
                                 },
-                                config={"scrollZoom": True, "displayModeBar": False},
+                                config={"scrollZoom": True, "displayModeBar": False},  # type: ignore[arg-type]
                             ),
                             width="auto",
                         )] if SHOW_SPECTRUM else []),
-                    ], align="center", className="g-3"),
+                    ], align="start", className="g-3"),
+                    html.P(id="process-status", className="mt-1 fw-bold fs-6"),
                 ]),
             ], className="mb-4"),
         ], width=12)
@@ -797,6 +816,28 @@ clientside_callback(
 
 clientside_callback(
     """
+    function(tempo, beats, measuresPerPattern, volume, playHiTone, playOnlyLowTone, isPlaying) {
+        if (!window.recorderControls) return window.dash_clientside.no_update;
+        const playing = isPlaying && isPlaying.length > 0;
+        window.recorderControls.reconfigureMetronome(
+            playing, tempo, beats, measuresPerPattern, volume, !!playHiTone, !!playOnlyLowTone
+        );
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("metronome-command-store", "data", allow_duplicate=True),
+    Input("tempo-slider", "value"),
+    Input("beats-per-measure", "value"),
+    Input("measures-per-pattern", "value"),
+    Input("metronome-vol", "value"),
+    Input("play-hi-tone", "value"),
+    Input("play-only-low-tone", "value"),
+    State("is-metronome-playing", "value"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
     function(phaseValue) {
         if (!phaseValue) {
             return window.dash_clientside.no_update;
@@ -957,6 +998,16 @@ clientside_callback(
     Input("waveform-visible-store", "data"),
 )
 
+clientside_callback(
+    """
+    function(waveform_visible) {
+        return { display: waveform_visible ? 'block' : 'none' };
+    }
+    """,
+    Output("subdivision-table-container", "style"),
+    Input("waveform-visible-store", "data"),
+)
+
 
 @app.callback(
     Output("beat-indicator-container", "children"),
@@ -1065,6 +1116,7 @@ if SHOW_SPECTRUM:
             print(f"update_spectrum: {e}")
             return go.Figure()
 
+
 @app.callback(
     Output("process-status", "children"),
     Input("audio-data-store", "data"),
@@ -1134,13 +1186,151 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
 
 
 @app.callback(
-    Output("deviation-graph", "figure"),
+    Output("subdivision-table-container", "children"),
     Input("audio-store", "data"),
     Input("waveform-graph", "relayoutData"),
+    Input("training-level", "value"),
     State("subdivisions-per-beat", "value"),
     prevent_initial_call=True,
 )
-def update_deviation_graph(audio_json, relayout_data, subdivisions_per_beat):
+def update_subdivision_table(audio_json, relayout_data, training_level, subdivisions_per_beat):
+    if not audio_json:
+        return None
+    try:
+        data = json.loads(audio_json)
+        all_beat_times = np.array(data.get("beat_times", []))
+        tempo = data.get("tempo")
+        bpm = int(data.get("beats_per_measure") or 4)
+        mpp = int(data.get("measures_per_pattern") or 1)
+
+        if not tempo or len(all_beat_times) == 0:
+            return None
+
+        spb = int(subdivisions_per_beat or 1)
+        dt = 60.0 / tempo / spb  # seconds per subdivision
+        warn_ms, alert_ms = TRAINING_LEVEL.get(training_level, TRAINING_LEVEL["Novice"])
+
+        # Filter by zoom window if applicable
+        beat_times = all_beat_times
+        if relayout_data and ctx.triggered_id != "audio-store":
+            if "xaxis.range[0]" in relayout_data:
+                t0, t1 = relayout_data["xaxis.range[0]"], relayout_data[
+                    "xaxis.range[1]"]
+                beat_times = all_beat_times[
+                    (all_beat_times >= t0) & (all_beat_times <= t1)]
+            elif "xaxis.range" in relayout_data:
+                t0, t1 = relayout_data["xaxis.range"]
+                beat_times = all_beat_times[
+                    (all_beat_times >= t0) & (all_beat_times <= t1)]
+
+        if len(beat_times) == 0:
+            return None
+
+        deviations_ms = np.array(
+            [((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
+
+        subs_per_measure = bpm * spb
+        # cell_devs[measure][beat][sub] = list of abs deviations
+        cell_devs = [[[[] for _ in range(spb)] for _ in range(bpm)] for _ in range(mpp)]
+
+        for t, dev in zip(beat_times, deviations_ms):
+            nearest_n = int(round(t / dt))
+            measure_idx = (nearest_n // subs_per_measure) % mpp
+            pos_in_measure = nearest_n % subs_per_measure
+            beat_idx = pos_in_measure // spb
+            sub_idx = pos_in_measure % spb
+            if 0 <= measure_idx < mpp and 0 <= beat_idx < bpm and 0 <= sub_idx < spb:
+                cell_devs[measure_idx][beat_idx][sub_idx].append(dev)
+
+        def cell_bg(deviations):
+            if not deviations:
+                return "#e8e8e8"
+            if abs(float(np.mean(deviations))) < warn_ms:
+                return "#c8e6c9"  # light green
+            if abs(float(np.mean(deviations))) < alert_ms:
+                return "#ffe0b2"  # light orange
+            return "#ffcdd2"  # light red
+
+        def cell_text(deviations):
+            if not deviations:
+                return "\u2014"
+            return str(round(float(np.mean(deviations))))
+
+        base_cell = {"textAlign": "center", "padding": "3px 6px",
+                     "fontSize": "0.75rem", "minWidth": "30px"}
+        base_th = {"textAlign": "center", "padding": "2px 4px",
+                   "fontSize": "0.75rem", "borderBottom": "1px solid #aaa",
+                   "background": "#f5f5f5"}
+
+        def beat_border(beat_index):
+            """Thicker right border between beats; thin on last."""
+            return "2px solid #666" if beat_index < bpm - 1 else "1px solid #bbb"
+
+        # Header row: beat labels spanning spb columns
+        header_cells = [html.Th("", style={**base_th, "minWidth": "30px"})]
+        for b in range(bpm):
+            header_cells.append(html.Th(
+                f"B{b + 1}", colSpan=spb,
+                style={**base_th, "borderRight": beat_border(b)},
+            ))
+
+        rows = [html.Tr(header_cells)]
+
+        # Sub-header row when spb > 1
+        if spb > 1:
+            sub_cells = [html.Th("", style={**base_th, "fontSize": "0.65rem"})]
+            for b in range(bpm):
+                for s in range(spb):
+                    is_last = (s == spb - 1)
+                    sub_cells.append(html.Th(
+                        str(s + 1),
+                        style={**base_th, "fontSize": "0.65rem", "color": "#888",
+                               "borderRight": beat_border(
+                                   b) if is_last else "1px solid #ddd"},
+                    ))
+            rows.append(html.Tr(sub_cells))
+
+        # Data rows
+        for m in range(mpp):
+            row_cells = [html.Td(
+                f"M{m + 1}",
+                style={"padding": "2px 5px", "fontSize": "0.75rem",
+                       "fontWeight": "600", "borderRight": "1px solid #bbb",
+                       "whiteSpace": "nowrap", "background": "#f5f5f5"},
+            )]
+            for b in range(bpm):
+                for s in range(spb):
+                    devs = cell_devs[m][b][s]
+                    is_last = (s == spb - 1)
+                    row_cells.append(html.Td(
+                        cell_text(devs),
+                        style={**base_cell,
+                               "backgroundColor": cell_bg(devs),
+                               "borderRight": beat_border(
+                                   b) if is_last else "1px solid #ddd",
+                               "borderBottom": "1px solid #ddd"},
+                    ))
+            rows.append(html.Tr(row_cells))
+
+        table = html.Table(
+            rows,
+            style={"borderCollapse": "collapse", "border": "1px solid #aaa"},
+        )
+        return html.Div(table, style={"overflowX": "auto"})
+    except Exception as e:
+        print(f"update_subdivision_table: {e}")
+        return None
+
+
+@app.callback(
+    Output("deviation-graph", "figure"),
+    Input("audio-store", "data"),
+    Input("waveform-graph", "relayoutData"),
+    Input("training-level", "value"),
+    State("subdivisions-per-beat", "value"),
+    prevent_initial_call=True,
+)
+def update_deviation_graph(audio_json, relayout_data, training_level, subdivisions_per_beat):
     if not audio_json:
         return go.Figure()
     try:
@@ -1152,8 +1342,9 @@ def update_deviation_graph(audio_json, relayout_data, subdivisions_per_beat):
             return go.Figure()
 
         spb = int(subdivisions_per_beat or 1)
-        dt = 60.0 / tempo / spb       # seconds per subdivision
-        dt_ms = dt * 1000              # ms per subdivision
+        warn_ms, alert_ms = TRAINING_LEVEL.get(training_level, TRAINING_LEVEL["Novice"])
+        dt = 60.0 / tempo / spb  # seconds per subdivision
+        dt_ms = dt * 1000  # ms per subdivision
 
         deviations = np.array(
             [((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times]
@@ -1161,8 +1352,8 @@ def update_deviation_graph(audio_json, relayout_data, subdivisions_per_beat):
         abs_dev = np.abs(deviations)
 
         dot_colors = np.where(
-            abs_dev < DEVIATION_WARN_MS, 'green',
-            np.where(abs_dev < DEVIATION_ALERT_MS, 'orange', 'red')
+            abs_dev < warn_ms, 'green',
+            np.where(abs_dev < alert_ms, 'orange', 'red')
         )
         fig = go.Figure()
         fig.add_trace(go.Scatter(
@@ -1172,20 +1363,20 @@ def update_deviation_graph(audio_json, relayout_data, subdivisions_per_beat):
             showlegend=False,
         ))
         categories = [
-            ('green',  f'< {DEVIATION_WARN_MS} ms',
-             abs_dev < DEVIATION_WARN_MS),
-            ('orange', f'{DEVIATION_WARN_MS}–{DEVIATION_ALERT_MS} ms',
-             (abs_dev >= DEVIATION_WARN_MS) & (abs_dev < DEVIATION_ALERT_MS)),
-            ('red',    f'≥ {DEVIATION_ALERT_MS} ms',
-             abs_dev >= DEVIATION_ALERT_MS),
+            ('green', f'< {warn_ms} ms',
+             abs_dev < warn_ms),
+            ('orange', f'{warn_ms}–{alert_ms} ms',
+             (abs_dev >= warn_ms) & (abs_dev < alert_ms)),
+            ('red', f'≥ {alert_ms} ms',
+             abs_dev >= alert_ms),
         ]
         for color, label, mask in categories:
-            x_segs, y_segs = [], []
+            x_values, y_values = [], []
             for t, d in zip(beat_times[mask], deviations[mask]):
-                x_segs += [t, t, None]
-                y_segs += [0.0, d, None]
+                x_values += [t, t, None]
+                y_values += [0.0, d, None]
             fig.add_trace(go.Scatter(
-                x=x_segs, y=y_segs,
+                x=x_values, y=y_values,
                 mode='lines', name=label,
                 line=dict(color=color, width=2),
             ))
@@ -1200,7 +1391,7 @@ def update_deviation_graph(audio_json, relayout_data, subdivisions_per_beat):
         if relayout_data and ctx.triggered_id != "audio-store":
             if "xaxis.range[0]" in relayout_data:
                 x_range = [relayout_data["xaxis.range[0]"],
-                            relayout_data["xaxis.range[1]"]]
+                           relayout_data["xaxis.range[1]"]]
             elif "xaxis.range" in relayout_data:
                 x_range = relayout_data["xaxis.range"]
             elif "xaxis.autorange" in relayout_data:
@@ -1214,9 +1405,10 @@ def update_deviation_graph(audio_json, relayout_data, subdivisions_per_beat):
             yaxis_fixedrange=True,
             dragmode=False,
             template="plotly_white",
-            margin=dict(l=40, r=20, t=20, b=40),
-            **({"xaxis_range": x_range} if x_range else {}),
+            margin=dict(l=60, r=20, t=20, b=40),
         )
+        if x_range:
+            fig.update_xaxes(range=x_range, autorange=False)
         return fig
     except Exception as e:
         print(f"update_deviation_graph: {e}")
@@ -1315,8 +1507,8 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
         # Normalizing each separately then taking np.maximum creates multiple frames at
         # exactly 1.0 (one per envelope's peak), which causes peak_pick to suppress an
         # adjacent beat via the wait window with no console trace.
-        onset_env_norm = onset_env_wide + onset_env_bass
-        onset_env_norm /= (onset_env_norm.max() + 1e-12)
+        onset_env_norm: np.ndarray = np.asarray(onset_env_wide + onset_env_bass, dtype=np.float32)
+        onset_env_norm = onset_env_norm / (float(onset_env_norm.max()) + 1e-12)
 
         # These 2 lines of code are causing a worker crash on cloud,
         # log shows numba/llvmlite JIT compile path.
@@ -1479,8 +1671,8 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat):
                                                       n_fft=n_fft)
         onset_env_bass = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
                                                       n_fft=n_fft, fmax=500)
-        onset_env_norm = onset_env_wide + onset_env_bass
-        onset_env_norm /= (onset_env_norm.max() + 1e-12)
+        onset_env_norm: np.ndarray = np.asarray(onset_env_wide + onset_env_bass, dtype=np.float32)
+        onset_env_norm = onset_env_norm / (float(onset_env_norm.max()) + 1e-12)
 
         y = normalize_waveform_for_display(y)
 

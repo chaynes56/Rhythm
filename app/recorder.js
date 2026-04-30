@@ -3,6 +3,8 @@ if (!window.dash_clientside) {
 }
 
 const METRONOME_TONE_DURATION_S = 0.04; // seconds
+// start recording this many ms before measure end to let audio startup settle
+const RECORDING_PRE_ROLL_MS = 200;
 
 let mediaRecorder;
 let audioChunks = [];
@@ -118,8 +120,8 @@ function setDashInputValue(elementId, value) {
         input.value = nextValue;
     }
 
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.dispatchEvent(new Event('change', { bubbles: true }));
+    input.dispatchEvent(new Event('input', {bubbles: true}));
+    input.dispatchEvent(new Event('change', {bubbles: true}));
 }
 
 function setRecordingPhase(phase) {
@@ -202,7 +204,7 @@ function cleanupRecordingStream() {
 function ensureAudioContext() {
     if (!audioContext || audioContext.state === 'closed') {
         console.log('Creating new AudioContext...');
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        audioContext = new (window.AudioContext || window['webkitAudioContext'])();
     }
     return audioContext;
 }
@@ -237,7 +239,7 @@ function getMetronomeBeatState() {
         if (metronomeState.onlyLowTone || !metronomeState.hiToneOn) shouldPlay = false;
     }
 
-    return { positionInMeasure, toneKey, shouldPlay };
+    return {positionInMeasure, toneKey, shouldPlay};
 }
 
 function advanceMetronomePosition(positionInMeasure) {
@@ -259,7 +261,7 @@ function playScheduledTone(scheduledTime = null) {
 
         ensureMetronomeClickBuffers(ctx);
 
-        const { positionInMeasure, toneKey, shouldPlay } = getMetronomeBeatState();
+        const {positionInMeasure, toneKey, shouldPlay} = getMetronomeBeatState();
         const toneTime = (Number.isFinite(scheduledTime) && scheduledTime >= ctx.currentTime)
             ? scheduledTime
             : ctx.currentTime;
@@ -278,9 +280,8 @@ function playScheduledTone(scheduledTime = null) {
             source.connect(gain);
             gain.connect(ctx.destination);
 
-            const nodeRecord = { source, gain };
-            activeMetronomeNodes.push(nodeRecord);
-            source.onended = () => {
+            const nodeRecord = {source, gain, onEnded: null};
+            const onEnded = () => {
                 try {
                     source.disconnect();
                     gain.disconnect();
@@ -289,6 +290,9 @@ function playScheduledTone(scheduledTime = null) {
                 }
                 cleanupMetronomeNode(nodeRecord);
             };
+            nodeRecord.onEnded = onEnded;
+            activeMetronomeNodes.push(nodeRecord);
+            source.addEventListener('ended', onEnded);
 
             source.start(toneTime);
         }
@@ -302,17 +306,17 @@ function playScheduledTone(scheduledTime = null) {
 function playHtmlTone() {
     try {
         ensureMetronomeAudioUrls();
-        const { positionInMeasure, toneKey, shouldPlay } = getMetronomeBeatState();
+        const {positionInMeasure, toneKey, shouldPlay} = getMetronomeBeatState();
 
         if (shouldPlay) {
             const audio = new Audio();
-            audio.src = metronomeAudioUrls[toneKey];
+            audio.src = /** @type {string} */ (metronomeAudioUrls[toneKey]);
             audio.preload = 'auto';
             audio.volume = metronomeState.volume;
             // Add playsinline just in case, though it's for video
             audio.setAttribute('playsinline', 'true');
             activeMetronomeAudios.push(audio);
-            audio.addEventListener('ended', () => cleanupMetronomeAudio(audio), { once: true });
+            audio.addEventListener('ended', () => cleanupMetronomeAudio(audio), {once: true});
             const playPromise = audio.play();
             if (playPromise !== undefined) {
                 playPromise.catch(err => {
@@ -335,9 +339,9 @@ function stopMetronomePlayback() {
     metronomeInterval = null;
     metronomeScheduler = null;
 
-    activeMetronomeNodes.forEach(({ source, gain }) => {
+    activeMetronomeNodes.forEach(({source, gain, onEnded}) => {
         try {
-            source.onended = null;
+            if (onEnded) source.removeEventListener('ended', onEnded);
             source.stop();
         } catch (stopErr) {
             console.warn('Metronome node stop warning:', stopErr);
@@ -367,7 +371,7 @@ function stopMetronomePlayback() {
 }
 
 function startMetronomePlayback(options = {}) {
-    const { preserveOffset = false } = options;
+    const {preserveOffset = false} = options;
     const ctx = ensureAudioContext();
     const secondsPerBeat = 60.0 / metronomeState.tempo;
     const useHtmlAudioMetronome = shouldUseHtmlAudioMetronome();
@@ -396,7 +400,6 @@ function startMetronomePlayback(options = {}) {
         if (useHtmlAudioMetronome) {
             console.log('Using HTMLAudio metronome fallback', {
                 host: window.location ? window.location.hostname : '',
-                vendor: navigator.vendor || '',
                 userAgent: navigator.userAgent || ''
             });
             playHtmlTone();
@@ -416,7 +419,7 @@ function startMetronomePlayback(options = {}) {
 
             metronomeInterval = metronomeScheduler;
             setMetronomePlayingState(true);
-            return { firstBeatDelayMs: 0, secondsPerBeat };
+            return {firstBeatDelayMs: 0, secondsPerBeat};
         }
 
         const firstToneDelaySeconds = 0.02;
@@ -438,7 +441,7 @@ function startMetronomePlayback(options = {}) {
 
         metronomeInterval = metronomeScheduler;
         setMetronomePlayingState(true);
-        return { firstBeatDelayMs: firstToneDelaySeconds * 1000, secondsPerBeat };
+        return {firstBeatDelayMs: firstToneDelaySeconds * 1000, secondsPerBeat};
     };
 
     if (ctx.state === 'suspended') {
@@ -448,7 +451,7 @@ function startMetronomePlayback(options = {}) {
             return startScheduler();
         }).catch(err => {
             console.error('Failed to resume AudioContext:', err);
-            return { firstBeatDelayMs: 0, secondsPerBeat };
+            return {firstBeatDelayMs: 0, secondsPerBeat};
         });
     }
 
@@ -527,14 +530,14 @@ function configureMediaRecorder(stream) {
         console.log('====================================');
 
         const reader = new FileReader();
-        const audioBlob = new Blob(audioChunks, { type: mediaRecorder.mimeType });
-        const decodeCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const audioBlob = new Blob(audioChunks, {type: mediaRecorder.mimeType});
+        const decodeCtx = new (window.AudioContext || window['webkitAudioContext'])();
         reader.readAsArrayBuffer(audioBlob);
-        reader.onloadend = () => {
+        reader.addEventListener('loadend', () => {
             const RECORD_SAMPLE_RATE = 4000;
             const RECORD_LPF_HZ = 1800;
-
-            decodeCtx.decodeAudioData(reader.result).then((audioBuffer) => {
+            const arrayBuffer = /** @type {ArrayBuffer} */ (reader.result);
+            decodeCtx.decodeAudioData(arrayBuffer).then((audioBuffer) => {
                 const targetLength = Math.ceil(audioBuffer.duration * RECORD_SAMPLE_RATE);
                 const offlineCtx = new OfflineAudioContext(1, targetLength, RECORD_SAMPLE_RATE);
                 const source = offlineCtx.createBufferSource();
@@ -548,25 +551,29 @@ function configureMediaRecorder(stream) {
                 return offlineCtx.startRendering();
             }).then((renderedBuffer) => {
                 const rawData = renderedBuffer.getChannelData(0);
-                const wavData = encodeWAV(rawData, RECORD_SAMPLE_RATE);
-                const wavBlob = new Blob([wavData], { type: 'audio/wav' });
+                const preRollSamples = Math.round(RECORD_SAMPLE_RATE * RECORDING_PRE_ROLL_MS / 1000);
+                const trimmedData = rawData.slice(preRollSamples);
+                const wavData = encodeWAV(trimmedData, RECORD_SAMPLE_RATE);
+                const wavBlob = new Blob([wavData], {type: 'audio/wav'});
 
                 const wavReader = new FileReader();
                 wavReader.readAsDataURL(wavBlob);
-                wavReader.onloadend = () => {
-                    window.lastRecordedAudio = wavReader.result;
-                    window.recordedAudioData = wavReader.result;
-                    console.log('Converted to WAV, length:', wavReader.result.length);
+                wavReader.addEventListener('loadend', () => {
+                    const dataUrl = /** @type {string} */ (wavReader.result);
+                    window.lastRecordedAudio = dataUrl;
+                    window.recordedAudioData = dataUrl;
+                    console.log('Converted to WAV, trimmed pre-roll, length:', dataUrl.length);
                     clickHiddenButton('audio-process-btn');
-                };
+                });
             }).catch((err) => {
                 console.error('decodeAudioData failed:', err);
             }).finally(() => {
                 if (decodeCtx && decodeCtx.state !== 'closed') {
-                    decodeCtx.close().catch(() => {});
+                    decodeCtx.close().catch(() => {
+                    });
                 }
             });
-        };
+        });
     });
 }
 
@@ -660,7 +667,7 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
             echoCancellation: false,
             noiseSuppression: false,
             autoGainControl: false,
-            sampleRate: { ideal: 48000 }
+            sampleRate: {ideal: 48000}
         }
     };
 
@@ -689,12 +696,15 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
                 preserveMetronomeStartOffset = false;
             }
 
-            startMetronomePlayback({ preserveOffset: patternMeasures > 1 }).then(({ firstBeatDelayMs, secondsPerBeat }) => {
+            startMetronomePlayback({preserveOffset: patternMeasures > 1}).then(({
+                                                                                    firstBeatDelayMs,
+                                                                                    secondsPerBeat
+                                                                                }) => {
                 if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay') {
                     return;
                 }
 
-                const measureDelayMs = firstBeatDelayMs + (metronomeState.beatsPerMeasure * secondsPerBeat * 1000);
+                const measureDelayMs = firstBeatDelayMs + (metronomeState.beatsPerMeasure * secondsPerBeat * 1000) - RECORDING_PRE_ROLL_MS;
                 recordingDelayTimeout = setTimeout(() => beginActiveRecording(requestId), measureDelayMs);
             });
         })
@@ -707,12 +717,7 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
 
 function isSafariBrowser() {
     const ua = navigator.userAgent || "";
-    const vendor = navigator.vendor || "";
-    const hasSafariInUa = /Safari/i.test(ua);
-    const excludedBrowsers = /Chrome|Chromium|CriOS|GSA|Firefox|FxiOS|Edg\//i.test(ua);
-    const appleVendor = /Apple/i.test(vendor);
-    const isSafari = (hasSafariInUa && !excludedBrowsers) || appleVendor;
-    return isSafari;
+    return /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|GSA|Firefox|FxiOS|Edg\//i.test(ua);
 }
 
 function shouldUseHtmlAudioMetronome() {
@@ -750,7 +755,7 @@ function ensureMetronomeAudioUrls() {
 
     const buildUrl = (frequency) => {
         const wavBuffer = encodeWAV(createClickSamples(frequency), 44100);
-        const blob = new Blob([wavBuffer], { type: 'audio/wav' });
+        const blob = new Blob([wavBuffer], {type: 'audio/wav'});
         return URL.createObjectURL(blob);
     };
 
@@ -791,190 +796,218 @@ function ensureMetronomeClickBuffers(ctx) {
 }
 
 try {
-const recorderControls = {
-    toggleRecording: function(n_clicks, recordingPhase, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
-        console.log('toggleRecording: n_clicks=', n_clicks, 'recordingPhase=', recordingPhase);
-        if (!n_clicks) {
-            return currentRecordingPhase === 'recording';
-        }
+    window.recorderControls = {
+        toggleRecording: function (n_clicks, recordingPhase, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
+            console.log('toggleRecording: n_clicks=', n_clicks, 'recordingPhase=', recordingPhase);
+            if (!n_clicks) {
+                return currentRecordingPhase === 'recording';
+            }
 
-        const phase = recordingPhase || currentRecordingPhase || 'idle';
-        if (phase === 'delay') {
-            console.log('Cancelling measure delay');
-            cancelPendingRecording();
-            return false;
-        }
+            const phase = recordingPhase || currentRecordingPhase || 'idle';
+            if (phase === 'delay') {
+                console.log('Cancelling measure delay');
+                cancelPendingRecording();
+                return false;
+            }
 
-        if (phase === 'recording') {
-            stopActiveRecording();
-            return false;
-        }
+            if (phase === 'recording') {
+                stopActiveRecording();
+                return false;
+            }
 
-        startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
-        return true;
-    },
-
-    playAudio: function(n_clicks, volume, is_playing) {
-        console.log("playAudio: n_clicks=", n_clicks, "volume=", volume, "is_playing=", is_playing, "lastRecordedAudio exists:", !!window.lastRecordedAudio);
-
-        // If Dash says playing but the audio already ended, reset state.
-        if (is_playing && !currentAudio) {
-            return false;
-        }
-
-        if (is_playing && currentAudio) {
-            console.log("Stopping current playback");
-            currentAudio.pause();
-            currentAudio.currentTime = 0;
-            currentAudio = null;
-            return false;
-        }
-
-        // Only start playback on a genuinely new button click. This prevents
-        // auto-playback after a hot-reload reconnect, where is_playing resets to
-        // false (memory store cleared) but window.lastRecordedAudio still holds
-        // the previous recording and the stale n_clicks value re-fires the callback.
-        // On the very first call after script load we sync lastPlayNClicks to the
-        // current n_clicks without acting, so only a subsequent increment triggers play.
-        if (lastPlayNClicks === null) {
-            lastPlayNClicks = n_clicks || 0;
-            return false;
-        }
-        if (!is_playing && window.lastRecordedAudio && n_clicks > lastPlayNClicks) {
-            lastPlayNClicks = n_clicks;
-            currentAudio = new Audio(window.lastRecordedAudio);
-            currentAudio.volume = (volume !== undefined && volume !== null) ? volume : 1.0;
-            console.log("Playing audio with volume:", currentAudio.volume);
-
-            currentAudio.addEventListener('ended', () => {
-                console.log("Audio playback ended");
-                currentAudio = null;
-                clickHiddenButton('playback-ended-btn');
-            });
-
-            currentAudio.play().catch(err => {
-                console.error("Playback error:", err);
-                currentAudio = null;
-            });
-
+            startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
             return true;
-        } else if (!window.lastRecordedAudio) {
-            console.warn("No recording available to play");
-        }
+        },
 
-        return is_playing;
-    },
+        playAudio: function (n_clicks, volume, is_playing) {
+            console.log("playAudio: n_clicks=", n_clicks, "volume=", volume, "is_playing=", is_playing, "lastRecordedAudio exists:", !!window.lastRecordedAudio);
 
-    toggleMetronome: function(n_clicks, is_playing, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
-        console.log("toggleMetronome: n_clicks=", n_clicks, "is_playing=", is_playing, "tempo=", tempo,
-                    "beatsPerMeasure=", beatsPerMeasure, "measuresPerPattern=", measuresPerPattern,
-                    "volume=", volume, "hiToneOn=", hiToneOn, "onlyLowTone=", onlyLowTone);
+            // If Dash says playing but the audio already ended, reset state.
+            if (is_playing && !currentAudio) {
+                return false;
+            }
 
-        if (!n_clicks) return is_playing;
+            if (is_playing && currentAudio) {
+                console.log("Stopping current playback");
+                currentAudio.pause();
+                currentAudio.currentTime = 0;
+                currentAudio = null;
+                return false;
+            }
 
-        updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
+            // Only start playback on a genuinely new button click. This prevents
+            // auto-playback after a hot-reload reconnect, where is_playing resets to
+            // false (memory store cleared) but window.lastRecordedAudio still holds
+            // the previous recording and the stale n_clicks value re-fires the callback.
+            // On the very first call after script load we sync lastPlayNClicks to the
+            // current n_clicks without acting, so only a subsequent increment triggers play.
+            if (lastPlayNClicks === null) {
+                lastPlayNClicks = n_clicks || 0;
+                return false;
+            }
+            if (!is_playing && window.lastRecordedAudio && n_clicks > lastPlayNClicks) {
+                lastPlayNClicks = n_clicks;
+                currentAudio = new Audio(window.lastRecordedAudio);
+                currentAudio.volume = (volume !== undefined && volume !== null) ? volume : 1.0;
+                console.log("Playing audio with volume:", currentAudio.volume);
 
-        if (!is_playing) {
+                currentAudio.addEventListener('ended', () => {
+                    console.log("Audio playback ended");
+                    currentAudio = null;
+                    clickHiddenButton('playback-ended-btn');
+                });
+
+                currentAudio.play().catch(err => {
+                    console.error("Playback error:", err);
+                    currentAudio = null;
+                });
+
+                return true;
+            } else if (!window.lastRecordedAudio) {
+                console.warn("No recording available to play");
+            }
+
+            return is_playing;
+        },
+
+        toggleMetronome: function (n_clicks, is_playing, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
+            console.log("toggleMetronome: n_clicks=", n_clicks, "is_playing=", is_playing, "tempo=", tempo,
+                "beatsPerMeasure=", beatsPerMeasure, "measuresPerPattern=", measuresPerPattern,
+                "volume=", volume, "hiToneOn=", hiToneOn, "onlyLowTone=", onlyLowTone);
+
+            if (!n_clicks) return is_playing;
+
+            updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
+
+            if (!is_playing) {
+                metronomeAutoStartedByRecording = false;
+                stopMetronomePlayback();
+                startMetronomePlayback({preserveOffset: false});
+                return true;
+            }
+
             metronomeAutoStartedByRecording = false;
             stopMetronomePlayback();
-            startMetronomePlayback({ preserveOffset: false });
-            return true;
+            return false;
+        },
+
+        playEndAlarm: function () {
+            try {
+                if (!audioContext || audioContext.state === 'closed') {
+                    audioContext = new (window.AudioContext || window['webkitAudioContext'])();
+                }
+                if (audioContext.state === 'suspended') {
+                    audioContext.resume();
+                }
+                // Three descending tones — loud and unmistakable
+                const tones = [
+                    {freq: 1200, delay: 0.0, dur: 0.25},
+                    {freq: 900, delay: 0.3, dur: 0.25},
+                    {freq: 600, delay: 0.6, dur: 0.5},
+                ];
+                tones.forEach(({freq, delay, dur}) => {
+                    const osc = audioContext.createOscillator();
+                    const gain = audioContext.createGain();
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(freq, audioContext.currentTime + delay);
+                    gain.gain.setValueAtTime(0.8, audioContext.currentTime + delay);
+                    gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + delay + dur);
+                    osc.connect(gain);
+                    gain.connect(audioContext.destination);
+                    osc.start(audioContext.currentTime + delay);
+                    osc.stop(audioContext.currentTime + delay + dur);
+                });
+                console.log("Played end alarm");
+            } catch (err) {
+                console.error("Error playing end alarm:", err);
+            }
+        },
+
+        showAutoStopMessage: function () {
+            try {
+                const statusMsg = document.getElementById('status-msg');
+                if (statusMsg) {
+                    statusMsg.textContent = 'Auto-stop: Recording reached 60-second limit. Processing audio...';
+                    console.log("Displayed auto-stop message");
+                }
+            } catch (err) {
+                console.error("Error showing auto-stop message:", err);
+            }
+        },
+        reconfigureMetronome: function (isPlaying, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
+            if (!isPlaying) return;
+
+            // Stop any in-progress recording
+            if (currentRecordingPhase === 'recording') {
+                stopActiveRecording();
+            } else if (currentRecordingPhase === 'delay') {
+                cancelPendingRecording();
+            }
+
+            updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
+            metronomeAutoStartedByRecording = false;
+            stopMetronomePlayback();
+            startMetronomePlayback({preserveOffset: false});
+        },
+
+        triggerPermissionDialog: function () {
+            console.log("Triggering permission dialog silently...");
+            const audioConstraints = {
+                audio: {
+                    echoCancellation: false,
+                    noiseSuppression: false,
+                    autoGainControl: false,
+                    sampleRate: {ideal: 48000}
+                }
+            };
+
+            navigator.mediaDevices.getUserMedia(audioConstraints)
+                .then(stream => {
+                    console.log("Permission granted or already present (silent trigger)");
+                    stream.getTracks().forEach(track => track.stop());
+                })
+                .catch(err => {
+                    console.warn("Silent permission trigger failed (user may have denied):", err);
+                });
         }
+    };
 
-        metronomeAutoStartedByRecording = false;
-        stopMetronomePlayback();
-        return false;
-    },
-
-    playEndAlarm: function() {
-        try {
-            if (!audioContext || audioContext.state === 'closed') {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-            }
-            if (audioContext.state === 'suspended') {
-                audioContext.resume();
-            }
-            // Three descending tones — loud and unmistakable
-            const tones = [
-                { freq: 1200, delay: 0.0,  dur: 0.25 },
-                { freq: 900,  delay: 0.3,  dur: 0.25 },
-                { freq: 600,  delay: 0.6,  dur: 0.5  },
-            ];
-            tones.forEach(({ freq, delay, dur }) => {
-                const osc = audioContext.createOscillator();
-                const gain = audioContext.createGain();
-                osc.type = 'square';
-                osc.frequency.setValueAtTime(freq, audioContext.currentTime + delay);
-                gain.gain.setValueAtTime(0.8, audioContext.currentTime + delay);
-                gain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + delay + dur);
-                osc.connect(gain);
-                gain.connect(audioContext.destination);
-                osc.start(audioContext.currentTime + delay);
-                osc.stop(audioContext.currentTime + delay + dur);
-            });
-            console.log("Played end alarm");
-        } catch (err) {
-            console.error("Error playing end alarm:", err);
-        }
-    },
-
-    showAutoStopMessage: function() {
-        try {
-            const statusMsg = document.getElementById('status-msg');
-            if (statusMsg) {
-                statusMsg.textContent = 'Auto-stop: Recording reached 60-second limit. Processing audio...';
-                console.log("Displayed auto-stop message");
-            }
-        } catch (err) {
-            console.error("Error showing auto-stop message:", err);
-        }
-    },
-    triggerPermissionDialog: function() {
-        console.log("Triggering permission dialog silently...");
-        const audioConstraints = {
-            audio: {
-                echoCancellation: false,
-                noiseSuppression: false,
-                autoGainControl: false,
-                sampleRate: { ideal: 48000 }
-            }
-        };
-
-        navigator.mediaDevices.getUserMedia(audioConstraints)
-            .then(stream => {
-                console.log("Permission granted or already present (silent trigger)");
-                stream.getTracks().forEach(track => track.stop());
-            })
-            .catch(err => {
-                console.warn("Silent permission trigger failed (user may have denied):", err);
-            });
-    }
-};
-
-window.recorderControls = recorderControls;
-window.dash_clientside = window.dash_clientside || {};
-window.dash_clientside.recorder = recorderControls;
-console.log("recorder.js: recorderControls initialized successfully.");
+    // reconfigureMetronome is called from a Dash clientside_callback embedded in main.py
+    void window.recorderControls.reconfigureMetronome;
+    window.dash_clientside = window.dash_clientside || {};
+    window.dash_clientside.recorder = window.recorderControls;
+    console.log("recorder.js: recorderControls initialized successfully.");
 
 // Trigger permission dialog on load
-if (typeof window !== 'undefined') {
-    window.addEventListener('load', () => {
-        setTimeout(() => {
-            if (window.recorderControls && window.recorderControls.triggerPermissionDialog) {
-                window.recorderControls.triggerPermissionDialog();
-            }
-        }, 1000); // Short delay to ensure browser context is ready
-    });
-}
+    if (typeof window !== 'undefined') {
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                if (window.recorderControls && window.recorderControls.triggerPermissionDialog) {
+                    window.recorderControls.triggerPermissionDialog();
+                }
+            }, 1000); // Short delay to ensure browser context is ready
+        });
+    }
 } catch (initErr) {
     console.error("recorder.js: CRITICAL - failed to initialize recorder namespace:", initErr, initErr.stack);
     // Install stubs so Dash doesn't cascade-crash on undefined.method() calls
     window.recorderControls = {
-        toggleRecording:    function() { console.error("recorder not initialized"); return false; },
-        playAudio:          function() { console.error("recorder not initialized"); return false; },
-        toggleMetronome:    function() { console.error("recorder not initialized"); return false; },
-        playEndAlarm:       function() {},
-        showAutoStopMessage:function() {}
+        toggleRecording: function () {
+            console.error("recorder not initialized");
+            return false;
+        },
+        playAudio: function () {
+            console.error("recorder not initialized");
+            return false;
+        },
+        toggleMetronome: function () {
+            console.error("recorder not initialized");
+            return false;
+        },
+        playEndAlarm: function () {
+        },
+        showAutoStopMessage: function () {
+        }
     };
     window.dash_clientside = window.dash_clientside || {};
     window.dash_clientside.recorder = window.recorderControls;

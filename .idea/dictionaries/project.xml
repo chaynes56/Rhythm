@@ -3,6 +3,7 @@
     <words>
       <w>displaylogo</w>
       <w>freqs</w>
+      <w>zindex</w>
     </words>
   </dictionary>
 </component>
