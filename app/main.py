@@ -575,9 +575,18 @@ app.layout = dbc.Container([
                         dbc.Col(
                             dcc.Markdown(
                                 id="analysis-data-block",
-                                style={"width": "400px", "height": "200px"},
+                                style={"width": "350px", "height": "200px"},
                             ),
                             width="auto"
+                        ),
+                        dbc.Col(
+                            dcc.Graph(
+                                id="interval-histogram",
+                                style={"height": "200px", "width": "350px",
+                                       "display": "none"},
+                                config={"staticPlot": True},  # type: ignore[arg-type]
+                            ),
+                            width="auto",
                         ),
                         dbc.Col(
                             html.Div(id="subdivision-table-container"),
@@ -981,7 +990,7 @@ else:
     clientside_callback(
         """
         function(waveform_visible) {
-            return { visibility: waveform_visible ? 'visible' : 'hidden' };
+            return { width: '350px', visibility: waveform_visible ? 'visible' : 'hidden' };
         }
         """,
         Output("analysis-data-block", "style"),
@@ -1005,6 +1014,16 @@ clientside_callback(
     }
     """,
     Output("subdivision-table-container", "style"),
+    Input("waveform-visible-store", "data"),
+)
+
+clientside_callback(
+    """
+    function(waveform_visible) {
+        return { height: '200px', width: '350px', display: waveform_visible ? 'block' : 'none' };
+    }
+    """,
+    Output("interval-histogram", "style"),
     Input("waveform-visible-store", "data"),
 )
 
@@ -1167,7 +1186,7 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         pulse_count = len(beat_times)
         dt = 60 / data.get("tempo") / subdivisions_per_beat  # seconds per subdivision
         if pulse_count == 0:
-            return f"**0** pulses detected in **{beat_count}** beats{window_note}.", ""
+            return f"No pulses detected in **{beat_count}** beats{window_note}.", ""
         deviations = np.array([((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
         mean = deviations.mean()
         std = deviations.std()
@@ -1175,10 +1194,10 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         median = np.median(deviations)
         markdown_text = f"""**{pulse_count}** pulses detected in **{beat_count}**
         beats{window_note}, which is **{(pulse_count / beat_count):.2f}** pulses per
-        beat.  \n The following statistics reflect time deviations from the start of
-        each **{round(dt * 1000)}** ms subdivision.  \n **{round(mean)}** mean,
-        **{round(median)}** median, **{round(std)}** std dev, **{round(maximum)}** maximum (ms)
-        """
+        beat. The following statistics reflect time deviations from the start of
+        each **{round(dt * 1000)}** ms subdivision: **{round(mean)}** mean,
+        **{round(median)}** median, **{round(std)}** std dev, **{round(maximum)}** max 
+        (ms)"""
         return markdown_text, ""
     except Exception as exc:
         print(f"update_analysis: {exc}")
@@ -1320,6 +1339,54 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
     except Exception as e:
         print(f"update_subdivision_table: {e}")
         return None
+
+
+@app.callback(
+    Output("interval-histogram", "figure"),
+    Input("audio-store", "data"),
+    Input("waveform-graph", "relayoutData"),
+    prevent_initial_call=True,
+)
+def update_interval_histogram(audio_json, relayout_data):
+    if not audio_json:
+        return go.Figure()
+    try:
+        data = json.loads(audio_json)
+        all_beat_times = np.array(data.get("beat_times", []))
+        if len(all_beat_times) < 2:
+            return go.Figure()
+
+        beat_times = all_beat_times
+        if relayout_data and ctx.triggered_id != "audio-store":
+            if "xaxis.range[0]" in relayout_data:
+                t0, t1 = relayout_data["xaxis.range[0]"], relayout_data["xaxis.range[1]"]
+                beat_times = all_beat_times[(all_beat_times >= t0) & (all_beat_times <= t1)]
+            elif "xaxis.range" in relayout_data:
+                t0, t1 = relayout_data["xaxis.range"]
+                beat_times = all_beat_times[(all_beat_times >= t0) & (all_beat_times <= t1)]
+
+        if len(beat_times) < 2:
+            return go.Figure()
+
+        intervals_ms = np.diff(beat_times) * 1000
+        print(f"update_interval_histogram: {len(beat_times)} pulses, {len(intervals_ms)} intervals")
+        print(f"  sorted intervals (ms): {sorted(round(x, 1) for x in intervals_ms.tolist())}")
+
+        fig = go.Figure(go.Histogram(
+            x=intervals_ms,
+            xbins=dict(size=1),
+            marker_color="steelblue",
+        ))
+        fig.update_layout(
+            xaxis_title="Interval (ms)",
+            yaxis_title="Count",
+            template="plotly_white",
+            margin=dict(l=50, r=20, t=20, b=40),
+        )
+        return fig
+    except Exception as e:
+        print(f"update_interval_histogram: {e}")
+        return go.Figure()
 
 
 @app.callback(

@@ -48,7 +48,9 @@ is often noticeable.
 
 Timing errors are indicated in the bar graph below the waveform, and as summary 
 statistics in the Analysis section below the waveform. The Training Level selected
-determines the color coding thresholds.
+determines the color-coding thresholds. In the bar graph, note especially trends 
+that indicate timing drift. A sudden flip from large positive to negative values, or 
+visa versa, is characteristic of a drift from one subdivision to another. 
 
 The first statistics presented in the text area 
 are the number of pulses and beats in the selected interval.
