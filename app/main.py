@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 import soundfile as sf
 from dash import Dash, ctx, dcc, html, Input, Output, State, clientside_callback
 from dash.exceptions import PreventUpdate
-from scipy.signal import welch as scipy_welch, resample as scipy_resample
+from scipy.signal import welch as scipy_welch, resample as scipy_resample, find_peaks
 
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
@@ -248,6 +248,53 @@ def serialize_audio_to_base64_wav(y: np.ndarray, sr: int) -> str:
         wav_bytes = buffer.getvalue()
     encoded = base64.b64encode(wav_bytes).decode("ascii")
     return f"data:audio/wav;base64,{encoded}"
+
+
+def detect_onsets_rms(y: np.ndarray, sr: int,
+                      hop_ms: float = 1.0,
+                      smooth_ms: float = 5.0) -> tuple[np.ndarray, np.ndarray, np.ndarray, int]:
+    """
+    Detect percussion onsets using positive first-difference of a smoothed RMS envelope.
+
+    Designed for downsampled recordings (e.g. 4 kHz) where librosa's minimum hop_length
+    gives ~16 ms frame resolution — too coarse for timing feedback. Returns ~1 ms
+    resolution at 4 kHz.
+
+    Returns:
+        onset_times: detected onset times in seconds
+        onset_frames: corresponding frame indices into onset_env_norm
+        onset_env_norm: normalized onset-strength envelope (for waveform display)
+        hop: hop size in samples
+    """
+    hop = max(1, int(round(sr * hop_ms / 1000)))
+    smooth_frames = max(1, int(round(smooth_ms / hop_ms)))
+
+    n_frames = len(y) // hop
+    if n_frames < 2:
+        empty = np.zeros(1, dtype=np.float32)
+        return np.array([]), np.array([], dtype=int), empty, hop
+
+    frames = y[:n_frames * hop].reshape(n_frames, hop).astype(np.float32)
+    rms = np.sqrt(np.mean(frames ** 2, axis=1))
+
+    if smooth_frames > 1:
+        kernel = np.full(smooth_frames, 1.0 / smooth_frames, dtype=np.float32)
+        rms = np.asarray(np.convolve(rms, kernel, mode='same'), dtype=np.float32)
+
+    # Onset strength = positive first-difference of smoothed RMS
+    onset_strength = np.maximum(0.0, np.diff(rms, prepend=rms[:1]))
+    peak = float(onset_strength.max())
+    onset_env_norm: np.ndarray = np.asarray(onset_strength / (peak + 1e-12), dtype=np.float32)
+
+    min_distance_frames = max(1, int(BEAT_MIN_SPACING_SECONDS * 1000 / hop_ms))
+    onset_frames_arr, _ = find_peaks(
+        onset_env_norm,
+        height=BEAT_MIN_AMPLITUDE_FRACTION,
+        distance=min_distance_frames,
+    )
+    onset_times = onset_frames_arr * hop / sr
+
+    return onset_times, onset_frames_arr, onset_env_norm, hop
 
 
 def filter_beat_times(beat_times: np.ndarray, onset_env_norm: np.ndarray,
@@ -1557,50 +1604,12 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
         trimmed_audio_base64 = serialize_audio_to_base64_wav(y, sr)
         y = normalize_waveform_for_display(y)
 
-        # Pulse analysis
-        # Scale hop_length and n_fft to preserve ~11.6ms/frame resolution and ~46ms window
-        # across sample rates (maintains the 4:1 n_fft/hop_length ratio from the
-        # 44,100 Hz default).
-        hop_length = max(64, int(512 * sr / 44100))
-        n_fft = hop_length * 4
-        # Wideband spectral flux — good for high-frequency / tonal hits.
-        onset_env_wide = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
-                                                      n_fft=n_fft)
-        # Bass-limited spectral flux (fmax=500 Hz) — captures bass hits that are diluted
-        # when averaged across all mel bands in the wideband envelope.
-        onset_env_bass = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
-                                                      n_fft=n_fft, fmax=500)
-        # Combine raw envelopes before normalizing so there is a single global maximum.
-        # Normalizing each separately then taking np.maximum creates multiple frames at
-        # exactly 1.0 (one per envelope's peak), which causes peak_pick to suppress an
-        # adjacent beat via the wait window with no console trace.
-        onset_env_norm: np.ndarray = np.asarray(onset_env_wide + onset_env_bass, dtype=np.float32)
-        onset_env_norm = onset_env_norm / (float(onset_env_norm.max()) + 1e-12)
-
-        # These 2 lines of code are causing a worker crash on cloud,
-        # log shows numba/llvmlite JIT compile path.
-        # tempo_detected, beats = librosa.beat.beat_track(onset_envelope=onset_env, sr=sr, bpm=tempo)
-        # beat_times = librosa.frames_to_time(beats, sr=sr)
-        # ...So replacing beat tracking with simpler onset detection.
-        # wait=1: only blocks the immediately adjacent frame from being a duplicate peak.
-        # filter_beat_times owns all real spacing and amplitude enforcement; using a large
-        # wait here would blind-gate real beats that follow spurious low-amplitude detections.
-        onset_frames = librosa.onset.onset_detect(
-            onset_envelope=onset_env_norm,
-            sr=sr,
-            hop_length=hop_length,
-            units="frames",
-            backtrack=False,
-            wait=0,
-            delta=0,
-            # disable mean+delta gate; filter_beat_times enforces amplitude threshold
-        )
-        beat_times = librosa.frames_to_time(onset_frames, sr=sr, hop_length=hop_length)
+        # Pulse analysis — RMS envelope positive first-difference at ~1 ms resolution
+        beat_times, onset_frames, onset_env_norm, hop_length = detect_onsets_rms(y, sr)
         print(
-            f"process_audio: onset_detect found {len(onset_frames)} frames, beat_times range [{beat_times.min():.2f}, {beat_times.max():.2f}]s" if len(
-                onset_frames) else "process_audio: onset_detect found 0 frames")
-        beat_times = filter_beat_times(beat_times, onset_env_norm, onset_frames)
-        print(f"process_audio: after filter: {len(beat_times)} beats")
+            f"process_audio: detect_onsets_rms found {len(beat_times)} onsets" +
+            (f", range [{beat_times.min():.2f}, {beat_times.max():.2f}]s"
+             if len(beat_times) else ""))
         beat_times = beat_times - WAVEFORM_DISPLAY_SHIFT_SECONDS
 
         # Metronome points (ideal points based on tempo)
@@ -1732,14 +1741,7 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat):
             except Exception as spec_err:
                 print(f"load_recording: spectrum failed: {spec_err}")
 
-        hop_length = max(64, int(512 * sr / 44100))
-        n_fft = hop_length * 4
-        onset_env_wide = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
-                                                      n_fft=n_fft)
-        onset_env_bass = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length,
-                                                      n_fft=n_fft, fmax=500)
-        onset_env_norm: np.ndarray = np.asarray(onset_env_wide + onset_env_bass, dtype=np.float32)
-        onset_env_norm = onset_env_norm / (float(onset_env_norm.max()) + 1e-12)
+        _, _, onset_env_norm, hop_length = detect_onsets_rms(y, sr)
 
         y = normalize_waveform_for_display(y)
 
