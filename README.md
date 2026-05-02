@@ -96,6 +96,12 @@ deviation from the wrong subdivision.
   This complexity allows more advanced exercises, but most exercises are a 
   single pattern and a number of patterns are a single measure. 
 
+## Settings
+
+The Save Settings button stores the current settings in the browser's default 
+download folder (typically `Downloads` or `My Documents`) in YAML format. 
+The Load Settings button restores the settings from the selected `.yaml` file.
+
 ## Local server
 
 The technically proficient may download the app from its 

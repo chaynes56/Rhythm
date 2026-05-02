@@ -15,8 +15,9 @@ import librosa
 import numpy as np
 import plotly.graph_objects as go
 import soundfile as sf
-from dash import Dash, ctx, dcc, html, Input, Output, State, clientside_callback
+from dash import Dash, ctx, dcc, html, Input, no_update, Output, State, clientside_callback
 from dash.exceptions import PreventUpdate
+from ruamel.yaml import YAML
 from scipy.signal import welch as scipy_welch, resample as scipy_resample, find_peaks
 
 # Suppress librosa deprecation warnings to clean up console output
@@ -55,6 +56,23 @@ SPECTRUM_GRAPH_WIDTH_PX = 500  # px
 
 RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(
     encoding="utf-8").replace("</script>", r"<\/script>")
+
+DEFAULT_SETTINGS_YAML = """
+# Rhythm app settings
+training-level: Novice
+subdivisions-per-beat: 4
+recording-vol: 1.0
+playback-vol: 1.0
+measures-per-pattern: 1
+beats-per-measure: 4
+play-hi-tone: true
+play-only-low-tone: false
+tempo-slider: 120
+metronome-vol: 0.5
+"""
+
+_yaml = YAML(typ='safe', pure=True)
+settings = _yaml.load(DEFAULT_SETTINGS_YAML)
 
 
 def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
@@ -603,7 +621,7 @@ app.layout = dbc.Container([
                                 id="training-level",
                                 options=[{"label": k, "value": k} for k in
                                          TRAINING_LEVEL],
-                                value="Novice",
+                                value=settings["training-level"],
                                 clearable=False,
                                 style={"width": "140px"},
                             ),
@@ -614,7 +632,7 @@ app.layout = dbc.Container([
                                 id="subdivisions-per-beat",
                                 options=[{"label": str(i), "value": i} for i in
                                          range(1, 7)],
-                                value=4,
+                                value=settings["subdivisions-per-beat"],
                                 clearable=False,
                                 style={"width": "110px"},
                             ),
@@ -661,7 +679,7 @@ app.layout = dbc.Container([
     dbc.Row([
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader("Recording & Playback"),
+                dbc.CardHeader("Recording \u2014 Playback \u2014 Settings"),
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
@@ -671,7 +689,12 @@ app.layout = dbc.Container([
                                        className="me-2"),
                             dbc.Button("Save Recording", id="save-btn", color="primary",
                                        className="me-2"),
-                            dbc.Button("Load Recording", id="load-btn", color="info"),
+                            dbc.Button("Load Recording", id="load-btn", color="info",
+                                       className="me-2"),
+                            dbc.Button("Save Settings", id="save-settings-btn",
+                                       color="secondary", className="me-2"),
+                            dbc.Button("Load Settings", id="load-settings-btn",
+                                       color="secondary"),
                         ], width=12),
                     ], className="mb-2"),
                     dcc.Checklist(id="is-recording", options=[
@@ -683,12 +706,12 @@ app.layout = dbc.Container([
                     dbc.Row([
                         dbc.Col([
                             html.Label("Recording Volume", className="small"),
-                            dcc.Slider(min=0, max=1, step=0.1, value=1.0,
+                            dcc.Slider(min=0, max=1, step=0.1, value=settings["recording-vol"],
                                        id="recording-vol"),
                         ], width=6),
                         dbc.Col([
                             html.Label("Playback Volume", className="small"),
-                            dcc.Slider(min=0, max=1, step=0.1, value=1.0,
+                            dcc.Slider(min=0, max=1, step=0.1, value=settings["playback-vol"],
                                        id="playback-vol"),
                         ], width=6),
                     ]),
@@ -709,7 +732,7 @@ app.layout = dbc.Container([
                                 id="measures-per-pattern",
                                 options=[{"label": str(i), "value": i} for i in
                                          range(1, 9)],
-                                value=1,
+                                value=settings["measures-per-pattern"],
                                 clearable=False,
                                 style={"width": "90px"},
                             ),
@@ -718,7 +741,7 @@ app.layout = dbc.Container([
                                 id="beats-per-measure",
                                 options=[{"label": str(i), "value": i} for i in
                                          range(1, 17)],
-                                value=4,
+                                value=settings["beats-per-measure"],
                                 clearable=False,
                                 style={"width": "90px"},
                             ),
@@ -727,20 +750,20 @@ app.layout = dbc.Container([
                             dbc.Switch(
                                 id="play-hi-tone",
                                 label="Play High Tone",
-                                value=True,
+                                value=settings["play-hi-tone"],
                                 style={"marginTop": "20px"}
                             ),
                             dbc.Switch(
                                 id="play-only-low-tone",
                                 label="Play Only Low Tone",
-                                value=False,
+                                value=settings["play-only-low-tone"],
                             ),
                         ], width="auto"),
                         dbc.Col([
                             html.Label("Beat", className="small d-block"),
                             html.Div(
                                 id="beat-indicator-container",
-                                children=build_beat_indicator_boxes(4, 1),
+                                children=build_beat_indicator_boxes(settings["beats-per-measure"], settings["measures-per-pattern"]),
                                 className="d-flex flex-column",
                             ),
                         ], width="auto"),
@@ -751,13 +774,13 @@ app.layout = dbc.Container([
                     dbc.Row([
                         dbc.Col([
                             html.Label("Tempo (BPM)", className="small"),
-                            dcc.Slider(min=40, max=240, step=1, value=120,
+                            dcc.Slider(min=40, max=240, step=1, value=settings["tempo-slider"],
                                        id="tempo-slider",
                                        marks={i: str(i) for i in range(40, 241, 40)}),
                         ], width=6),
                         dbc.Col([
                             html.Label("Metronome Volume", className="small"),
-                            dcc.Slider(min=0, max=1, step=0.1, value=0.5,
+                            dcc.Slider(min=0, max=1, step=0.1, value=settings["metronome-vol"],
                                        id="metronome-vol"),
                         ], width=6),
                     ]),
@@ -786,6 +809,8 @@ app.layout = dbc.Container([
                n_clicks=0),
     dcc.Download(id="download-audio"),
     dcc.Upload(id="upload-audio", style={"display": "none"}),
+    dcc.Download(id="download-settings"),
+    dcc.Store(id="settings-raw-store"),
 ], fluid=True)
 
 # Clientside callbacks for recording and playback
@@ -1422,7 +1447,7 @@ def update_interval_histogram(audio_json, relayout_data):
         fig = go.Figure(go.Histogram(
             x=intervals_ms,
             xbins=dict(size=1),
-            marker_color="steelblue",
+            marker=dict(color="steelblue"),
         ))
         fig.update_layout(
             xaxis_title="Interval (ms)",
@@ -1783,6 +1808,113 @@ clientside_callback(
     Output("load-btn", "n_clicks"),
     Input("load-btn", "n_clicks"),
 )
+
+clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks) {
+            var fileInput = document.createElement('input');
+            fileInput.type = 'file';
+            fileInput.accept = '.yaml,.yml';
+            fileInput.onchange = function(e) {
+                var file = e.target.files[0];
+                if (!file) return;
+                var reader = new FileReader();
+                reader.onload = function(evt) {
+                    window.dash_clientside.set_props('settings-raw-store', {
+                        data: {content: evt.target.result, ts: Date.now()}
+                    });
+                };
+                reader.readAsText(file);
+            };
+            fileInput.click();
+        }
+        return n_clicks;
+    }
+    """,
+    Output("load-settings-btn", "n_clicks"),
+    Input("load-settings-btn", "n_clicks"),
+)
+
+
+@app.callback(
+    Output("download-settings", "data"),
+    Input("save-settings-btn", "n_clicks"),
+    State("training-level", "value"),
+    State("subdivisions-per-beat", "value"),
+    State("recording-vol", "value"),
+    State("playback-vol", "value"),
+    State("measures-per-pattern", "value"),
+    State("beats-per-measure", "value"),
+    State("play-hi-tone", "value"),
+    State("play-only-low-tone", "value"),
+    State("tempo-slider", "value"),
+    State("metronome-vol", "value"),
+    prevent_initial_call=True,
+)
+def save_settings(n_clicks, training_level, subdivisions, rec_vol, play_vol,
+                  measures, beats, play_hi, play_only_low, tempo, metro_vol):
+    current = {
+        "training-level": training_level,
+        "subdivisions-per-beat": subdivisions,
+        "recording-vol": rec_vol,
+        "playback-vol": play_vol,
+        "measures-per-pattern": measures,
+        "beats-per-measure": beats,
+        "play-hi-tone": bool(play_hi),
+        "play-only-low-tone": bool(play_only_low),
+        "tempo-slider": tempo,
+        "metronome-vol": metro_vol,
+    }
+    buf = io.StringIO()
+    _yaml_out = YAML()
+    _yaml_out.dump(current, buf)
+    return dict(content=buf.getvalue(), filename="rhythm_settings.yaml")
+
+
+@app.callback(
+    Output("training-level", "value"),
+    Output("subdivisions-per-beat", "value"),
+    Output("recording-vol", "value"),
+    Output("playback-vol", "value"),
+    Output("measures-per-pattern", "value"),
+    Output("beats-per-measure", "value"),
+    Output("play-hi-tone", "value"),
+    Output("play-only-low-tone", "value"),
+    Output("tempo-slider", "value"),
+    Output("metronome-vol", "value"),
+    Output("status-msg", "children", allow_duplicate=True),
+    Input("settings-raw-store", "data"),
+    prevent_initial_call=True,
+)
+def load_settings(data):
+    if data is None:
+        raise PreventUpdate
+    no_change = (no_update,) * 10
+    try:
+        text = data["content"]
+        loaded = _yaml.load(text)
+        if not isinstance(loaded, dict):
+            raise ValueError("Settings file did not contain a YAML mapping")
+        training_level_val = loaded.get("training-level", settings["training-level"])
+        print(f"load_settings: loaded keys = {list(loaded.keys())}, training-level = {training_level_val!r}")
+        return (
+            training_level_val,
+            loaded.get("subdivisions-per-beat", settings["subdivisions-per-beat"]),
+            loaded.get("recording-vol", settings["recording-vol"]),
+            loaded.get("playback-vol", settings["playback-vol"]),
+            loaded.get("measures-per-pattern", settings["measures-per-pattern"]),
+            loaded.get("beats-per-measure", settings["beats-per-measure"]),
+            loaded.get("play-hi-tone", settings["play-hi-tone"]),
+            loaded.get("play-only-low-tone", settings["play-only-low-tone"]),
+            loaded.get("tempo-slider", settings["tempo-slider"]),
+            loaded.get("metronome-vol", settings["metronome-vol"]),
+            "",
+        )
+    except Exception as e:
+        print(f"load_settings error: {e}")
+        return (*no_change, f"Failed to load settings: {e}")
+
 
 if __name__ == '__main__':
     app.run(debug=True, port=8006)
