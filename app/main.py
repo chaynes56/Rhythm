@@ -23,7 +23,8 @@ from scipy.signal import welch as scipy_welch, resample as scipy_resample, find_
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.064
+WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.017
+RECORDING_PRE_ROLL_SECONDS = 0.200
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
 AUDIO_STOP_CLICK_TRIM_SECONDS = 0.25
@@ -54,11 +55,59 @@ FFT_DISPLAY_POINTS = 500  # log-spaced output points for serialization
 SPECTRUM_GRAPH_HEIGHT_PX = 160  # px
 SPECTRUM_GRAPH_WIDTH_PX = 500  # px
 
+METRONOME_SAMPLE_RATE = 22050
+METRONOME_TICK_DURATION = 0.04  # seconds
+METRONOME_TARGET_LOOP_SECONDS = 30.0
+METRONOME_MAX_LOOP_SECONDS = 300.0
+_METRONOME_TONE_FREQS = {'low': 294, 'mid': 440, 'high': 587}
+
+
+def _make_metronome_tick(sr, tone_type):
+    n = int(sr * METRONOME_TICK_DURATION)
+    t = np.arange(n) / sr
+    return np.sin(2 * np.pi * _METRONOME_TONE_FREQS[tone_type] * t) * np.exp(-40 * t)
+
+
+def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi, play_only_low):
+    sr = METRONOME_SAMPLE_RATE
+    seconds_per_beat = 60.0 / tempo
+    pattern_duration = seconds_per_beat * beats_per_measure * measures_per_pattern
+    n_patterns = max(1, round(METRONOME_TARGET_LOOP_SECONDS / pattern_duration))
+    while n_patterns * pattern_duration > METRONOME_MAX_LOOP_SECONDS:
+        n_patterns -= 1
+    n_patterns = max(1, n_patterns)
+    track_samples = round(n_patterns * pattern_duration * sr)
+    track = np.zeros(track_samples)
+    for p in range(n_patterns):
+        for m in range(measures_per_pattern):
+            for b in range(beats_per_measure):
+                if b == 0 and m == 0:
+                    tone_type, should_play = 'low', True
+                elif b == 0:
+                    tone_type, should_play = 'mid', not bool(play_only_low)
+                else:
+                    tone_type = 'high'
+                    should_play = bool(play_hi) and not bool(play_only_low)
+                if not should_play:
+                    continue
+                beat_time = ((p * measures_per_pattern + m) * beats_per_measure + b) * seconds_per_beat
+                start = round(beat_time * sr)
+                tick = _make_metronome_tick(sr, tone_type)
+                end = min(start + len(tick), track_samples)
+                track[start:end] += tick[:end - start]
+    peak = np.max(np.abs(track))
+    if peak > 0:
+        track *= 0.9 / peak
+    buf = io.BytesIO()
+    sf.write(buf, track, sr, format='WAV', subtype='PCM_16')
+    buf.seek(0)
+    return 'data:audio/wav;base64,' + base64.b64encode(buf.read()).decode()
+
+
 RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(
     encoding="utf-8").replace("</script>", r"<\/script>")
 
 DEFAULT_SETTINGS_YAML = """
-# Rhythm app settings
 training-level: Novice
 subdivisions-per-beat: 4
 recording-vol: 1.0
@@ -69,6 +118,7 @@ play-hi-tone: true
 play-only-low-tone: false
 tempo-slider: 120
 metronome-vol: 0.5
+custom-exercises: |-
 """
 
 _yaml = YAML(typ='safe', pure=True)
@@ -811,7 +861,32 @@ app.layout = dbc.Container([
     dcc.Upload(id="upload-audio", style={"display": "none"}),
     dcc.Download(id="download-settings"),
     dcc.Store(id="settings-raw-store"),
+    dcc.Store(id="metronome-track-store"),
 ], fluid=True)
+
+@app.callback(
+    Output("metronome-track-store", "data"),
+    Input("tempo-slider", "value"),
+    Input("beats-per-measure", "value"),
+    Input("measures-per-pattern", "value"),
+    Input("play-hi-tone", "value"),
+    Input("play-only-low-tone", "value"),
+)
+def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi, play_only_low):
+    try:
+        data_url = compute_metronome_track(
+            tempo or 120,
+            beats_per_measure or 4,
+            measures_per_pattern or 1,
+            bool(play_hi),
+            bool(play_only_low),
+        )
+        print(f"update_metronome_track: {beats_per_measure}/{measures_per_pattern} at {tempo} BPM")
+        return data_url
+    except Exception as e:
+        print(f"update_metronome_track error: {e}")
+        raise PreventUpdate
+
 
 # Clientside callbacks for recording and playback
 clientside_callback(
@@ -914,6 +989,20 @@ clientside_callback(
     Input("play-hi-tone", "value"),
     Input("play-only-low-tone", "value"),
     State("is-metronome-playing", "value"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
+    function(trackData) {
+        if (trackData && window.recorderControls && window.recorderControls.loadMetronomeTrack) {
+            window.recorderControls.loadMetronomeTrack(trackData);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("metronome-command-store", "data", allow_duplicate=True),
+    Input("metronome-track-store", "data"),
     prevent_initial_call=True,
 )
 
@@ -1153,16 +1242,6 @@ def clear_msg_on_load(n_clicks):
     return ""
 
 
-@app.callback(
-    Output("metronome-btn", "children"),
-    Output("metronome-btn", "color"),
-    Input("is-metronome-playing", "value")
-)
-def update_metronome_button(playing_value):
-    if "playing" in playing_value:
-        return "Stop Metronome", "secondary"
-    return "Start Metronome", "primary"
-
 
 @app.callback(
     Output("record-btn", "children"),
@@ -1326,6 +1405,8 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
 
         for t, dev in zip(beat_times, deviations_ms):
             nearest_n = int(round(t / dt))
+            if nearest_n < 0:
+                continue
             measure_idx = (nearest_n // subs_per_measure) % mpp
             pos_in_measure = nearest_n % subs_per_measure
             beat_idx = pos_in_measure // spb
@@ -1539,7 +1620,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
         fig.add_hline(y=0, line_width=1, line_color="gray", line_dash="dot")
         fig.update_layout(
             xaxis_title="Time (s)",
-            yaxis_title="Deviation (ms)",
+            yaxis_title="Early \u2014 milliseconds \u2014 Late",
             yaxis_range=[-dt_ms / 2, dt_ms / 2],
             yaxis_fixedrange=True,
             dragmode=False,

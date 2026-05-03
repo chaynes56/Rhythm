@@ -96,6 +96,31 @@ deviation from the wrong subdivision.
   This complexity allows more advanced exercises, but most exercises are a 
   single pattern and a number of patterns are a single measure. 
 
+## Metronome beat indicator and audio latency
+
+The metronome beat indicator (the highlighted box that advances with each beat) 
+is synchronized to the audio output using the browser's reported hardware latency. 
+On most wired or built-in audio devices the indicator and the audible beat will 
+align closely. 
+
+**Bluetooth audio devices** introduce additional codec buffering (typically 100–500 ms, 
+sometimes more) that the browser cannot measure. This affects both the beat indicator 
+and recording accuracy:
+
+- The **beat indicator** will appear to advance one or more beats ahead of the sound
+  you hear.
+- **Recording accuracy** is affected if you time your playing to the sound you hear
+  through the Bluetooth device. Your beats will be recorded late by approximately
+  the Bluetooth latency, appearing as a consistent negative timing error in the
+  analysis.
+
+For best results when using Bluetooth, use the wired (built-in) speakers or headphones 
+for metronome output while recording, or account for the latency when interpreting 
+the analysis. A future version of the app will include a manual calibration step 
+(hold the Bluetooth device near the microphone while the metronome plays, then click 
+Calibrate) that measures this extra latency automatically and corrects both the 
+indicator and the analysis grid.
+
 ## Settings
 
 The Save Settings button stores the current settings in the browser's default 
