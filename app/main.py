@@ -23,7 +23,7 @@ from scipy.signal import welch as scipy_welch, resample as scipy_resample, find_
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.017
+WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.025  # increase when pulses are late
 RECORDING_PRE_ROLL_SECONDS = 0.200
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
@@ -531,6 +531,10 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
             for s in range(1, subdivisions_per_beat):
                 sub_times.append(
                     metronome_times[i] + s * beat_dur / subdivisions_per_beat)
+        # Extrapolate subdivisions after the last beat
+        last_beat_dur = metronome_times[-1] - metronome_times[-2]
+        for s in range(1, subdivisions_per_beat):
+            sub_times.append(metronome_times[-1] + s * last_beat_dur / subdivisions_per_beat)
         fig.add_trace(go.Scatter(
             x=sub_times,
             y=[y_max * 1.05] * len(sub_times),
@@ -641,7 +645,7 @@ app.layout = dbc.Container([
                 id="waveform-graph",
                 style={"height": "260px", "visibility": "hidden"},
                 # ~6:1+ on typical desktop widths
-                config=dict(scrollZoom=True, displayModeBar=True,  # type: ignore[arg-type]
+                config=dict(scrollZoom=False, displayModeBar=True,  # type: ignore[arg-type]
                             modeBarButtonsToRemove=["pan2d", "select2d", "lasso2d",
                                                     "autoScale2d"], displaylogo=False),
             ),
