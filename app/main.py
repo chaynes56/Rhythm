@@ -748,7 +748,9 @@ app.layout = dbc.Container([
                             dbc.Button("Save Settings", id="save-settings-btn",
                                        color="secondary", className="me-2"),
                             dbc.Button("Load Settings", id="load-settings-btn",
-                                       color="secondary"),
+                                       color="secondary", className="me-2"),
+                            dbc.Button("Calibrate", id="calibrate-btn",
+                                       color="warning"),
                         ], width=12),
                     ], className="mb-2"),
                     dcc.Checklist(id="is-recording", options=[
@@ -861,12 +863,128 @@ app.layout = dbc.Container([
               style={"display": "none"}),
     dbc.Button("Process", id="audio-process-btn", style={"display": "none"},
                n_clicks=0),
+    dbc.Button("Calibration Process", id="calibration-process-btn",
+               style={"display": "none"}, n_clicks=0),
     dcc.Download(id="download-audio"),
     dcc.Upload(id="upload-audio", style={"display": "none"}),
     dcc.Download(id="download-settings"),
     dcc.Store(id="settings-raw-store"),
     dcc.Store(id="metronome-track-store"),
+    dcc.Store(id="calibration-audio-data-store"),
+    dcc.Store(id="calibration-offset-store"),
+    dcc.Store(id="calibration-command-store"),
+    dcc.Interval(id="auto-calibrate-interval", interval=3000, n_intervals=0,
+                 max_intervals=1),
 ], fluid=True)
+
+# Calibration clientside callbacks
+clientside_callback(
+    """
+    function(n_clicks, tempo, beats, measures, volume, hiTone, onlyLow) {
+        if (n_clicks && window.recorderControls && window.recorderControls.startCalibration) {
+            window.recorderControls.startCalibration(
+                tempo, beats, measures, volume, !!hiTone, !!onlyLow);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("calibration-command-store", "data"),
+    Input("calibrate-btn", "n_clicks"),
+    State("tempo-slider", "value"),
+    State("beats-per-measure", "value"),
+    State("measures-per-pattern", "value"),
+    State("metronome-vol", "value"),
+    State("play-hi-tone", "value"),
+    State("play-only-low-tone", "value"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
+    function(n_intervals, tempo, beats, measures, volume, hiTone, onlyLow, existing) {
+        if (n_intervals > 0 && (existing === null || existing === undefined)) {
+            if (window.recorderControls && window.recorderControls.startCalibration) {
+                window.recorderControls.startCalibration(
+                    tempo, beats, measures, volume, !!hiTone, !!onlyLow);
+            }
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("calibration-command-store", "data", allow_duplicate=True),
+    Input("auto-calibrate-interval", "n_intervals"),
+    State("tempo-slider", "value"),
+    State("beats-per-measure", "value"),
+    State("measures-per-pattern", "value"),
+    State("metronome-vol", "value"),
+    State("play-hi-tone", "value"),
+    State("play-only-low-tone", "value"),
+    State("calibration-offset-store", "data"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
+    function(n_clicks) {
+        if (window.calibrationRecordedAudio) {
+            const result = window.calibrationRecordedAudio;
+            window.calibrationRecordedAudio = null;
+            return result;
+        }
+        return null;
+    }
+    """,
+    Output("calibration-audio-data-store", "data"),
+    Input("calibration-process-btn", "n_clicks"),
+)
+
+
+@app.callback(
+    Output("calibration-offset-store", "data"),
+    Output("process-status", "children", allow_duplicate=True),
+    Input("calibration-audio-data-store", "data"),
+    State("tempo-slider", "value"),
+    prevent_initial_call=True,
+)
+def process_calibration(base64_audio, tempo):
+    if not base64_audio:
+        raise PreventUpdate
+    try:
+        if ',' in base64_audio:
+            _, data = base64_audio.split(',', 1)
+        else:
+            data = base64_audio
+        audio_bytes = base64.b64decode(data)
+
+        try:
+            with io.BytesIO(audio_bytes) as f:
+                y, sr = sf.read(f)
+        except Exception:
+            result = load_audio_from_bytes(audio_bytes)
+            if result is None:
+                return no_update, "Calibration failed: could not load audio"
+            y, sr = result
+
+        if len(y.shape) > 1:
+            y = y.mean(axis=1)
+        y = trim_audio_tail(np.asarray(y, dtype=np.float32), sr)
+        y = normalize_waveform_for_display(y)
+
+        beat_times, _, _, _ = detect_onsets_rms(y, sr)
+        beat_times = beat_times - WAVEFORM_DISPLAY_SHIFT_SECONDS
+
+        if len(beat_times) < 2:
+            return no_update, "Calibration failed: too few beats detected"
+
+        seconds_per_beat = 60.0 / (tempo or 120)
+        phase_offset_s = float(np.median(beat_times % seconds_per_beat))
+        offset_ms = round(phase_offset_s * 1000, 1)
+        print(f"process_calibration: offset={offset_ms}ms from {len(beat_times)} beats")
+        return offset_ms, f"Calibrated: {offset_ms} ms offset"
+    except Exception as e:
+        print(f"process_calibration error: {e}")
+        return no_update, f"Calibration failed: {e}"
+
 
 @app.callback(
     Output("metronome-track-store", "data"),
@@ -1649,10 +1767,11 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
     State("beats-per-measure", "value"),
     State("measures-per-pattern", "value"),
     State("subdivisions-per-beat", "value"),
+    State("calibration-offset-store", "data"),
     prevent_initial_call=True
 )
 def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
-                  subdivisions_per_beat):
+                  subdivisions_per_beat, calibration_offset_ms):
     print(f"\n{'=' * 60}")
     print(f"PROCESS_AUDIO CALLBACK TRIGGERED!")
     print(f"audio_len={len(base64_audio) if base64_audio else 0}")
@@ -1722,13 +1841,20 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
              if len(beat_times) else ""))
         beat_times = beat_times - WAVEFORM_DISPLAY_SHIFT_SECONDS
 
-        # Metronome points (ideal points based on tempo)
+        # Metronome points for analysis/saving (shifted by calibration offset)
         duration = len(y) / sr
         seconds_per_beat = 60.0 / tempo
-        metronome_times = np.arange(0, duration - METRONOME_END_MARGIN_SECONDS,
+        cal_s = (calibration_offset_ms or 0) / 1000.0
+        metronome_times = np.arange(cal_s, duration - METRONOME_END_MARGIN_SECONDS,
                                     seconds_per_beat)
+        # For waveform display, omit cal_s: WAVEFORM_DISPLAY_SHIFT_SECONDS already
+        # compensates D_setup, and cal_s (measured from speaker→mic) doesn't apply
+        # to hand hits.
+        metronome_times_display = np.arange(0, duration - METRONOME_END_MARGIN_SECONDS,
+                                            seconds_per_beat)
+        print(f"process_audio: calibration_offset={calibration_offset_ms}ms, cal_s={cal_s:.4f}s")
 
-        fig = build_waveform_figure(y, sr, metronome_times, beat_times,
+        fig = build_waveform_figure(y, sr, metronome_times_display, beat_times,
                                     beats_per_measure,
                                     onset_env_norm if SHOW_ONSET_ENVELOPE else None,
                                     hop_length,
@@ -1785,9 +1911,11 @@ def save_recording(n_clicks, audio_json):
     Input("upload-audio", "contents"),
     State("beats-per-measure", "value"),
     State("subdivisions-per-beat", "value"),
+    State("calibration-offset-store", "data"),
     prevent_initial_call=True
 )
-def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat):
+def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
+                   calibration_offset_ms):
     if not contents:
         return None, False, go.Figure(), ""
 
@@ -1857,11 +1985,14 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat):
 
         duration = len(y) / sr
 
-        metronome_times = np.array(data.get("metronome_times", []))
+        tempo_saved = data.get("tempo", 120)
+        seconds_per_beat_saved = 60.0 / (tempo_saved or 120)
         beat_times = np.array(data.get("beat_times", []))
         bpm = data.get("beats_per_measure", beats_per_measure_slider)
         mpp = data.get("measures_per_pattern", 1)
-        fig = build_waveform_figure(y, sr, metronome_times, beat_times, bpm,
+        metronome_times_display = np.arange(0, duration - METRONOME_END_MARGIN_SECONDS,
+                                            seconds_per_beat_saved)
+        fig = build_waveform_figure(y, sr, metronome_times_display, beat_times, bpm,
                                     onset_env_norm if SHOW_ONSET_ENVELOPE else None,
                                     hop_length,
                                     measures_per_pattern=mpp,
@@ -1870,7 +2001,7 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat):
         print(
             f"load_recording: Successfully processed audio, duration={duration:.2f}s, sr={sr}")
         print(
-            f"load_recording: Returning data with {len(metronome_times)} metronome points, {len(beat_times)} beat points")
+            f"load_recording: Returning data with {len(metronome_times_display)} metronome points, {len(beat_times)} beat points")
 
         data["duration"] = duration
         # Don't show a success message (waveform appearing is enough feedback)

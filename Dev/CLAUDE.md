@@ -50,3 +50,7 @@ Recording phase state (`idle` / `delay` / `recording`) is synced through `#recor
 ### Waveform display pipeline
 
 Raw audio → `trim_audio_tail` → `normalize_waveform_for_display` → `smooth_waveform_for_display` → `downsample_waveform_preserve_peaks` → Plotly figure with overlaid metronome beat markers (red/orange diamonds) and detected pulse markers (green circles).
+
+## Recent commits
+
+**aff27d9** — Ghost notes use `'.'` voicing character (was space); pattern lines must match exact subdivision count (no silent padding). `WAVEFORM_DISPLAY_SHIFT_SECONDS` tuned 0.017→0.025. Subdivision markers extrapolated past last beat. Scroll zoom disabled on waveform. *Metronome beats display fixed; analysis timing still being worked on.*

@@ -28,8 +28,8 @@ voicing_characters = ''.join(list(voicing_code.keys()))
 # todo ghost notes . instead of space
 exercises_text = """
 3,3,2 (tresillo)
-1 e & a 2 e & a
-x . . x . . x .
+1e&a2e&a
+x..x..x.
 ---
 3,2,3
 1 e & a 2 e & a

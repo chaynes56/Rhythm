@@ -33,6 +33,7 @@ let recordingWarningTimeout = null;
 let recordingStream = null;
 let pendingRecordingRequestId = 0;
 let currentRecordingPhase = 'idle';
+let calibrationMode = false;
 let metronomeState = {
     beatCount: 0,
     measureCount: 0,
@@ -451,28 +452,27 @@ function startMetronomePlayback(options = {}) {
         const firstToneDelaySeconds = 0.02;
         const startTime = ctx.currentTime + firstToneDelaySeconds;
 
-        // Measure audio output latency once so the visual indicator tracks what
-        // the user actually hears rather than what is merely scheduled.
-        // getOutputTimestamp().contextTime is the AudioContext time of the sample
-        // currently being rendered at the hardware output — it lags ctx.currentTime
-        // by the total output latency (driver + hardware buffer).  We bake this
-        // into indicatorStartTime so the setInterval uses only ctx.currentTime
-        // (always safe) without calling any API in the hot loop.
-        // NOTE: this captures API-level latency only.  Bluetooth codec buffering
-        // is transparent to the browser and will require manual calibration (see Help).
+        // Measure output latency for logging/recording timing; not applied to the
+        // visual indicator (indicatorStartTime uses the scheduled startTime directly
+        // so the beat lights up on schedule rather than being delayed by latency).
         let outputLatencySeconds = 0;
         try {
             const ts = ctx.getOutputTimestamp();
             if (ts && ts.contextTime > 0 && ctx.currentTime > ts.contextTime) {
-                outputLatencySeconds = ctx.currentTime - ts.contextTime;
+                const measured = ctx.currentTime - ts.contextTime;
+                // Reject stale values (e.g. after a suspended context resumes,
+                // contextTime can lag by seconds making this huge)
+                if (measured > 0 && measured < 0.200) {
+                    outputLatencySeconds = measured;
+                }
             }
         } catch (e) { /* getOutputTimestamp not supported */ }
         // Fall back to the browser-reported estimate when the timestamp is unavailable
         if (outputLatencySeconds <= 0) {
             outputLatencySeconds = (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
         }
-        const indicatorStartTime = startTime + outputLatencySeconds;
-        console.log(`startMetronomePlayback: outputLatency=${(outputLatencySeconds * 1000).toFixed(1)}ms, indicatorDelay=${(outputLatencySeconds * 1000).toFixed(1)}ms`);
+        const indicatorStartTime = startTime;
+        console.log(`startMetronomePlayback: outputLatency=${(outputLatencySeconds * 1000).toFixed(1)}ms, indicatorStartTime at startTime`);
 
         // For recording count-in: start buffer at the last measure of the pattern
         const countInMeasure = preserveOffset ? (measuresPerPattern - 1) : 0;
@@ -539,7 +539,7 @@ function startMetronomePlayback(options = {}) {
                 }, 20);
                 metronomeInterval = metronomeScheduler;
                 setMetronomePlayingState(true);
-                return {firstBeatDelayMs: 0, secondsPerBeat};
+                return {firstBeatDelayMs: 0, secondsPerBeat, outputLatencyMs: 0};
             }
 
             playScheduledTone(startTime);
@@ -559,7 +559,7 @@ function startMetronomePlayback(options = {}) {
             setMetronomePlayingState(true);
         }
 
-        return {firstBeatDelayMs: firstToneDelaySeconds * 1000, secondsPerBeat};
+        return {firstBeatDelayMs: firstToneDelaySeconds * 1000, secondsPerBeat, outputLatencyMs: outputLatencySeconds * 1000};
     };
 
     if (ctx.state === 'suspended') {
@@ -677,10 +677,16 @@ function configureMediaRecorder(stream) {
                 wavReader.readAsDataURL(wavBlob);
                 wavReader.addEventListener('loadend', () => {
                     const dataUrl = /** @type {string} */ (wavReader.result);
-                    window.lastRecordedAudio = dataUrl;
-                    window.recordedAudioData = dataUrl;
                     console.log('Converted to WAV, trimmed pre-roll, length:', dataUrl.length);
-                    clickHiddenButton('audio-process-btn');
+                    if (calibrationMode) {
+                        window.calibrationRecordedAudio = dataUrl;
+                        calibrationMode = false;
+                        clickHiddenButton('calibration-process-btn');
+                    } else {
+                        window.lastRecordedAudio = dataUrl;
+                        window.recordedAudioData = dataUrl;
+                        clickHiddenButton('audio-process-btn');
+                    }
                 });
             }).catch((err) => {
                 console.error('decodeAudioData failed:', err);
@@ -711,6 +717,7 @@ function cancelPendingRecording() {
         stopMetronomePlayback();
         metronomeAutoStartedByRecording = false;
     }
+    calibrationMode = false;
     setRecordingPhase('idle');
 }
 
@@ -815,13 +822,15 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
 
             startMetronomePlayback({preserveOffset: patternMeasures > 1}).then(({
                                                                                     firstBeatDelayMs,
-                                                                                    secondsPerBeat
+                                                                                    secondsPerBeat,
+                                                                                    outputLatencyMs = 0
                                                                                 }) => {
                 if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay') {
                     return;
                 }
 
-                const measureDelayMs = firstBeatDelayMs + (metronomeState.beatsPerMeasure * secondsPerBeat * 1000) - RECORDING_PRE_ROLL_MS;
+                const measureDelayMs = firstBeatDelayMs + outputLatencyMs + (metronomeState.beatsPerMeasure * secondsPerBeat * 1000) - RECORDING_PRE_ROLL_MS;
+                console.log(`startRecordingWithCountIn: measureDelayMs=${measureDelayMs.toFixed(1)}ms, outputLatencyMs=${outputLatencyMs.toFixed(1)}ms`);
                 recordingDelayTimeout = setTimeout(() => beginActiveRecording(requestId), measureDelayMs);
             });
         })
@@ -1085,6 +1094,22 @@ try {
         },
         loadMetronomeTrack: function(dataUrl) {
             loadMetronomeTrack(dataUrl);
+        },
+
+        startCalibration: function(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
+            console.log('startCalibration: starting calibration recording');
+            calibrationMode = true;
+            startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
+            // Auto-stop: getUserMedia (~500ms) + count-in measure + 4 calibration beats + buffer
+            const secondsPerBeat = 60.0 / (tempo || 120);
+            const autoStopMs = 500 + ((beatsPerMeasure || 4) * secondsPerBeat * 1000) + (4 * secondsPerBeat * 1000) + 500;
+            console.log(`startCalibration: auto-stop scheduled in ${autoStopMs.toFixed(0)}ms`);
+            setTimeout(() => {
+                if (calibrationMode || currentRecordingPhase !== 'idle') {
+                    console.log('startCalibration: auto-stopping calibration recording');
+                    stopActiveRecording();
+                }
+            }, autoStopMs);
         },
 
         reconfigureMetronome: function (isPlaying, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
