@@ -98,7 +98,7 @@ deviation from the wrong subdivision.
 
 ## Metronome beat indicator and audio latency
 
-The metronome beat indicator (the highlighted box that advances with each beat) 
+The metronome **beat indicator** (the highlighted box that advances with each beat) 
 is synchronized to the audio output using the browser's reported hardware latency. 
 On most wired or built-in audio devices the indicator and the audible beat will 
 align closely. 
@@ -107,11 +107,9 @@ align closely.
 sometimes more) that the browser cannot measure. This affects both the beat indicator 
 and recording accuracy:
 
-- The **beat indicator** will appear to advance one or more beats ahead of the sound
-  you hear.
-- **Recording accuracy** is affected if you time your playing to the sound you hear
-  through the Bluetooth device. Your beats will be recorded late by approximately
-  the Bluetooth latency, appearing as a consistent negative timing error in the
+- The **beat indicator** will appear to advance ahead or behind the sound you hear.
+- **Recording accuracy** is affected so your beats will be recorded late by 
+  approximately the Bluetooth latency, appearing as a consistent timing error in the
   analysis.
 
 For best results when using Bluetooth, use the wired (built-in) speakers or headphones 

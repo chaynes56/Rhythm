@@ -464,10 +464,13 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
                           onset_env_norm: np.ndarray | None = None,
                           hop_length: int = 512,
                           measures_per_pattern: int = 1,
-                          subdivisions_per_beat: int = 1) -> go.Figure:
+                          subdivisions_per_beat: int = 1,
+                          display_offset: float = 0.0) -> go.Figure:
     duration = len(y) / sr if sr else 0.0
-    time = np.linspace(0, duration, num=len(y),
-                       endpoint=False) - WAVEFORM_DISPLAY_SHIFT_SECONDS
+    # display_offset shifts the time origin so beat 1 appears at x≈0
+    shift = WAVEFORM_DISPLAY_SHIFT_SECONDS + display_offset
+    time = np.linspace(0, duration, num=len(y), endpoint=False) - shift
+    mt = metronome_times - display_offset  # shifted metronome positions
     y_for_display = smooth_waveform_for_display(y)
     time_display, y_display = downsample_waveform_preserve_peaks(time, y_for_display)
     y_peak = float(np.max(np.abs(y_display)))
@@ -488,7 +491,7 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
     if onset_env_norm is not None and len(onset_env_norm) > 0:
         env_times = librosa.frames_to_time(
             np.arange(len(onset_env_norm)), sr=sr, hop_length=hop_length
-        ) - WAVEFORM_DISPLAY_SHIFT_SECONDS
+        ) - shift
         # Scale envelope to the positive half of the waveform y-range
         env_scaled = onset_env_norm * y_max
         fig.add_trace(go.Scatter(
@@ -501,7 +504,7 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
     mpp = max(1, int(measures_per_pattern or 1))
     pattern_len = beats_per_measure * mpp
     pattern_x, measure_x, beat_x = [], [], []
-    for i, t in enumerate(metronome_times):
+    for i, t in enumerate(mt):
         if i % pattern_len == 0:
             pattern_x.append(t)
         elif i % beats_per_measure == 0:
@@ -524,17 +527,16 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
         marker=dict(color='royalblue', symbol='diamond'),
     ))
 
-    if subdivisions_per_beat > 1 and len(metronome_times) > 1:
+    if subdivisions_per_beat > 1 and len(mt) > 1:
         sub_times = []
-        for i in range(len(metronome_times) - 1):
-            beat_dur = metronome_times[i + 1] - metronome_times[i]
+        for i in range(len(mt) - 1):
+            beat_dur = mt[i + 1] - mt[i]
             for s in range(1, subdivisions_per_beat):
-                sub_times.append(
-                    metronome_times[i] + s * beat_dur / subdivisions_per_beat)
+                sub_times.append(mt[i] + s * beat_dur / subdivisions_per_beat)
         # Extrapolate subdivisions after the last beat
-        last_beat_dur = metronome_times[-1] - metronome_times[-2]
+        last_beat_dur = mt[-1] - mt[-2]
         for s in range(1, subdivisions_per_beat):
-            sub_times.append(metronome_times[-1] + s * last_beat_dur / subdivisions_per_beat)
+            sub_times.append(mt[-1] + s * last_beat_dur / subdivisions_per_beat)
         fig.add_trace(go.Scatter(
             x=sub_times,
             y=[y_max * 1.05] * len(sub_times),
@@ -545,7 +547,7 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
         ))
 
     fig.add_trace(go.Scatter(
-        x=beat_times,
+        x=beat_times - display_offset,
         y=[y_min * 1.1] * len(beat_times),
         mode='markers',
         name='Pulses',
@@ -562,8 +564,7 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
         margin=dict(l=60, r=20, t=20, b=40),
     )
     fig.update_xaxes(
-        range=[-WAVEFORM_DISPLAY_SHIFT_SECONDS,
-               duration - WAVEFORM_DISPLAY_SHIFT_SECONDS],
+        range=[-shift, duration - shift],
         autorange=False,
     )
     return fig
@@ -1474,7 +1475,7 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         beats{window_note}, which is **{(pulse_count / beat_count):.2f}** pulses per
         beat. The following statistics reflect time deviations from the start of
         each **{round(dt * 1000)}** ms subdivision: **{round(mean)}** mean,
-        **{round(median)}** median, **{round(std)}** std dev, **{round(minimum)}** min 
+        **{round(median)}** median, **{round(std)}** std dev, **{round(minimum)}** min, 
         **{round(maximum)}** max (ms)"""
         return markdown_text, ""
     except Exception as exc:
@@ -1694,6 +1695,10 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
         dt = 60.0 / tempo / spb  # seconds per subdivision
         dt_ms = dt * 1000  # ms per subdivision
         cal_s = data.get("calibration_offset_ms", 0) / 1000.0
+        seconds_per_beat = 60.0 / tempo
+        display_offset = cal_s % seconds_per_beat
+        shift = WAVEFORM_DISPLAY_SHIFT_SECONDS + display_offset
+        x_times = beat_times - display_offset  # calibration-corrected x positions
 
         deviations = np.array(
             [((t - cal_s - dt / 2) % dt - dt / 2) * 1000 for t in beat_times]
@@ -1706,7 +1711,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
         )
         fig = go.Figure()
         fig.add_trace(go.Scatter(
-            x=beat_times, y=[0.0] * len(beat_times),
+            x=x_times, y=[0.0] * len(x_times),
             mode='markers', name='Pulses',
             marker=dict(color=dot_colors.tolist(), size=6, symbol='circle'),
             showlegend=False,
@@ -1721,8 +1726,8 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
         ]
         for color, label, mask in categories:
             x_values, y_values = [], []
-            for t, d in zip(beat_times[mask], deviations[mask]):
-                x_values += [t, t, None]
+            for xt, d in zip(x_times[mask], deviations[mask]):
+                x_values += [xt, xt, None]
                 y_values += [0.0, d, None]
             fig.add_trace(go.Scatter(
                 x=x_values, y=y_values,
@@ -1732,7 +1737,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
 
         # Default x range matches the waveform (full recording, with display shift)
         full_x_range = (
-            [-WAVEFORM_DISPLAY_SHIFT_SECONDS, duration - WAVEFORM_DISPLAY_SHIFT_SECONDS]
+            [-shift, duration - shift]
             if duration else None
         )
         # Sync x range with waveform zoom
@@ -1864,7 +1869,8 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
                                     onset_env_norm if SHOW_ONSET_ENVELOPE else None,
                                     hop_length,
                                     measures_per_pattern,
-                                    subdivisions_per_beat)
+                                    subdivisions_per_beat,
+                                    display_offset=cal_s % seconds_per_beat)
         fig.update_layout(uirevision=str(time_now()))
 
         # Prepare data for saving
@@ -2004,7 +2010,8 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
                                     onset_env_norm if SHOW_ONSET_ENVELOPE else None,
                                     hop_length,
                                     measures_per_pattern=mpp,
-                                    subdivisions_per_beat=subdivisions_per_beat)
+                                    subdivisions_per_beat=subdivisions_per_beat,
+                                    display_offset=cal_s_saved % seconds_per_beat_saved)
 
         print(
             f"load_recording: Successfully processed audio, duration={duration:.2f}s, sr={sr}")

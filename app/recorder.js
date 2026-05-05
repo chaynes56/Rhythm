@@ -445,11 +445,24 @@ function startMetronomePlayback(options = {}) {
             }
         }
 
+        // Prime the hardware audio pipeline before the first real tone. On a cold
+        // browser (first audio use of the day), the OS audio device may take
+        // 50–200ms to open. Scheduling a silent buffer immediately forces the
+        // device to open; by the time the first real tone fires (~150ms later)
+        // the pipeline is ready and won't drop it.
+        {
+            const primeBuf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * 0.15), ctx.sampleRate);
+            const primeSrc = ctx.createBufferSource();
+            primeSrc.buffer = primeBuf;
+            primeSrc.connect(ctx.destination);
+            primeSrc.start(ctx.currentTime);
+        }
+
         const secondsPerBeat = 60.0 / metronomeState.tempo;
         const beatsPerMeasure = metronomeState.beatsPerMeasure;
         const measuresPerPattern = metronomeState.measuresPerPattern;
         const measureDuration = secondsPerBeat * beatsPerMeasure;
-        const firstToneDelaySeconds = 0.02;
+        const firstToneDelaySeconds = 0.15;  // was 0.02; increased to ensure pipeline is open
         const startTime = ctx.currentTime + firstToneDelaySeconds;
 
         // Measure output latency for logging/recording timing; not applied to the

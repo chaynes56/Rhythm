@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code. Read this at session start. Full session history is in `Dev/AI/Claude/MEMORY.md` (local only, not in git) — read it when older context matters.
 
 ## Running the App
 
@@ -12,7 +12,7 @@ Dependencies are managed via `app/pyproject.toml` with a virtual env at `.venv/`
 
 ## Architecture
 
-This is a **Plotly/Dash** web app (single file: `app/main.py`) for percussion/rhythm analysis. The app is deployed to the Plotly cloud at the URL in README.md.
+This is a **Plotly/Dash** web app (single file: `app/main.py`) for percussion/rhythm analysis. Deployed to Plotly cloud (URL in README.md).
 
 ### Two-layer design: Python server + JavaScript client
 
@@ -29,28 +29,46 @@ This is a **Plotly/Dash** web app (single file: `app/main.py`) for percussion/rh
 
 ### How recorder.js is loaded
 
-The script is **inlined into the HTML** via `load_inline_script()` rather than served as a normal Dash asset. This avoids double-loading: `assets_ignore=r"recorder(?:_bundle)?\.js"` tells Dash to skip the file.
+**Inlined into HTML** via `load_inline_script()`, not served as a normal Dash asset. `assets_ignore=r"recorder(?:_bundle)?\.js"` tells Dash to skip the file. Every JS change requires a **server restart**, not just browser refresh.
 
 ### JS → Python data flow
 
-Dash hidden components act as a message bus between JS and Python:
+Dash hidden components act as a message bus:
 
-1. Recording stops → JS encodes WAV, stores in `window.recordedAudioData`
+1. Recording stops → JS encodes WAV → `window.recordedAudioData`
 2. JS clicks hidden `#audio-process-btn`
-3. `audio-data-store` clientside callback reads `window.recordedAudioData` and pushes it to the Dash store
-4. Python `process_audio` callback fires, runs librosa analysis, returns waveform figure + JSON blob to `audio-store`
-5. Other callbacks read `audio-store` to update UI (beat counts, waveform visibility)
+3. `audio-data-store` clientside callback pushes data to Dash store
+4. Python `process_audio` fires, runs librosa analysis → waveform figure + JSON blob → `audio-store`
+5. Other callbacks read `audio-store` to update UI
 
-Recording phase state (`idle` / `delay` / `recording`) is synced through `#recording-phase-sync` hidden input using `setDashInputValue()`, which manually fires React synthetic events to trigger Dash updates.
+Recording phase state (`idle` / `delay` / `recording`) synced through `#recording-phase-sync` hidden input via `setDashInputValue()` (fires React synthetic events).
 
-### Audio processing note
+### Audio processing
 
-`librosa.beat.beat_track` is intentionally disabled (see comment in `process_audio`) — it crashes the Plotly cloud worker due to numba/llvmlite JIT compilation. Onset detection (`librosa.onset.onset_detect`) is used instead.
+`librosa.beat.beat_track` intentionally disabled — crashes Plotly cloud worker (numba/llvmlite JIT). Uses `librosa.onset.onset_detect` instead.
 
-### Waveform display pipeline
+Waveform pipeline: raw audio → `trim_audio_tail` → `normalize_waveform_for_display` → `smooth_waveform_for_display` → `downsample_waveform_preserve_peaks` → Plotly figure with metronome beat markers (red/orange diamonds) and detected pulse markers (green circles).
 
-Raw audio → `trim_audio_tail` → `normalize_waveform_for_display` → `smooth_waveform_for_display` → `downsample_waveform_preserve_peaks` → Plotly figure with overlaid metronome beat markers (red/orange diamonds) and detected pulse markers (green circles).
+### Calibration and timing model
 
-## Recent commits
+The app measures output latency to synchronise recording start with metronome beat 1. Because Web Audio's `outputLatency` API is unreliable on many systems, a **calibration recording** is used instead:
 
-**aff27d9** — Ghost notes use `'.'` voicing character (was space); pattern lines must match exact subdivision count (no silent padding). `WAVEFORM_DISPLAY_SHIFT_SECONDS` tuned 0.017→0.025. Subdivision markers extrapolated past last beat. Scroll zoom disabled on waveform. *Metronome beats display fixed; analysis timing still being worked on.*
+- Calibration plays one measure with `onlyLowTone=true` (speaker → mic) and measures `median(beat_times % seconds_per_beat)`, normalised to `(−spb/2, spb/2]` → `cal_s` (seconds).
+- `cal_s` is saved in every recording's JSON as `calibration_offset_ms`.
+- All analysis (deviation formulas, subdivision assignment, `metronome_times_display`) applies `t − cal_s` to correct for the recording-start offset.
+- `cal_s` varies by system state: ~0ms when API reports latency accurately, ~−164ms when API under-reports (~0ms measured vs ~337ms actual), ~+161ms when API over-reports on cold browser startup. All values produce correct analysis because `cal_s` is measured and saved per session.
+
+### Known timing quirks
+
+- **Cold-browser first tone dropped:** On first audio use after OS restart, the hardware audio device takes 50–200ms to open. A 150ms silent primer buffer in `startMetronomePlayback → startScheduler` forces the device open before the first real tone fires. `firstToneDelaySeconds` is 150ms (not the original 20ms) for the same reason.
+- **Dash double-fire:** `toggleMetronome` fires twice on click (async AudioContext resume → state sync → Dash callback chain). Handled by directional debounce: suppress Stop arriving within 2s of a Start.
+
+---
+
+## Last session — 2026-05-05
+
+Applied `cal_s` correction to all analysis functions in `main.py` (deviation formulas, `nearest_n`, `metronome_times_display`, `save_data`). Added 150ms silent primer + `firstToneDelaySeconds` 20ms→150ms in `recorder.js` to fix first-use-of-day dropped count-in beat.
+
+**Open:** cold-start primer not yet tested end-to-end. Cold-browser calibration still shows ~161ms on first auto-calibration (consistent/correct, but cosmetically odd — user re-calibrates manually to get the warm value).
+
+**To update this stub:** replace the content above with a fresh 3–5 sentence summary at the end of each session.
