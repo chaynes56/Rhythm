@@ -23,7 +23,7 @@ from scipy.signal import welch as scipy_welch, resample as scipy_resample, find_
 # Suppress librosa deprecation warnings to clean up console output
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
-WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.025  # increase when pulses are late
+WAVEFORM_DISPLAY_SHIFT_SECONDS = 0.002  # shifts waveform/pulses left to align with beat markers
 RECORDING_PRE_ROLL_SECONDS = 0.200
 WAVEFORM_DISPLAY_SMOOTHING_WINDOW = 9
 WAVEFORM_DISPLAY_DOWNSAMPLE_FACTOR = 12
@@ -978,6 +978,9 @@ def process_calibration(base64_audio, tempo):
 
         seconds_per_beat = 60.0 / (tempo or 120)
         phase_offset_s = float(np.median(beat_times % seconds_per_beat))
+        # Normalize to (-spb/2, spb/2]: 477ms at 120 BPM → -23ms
+        if phase_offset_s > seconds_per_beat / 2:
+            phase_offset_s -= seconds_per_beat
         offset_ms = round(phase_offset_s * 1000, 1)
         print(f"process_calibration: offset={offset_ms}ms from {len(beat_times)} beats")
         return offset_ms, f"Calibrated: {offset_ms} ms offset"
@@ -1458,19 +1461,21 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         beat_count = len(metronome_times)
         pulse_count = len(beat_times)
         dt = 60 / data.get("tempo") / subdivisions_per_beat  # seconds per subdivision
+        cal_s = data.get("calibration_offset_ms", 0) / 1000.0
         if pulse_count == 0:
             return f"No pulses detected in **{beat_count}** beats{window_note}.", ""
-        deviations = np.array([((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
+        deviations = np.array([((t - cal_s - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
         mean = deviations.mean()
         std = deviations.std()
         maximum = deviations.max()
+        minimum = deviations.min()
         median = np.median(deviations)
         markdown_text = f"""**{pulse_count}** pulses detected in **{beat_count}**
         beats{window_note}, which is **{(pulse_count / beat_count):.2f}** pulses per
         beat. The following statistics reflect time deviations from the start of
         each **{round(dt * 1000)}** ms subdivision: **{round(mean)}** mean,
-        **{round(median)}** median, **{round(std)}** std dev, **{round(maximum)}** max 
-        (ms)"""
+        **{round(median)}** median, **{round(std)}** std dev, **{round(minimum)}** min 
+        **{round(maximum)}** max (ms)"""
         return markdown_text, ""
     except Exception as exc:
         print(f"update_analysis: {exc}")
@@ -1500,6 +1505,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
 
         spb = int(subdivisions_per_beat or 1)
         dt = 60.0 / tempo / spb  # seconds per subdivision
+        cal_s = data.get("calibration_offset_ms", 0) / 1000.0
         warn_ms, alert_ms = TRAINING_LEVEL.get(training_level, TRAINING_LEVEL["Novice"])
 
         # Filter by zoom window if applicable
@@ -1519,14 +1525,14 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
             return None
 
         deviations_ms = np.array(
-            [((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
+            [((t - cal_s - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
 
         subs_per_measure = bpm * spb
         # cell_devs[measure][beat][sub] = list of abs deviations
         cell_devs = [[[[] for _ in range(spb)] for _ in range(bpm)] for _ in range(mpp)]
 
         for t, dev in zip(beat_times, deviations_ms):
-            nearest_n = int(round(t / dt))
+            nearest_n = int(round((t - cal_s) / dt))
             if nearest_n < 0:
                 continue
             measure_idx = (nearest_n // subs_per_measure) % mpp
@@ -1687,9 +1693,10 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
         warn_ms, alert_ms = TRAINING_LEVEL.get(training_level, TRAINING_LEVEL["Novice"])
         dt = 60.0 / tempo / spb  # seconds per subdivision
         dt_ms = dt * 1000  # ms per subdivision
+        cal_s = data.get("calibration_offset_ms", 0) / 1000.0
 
         deviations = np.array(
-            [((t - dt / 2) % dt - dt / 2) * 1000 for t in beat_times]
+            [((t - cal_s - dt / 2) % dt - dt / 2) * 1000 for t in beat_times]
         )
         abs_dev = np.abs(deviations)
 
@@ -1847,10 +1854,8 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
         cal_s = (calibration_offset_ms or 0) / 1000.0
         metronome_times = np.arange(cal_s, duration - METRONOME_END_MARGIN_SECONDS,
                                     seconds_per_beat)
-        # For waveform display, omit cal_s: WAVEFORM_DISPLAY_SHIFT_SECONDS already
-        # compensates D_setup, and cal_s (measured from speaker→mic) doesn't apply
-        # to hand hits.
-        metronome_times_display = np.arange(0, duration - METRONOME_END_MARGIN_SECONDS,
+        metronome_times_display = np.arange(cal_s % seconds_per_beat,
+                                            duration - METRONOME_END_MARGIN_SECONDS,
                                             seconds_per_beat)
         print(f"process_audio: calibration_offset={calibration_offset_ms}ms, cal_s={cal_s:.4f}s")
 
@@ -1868,6 +1873,7 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
             "tempo": tempo,
             "beats_per_measure": beats_per_measure,
             "measures_per_pattern": measures_per_pattern,
+            "calibration_offset_ms": calibration_offset_ms or 0,
             "metronome_times": metronome_times.tolist(),
             "beat_times": beat_times.tolist(),
             "spectrum_freqs": spec_freqs.tolist(),
@@ -1990,7 +1996,9 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
         beat_times = np.array(data.get("beat_times", []))
         bpm = data.get("beats_per_measure", beats_per_measure_slider)
         mpp = data.get("measures_per_pattern", 1)
-        metronome_times_display = np.arange(0, duration - METRONOME_END_MARGIN_SECONDS,
+        cal_s_saved = data.get("calibration_offset_ms", 0) / 1000.0
+        metronome_times_display = np.arange(cal_s_saved % seconds_per_beat_saved,
+                                            duration - METRONOME_END_MARGIN_SECONDS,
                                             seconds_per_beat_saved)
         fig = build_waveform_figure(y, sr, metronome_times_display, beat_times, bpm,
                                     onset_env_norm if SHOW_ONSET_ENVELOPE else None,
