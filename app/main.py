@@ -646,7 +646,7 @@ app.layout = dbc.Container([
                 id="waveform-graph",
                 style={"height": "260px", "visibility": "hidden"},
                 # ~6:1+ on typical desktop widths
-                config=dict(scrollZoom=False, displayModeBar=True,  # type: ignore[arg-type]
+                config=dict(scrollZoom=False, displayModeBar=True, doubleClick='reset',  # type: ignore[arg-type]
                             modeBarButtonsToRemove=["pan2d", "select2d", "lasso2d",
                                                     "autoScale2d"], displaylogo=False),
             ),
@@ -1826,6 +1826,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
     except Exception as e:
         print(f"update_deviation_graph: {e}")
         return go.Figure()
+
 
 
 @app.callback(

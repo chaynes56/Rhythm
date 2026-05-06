@@ -449,11 +449,7 @@ function startMetronomePlayback(options = {}) {
         const beatsPerMeasure = metronomeState.beatsPerMeasure;
         const measuresPerPattern = metronomeState.measuresPerPattern;
         const measureDuration = secondsPerBeat * beatsPerMeasure;
-        // 400ms: enough for the OS audio device to open (~50–200ms) and for
-        // the hardware pipeline to settle to its steady-state output latency.
-        // 150ms was sufficient to open the device but left a residual ~10–20ms
-        // calibration error from an unstabilised pipeline.
-        const firstToneDelaySeconds = 1.0;
+        const firstToneDelaySeconds = 0.15;
 
         // Silence buffer spanning the full delay forces the audio device open
         // so the pipeline is stable before the first real tone fires.

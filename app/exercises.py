@@ -63,22 +63,20 @@ BxBxBxBxBxBx
 #            subdivisions_per_beat: int,
 #            measures_per_pattern: int,
 #            subdivision_line = str,
-#            patterns: list(pattern_string)
+#            measures: list(measure_line)
 #          }
-# pattern_string: string of voicing characters of length subdivisions_per_beat *
+# measure_line: string of voicing characters of length subdivisions_per_beat *
 #   beats_per_measure.
 # exercise_dict: exercise_name -> list(pattern)
-def make_exercises(text):  # -> (list(exercise_name), exercise_dict)
-    exercise_name_list = []
+def make_exercises(text):  # -> exercise_dict
     exercise_dict = {}
     for exercise_text in text.split('---'):
         lines = exercise_text.strip().splitlines()
         exercise_name = lines[0].strip()
-        exercise_name_list.append(exercise_name)
-        pattern_list = []
         subdivisions_per_beat = 0
         num_beats = 0
         patterns = []
+        measures = []  # avoid reference before assignment warning
         for line in lines[1:]:
             def error(message):
                 raise SystemExit(
@@ -89,19 +87,19 @@ def make_exercises(text):  # -> (list(exercise_name), exercise_dict)
             if not line:  # end of exercise
                 break
             if line[0] == '1':  # start a pattern
-                patterns = []
-                beat1, _ = line.split("2")
+                measures = []
+                beat1, _ = line.split('2')
                 subdivisions_per_beat = len(beat1)
                 if not all(c.isdigit() for c in line[::subdivisions_per_beat]):
                     error('invalid subdivision line beat number')
                 num_beats = int(len(line) / subdivisions_per_beat)
                 if len(line) % subdivisions_per_beat != 0:
-                    error('invalid subdivision line')
-                pattern_list.append(
+                    error('invalid subdivision line length')
+                patterns.append(
                     {'beats_per_measure': num_beats,
                      'subdivisions_per_beat': subdivisions_per_beat,
                      'subdivision_line': line,
-                     'patterns': patterns
+                     'measures': measures
                      })
             else:
                 if not all(c in voicing_characters for c in line):
@@ -109,9 +107,9 @@ def make_exercises(text):  # -> (list(exercise_name), exercise_dict)
                     error('invalid voicing code')
                 elif len(line) != subdivisions_per_beat * num_beats:
                     error('invalid pattern line length')
-                patterns.append(line)
-        exercise_dict[exercise_name] = pattern_list
-    return exercise_name_list, exercise_dict
+                measures.append(line)
+        exercise_dict[exercise_name] = patterns
+    return exercise_dict
 
 
 exercises = make_exercises(exercises_text)

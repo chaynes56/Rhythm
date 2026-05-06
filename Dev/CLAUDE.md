@@ -65,10 +65,10 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session — 2026-05-05
+## Last session — 2026-05-06
 
-Applied `cal_s` correction to all analysis functions in `main.py` (deviation formulas, `nearest_n`, `metronome_times_display`, `save_data`). Added 150ms silent primer + `firstToneDelaySeconds` 20ms→150ms in `recorder.js` to fix first-use-of-day dropped count-in beat.
+Added metronome pattern-length guard: `validate_metronome_settings` callback checks `pattern_duration > 300s`, shows a dismissable alert in `status-msg`, and reverts UI controls via a store-based revert pattern. `update_metronome_track` now reads from `last-valid-metro-settings` store. Increased cold-start audio primer from 150ms → 1s (`firstToneDelaySeconds` in `recorder.js`) to cover mobile and Plotly cloud pipeline stabilisation times; primer buffer duration now references the same constant.
 
-**Open:** cold-start primer not yet tested end-to-end. Cold-browser calibration still shows ~161ms on first auto-calibration (consistent/correct, but cosmetically odd — user re-calibrates manually to get the warm value).
+**Open:** startup auto-calibration accuracy with 1s primer not yet field-tested on mobile/cloud.
 
 **To update this stub:** replace the content above with a fresh 3–5 sentence summary at the end of each session.
