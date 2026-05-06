@@ -445,24 +445,25 @@ function startMetronomePlayback(options = {}) {
             }
         }
 
-        // Prime the hardware audio pipeline before the first real tone. On a cold
-        // browser (first audio use of the day), the OS audio device may take
-        // 50–200ms to open. Scheduling a silent buffer immediately forces the
-        // device to open; by the time the first real tone fires (~150ms later)
-        // the pipeline is ready and won't drop it.
+        const secondsPerBeat = 60.0 / metronomeState.tempo;
+        const beatsPerMeasure = metronomeState.beatsPerMeasure;
+        const measuresPerPattern = metronomeState.measuresPerPattern;
+        const measureDuration = secondsPerBeat * beatsPerMeasure;
+        // 400ms: enough for the OS audio device to open (~50–200ms) and for
+        // the hardware pipeline to settle to its steady-state output latency.
+        // 150ms was sufficient to open the device but left a residual ~10–20ms
+        // calibration error from an unstabilised pipeline.
+        const firstToneDelaySeconds = 1.0;
+
+        // Silence buffer spanning the full delay forces the audio device open
+        // so the pipeline is stable before the first real tone fires.
         {
-            const primeBuf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * 0.15), ctx.sampleRate);
+            const primeBuf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * firstToneDelaySeconds), ctx.sampleRate);
             const primeSrc = ctx.createBufferSource();
             primeSrc.buffer = primeBuf;
             primeSrc.connect(ctx.destination);
             primeSrc.start(ctx.currentTime);
         }
-
-        const secondsPerBeat = 60.0 / metronomeState.tempo;
-        const beatsPerMeasure = metronomeState.beatsPerMeasure;
-        const measuresPerPattern = metronomeState.measuresPerPattern;
-        const measureDuration = secondsPerBeat * beatsPerMeasure;
-        const firstToneDelaySeconds = 0.15;  // was 0.02; increased to ensure pipeline is open
         const startTime = ctx.currentTime + firstToneDelaySeconds;
 
         // Measure output latency for logging/recording timing; not applied to the

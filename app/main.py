@@ -847,6 +847,12 @@ app.layout = dbc.Container([
     ]),
 
     # Hidden components for data storage and communication
+    dcc.Store(id="last-valid-metro-settings", data={
+        "tempo": settings["tempo-slider"],
+        "beats": settings["beats-per-measure"],
+        "measures": settings["measures-per-pattern"],
+    }),
+    dcc.Store(id="metro-settings-revert-trigger", data=0),
     dcc.Store(id="audio-store"),
     dcc.Store(id="recording-phase-store", data="idle"),
     dcc.Store(id="waveform-visible-store", data=False),
@@ -992,18 +998,21 @@ def process_calibration(base64_audio, tempo):
 
 @app.callback(
     Output("metronome-track-store", "data"),
-    Input("tempo-slider", "value"),
-    Input("beats-per-measure", "value"),
-    Input("measures-per-pattern", "value"),
+    Input("last-valid-metro-settings", "data"),
     Input("play-hi-tone", "value"),
     Input("play-only-low-tone", "value"),
 )
-def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi, play_only_low):
+def update_metronome_track(valid_settings, play_hi, play_only_low):
+    if not valid_settings:
+        raise PreventUpdate
+    tempo = valid_settings.get("tempo", 120)
+    beats_per_measure = valid_settings.get("beats", 4)
+    measures_per_pattern = valid_settings.get("measures", 1)
     try:
         data_url = compute_metronome_track(
-            tempo or 120,
-            beats_per_measure or 4,
-            measures_per_pattern or 1,
+            tempo,
+            beats_per_measure,
+            measures_per_pattern,
             bool(play_hi),
             bool(play_only_low),
         )
@@ -1012,6 +1021,56 @@ def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_
     except Exception as e:
         print(f"update_metronome_track error: {e}")
         raise PreventUpdate
+
+
+@app.callback(
+    Output("last-valid-metro-settings", "data"),
+    Output("status-msg", "children", allow_duplicate=True),
+    Output("metro-settings-revert-trigger", "data"),
+    Input("tempo-slider", "value"),
+    Input("beats-per-measure", "value"),
+    Input("measures-per-pattern", "value"),
+    State("last-valid-metro-settings", "data"),
+    State("metro-settings-revert-trigger", "data"),
+    prevent_initial_call=True,
+)
+def validate_metronome_settings(tempo, beats, measures, last_valid, revert_counter):
+    tempo = tempo or 120
+    beats = beats or 4
+    measures = measures or 1
+    last_valid = last_valid or {"tempo": 120, "beats": 4, "measures": 1}
+
+    pattern_duration = (60.0 / tempo) * beats * measures
+    if pattern_duration > METRONOME_MAX_LOOP_SECONDS:
+        mins = pattern_duration / 60
+        msg = dbc.Alert(
+            f"Pattern too long ({mins:.1f} min > {METRONOME_MAX_LOOP_SECONDS / 60:.0f}"
+                "min limit). Use shorter exercise or pattern, or increase tempo.",
+            color="warning", dismissable=True,
+        )
+        return no_update, msg, (revert_counter or 0) + 1
+
+    new_settings = {"tempo": tempo, "beats": beats, "measures": measures}
+    is_post_revert = (
+        tempo == last_valid.get("tempo")
+        and beats == last_valid.get("beats")
+        and measures == last_valid.get("measures")
+    )
+    return new_settings, (no_update if is_post_revert else None), no_update
+
+
+@app.callback(
+    Output("tempo-slider", "value", allow_duplicate=True),
+    Output("beats-per-measure", "value", allow_duplicate=True),
+    Output("measures-per-pattern", "value", allow_duplicate=True),
+    Input("metro-settings-revert-trigger", "data"),
+    State("last-valid-metro-settings", "data"),
+    prevent_initial_call=True,
+)
+def revert_metronome_settings(trigger, last_valid):
+    if not trigger or not last_valid:
+        raise PreventUpdate
+    return last_valid["tempo"], last_valid["beats"], last_valid["measures"]
 
 
 # Clientside callbacks for recording and playback

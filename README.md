@@ -110,7 +110,7 @@ deviation from the wrong subdivision.
   This complexity allows more advanced exercises, but most exercises are a 
   single pattern, and a number of patterns are a single measure. 
 
-## Metronome beat indicator and audio latency
+## Audio latency
 
 For the metronome **beat indicator** (the highlighted box that advances with each beat) 
 to synchronized to the audio output and recording analysis to be reasonably accurate, 
@@ -133,6 +133,10 @@ will align closely, and recording analysis will be accurate to within a few ms.
 **Bluetooth audio devices** introduce additional buffering time (typically 100–500 ms, 
 sometimes more). A Bluetooth microphone is not recommended. Bluetooth speakers 
 or headphones may be satisfactory if buffering delay is stable. 
+
+It is possible that a VPN may introduce additional latency or other issues.
+Reports of experience in this regard are welcome via 
+the issue tracker mentioned below.
 
 ## Settings
 
