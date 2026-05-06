@@ -6,18 +6,22 @@ server: just visit
 [this page](https://2e7b9ba9-3380-4afa-b92e-f1ff3eee1007.plotly.app/#). 
 It is expected to work in all the common modern browsers.
 
+An intuitive understanding of the app may suffice, but the following information is
+provided for a fuller understanding of the app's capabilities, how best to interpret 
+its performance analysis, and its limitations in certain circumstances.
+
 You may return to this page at any time via the 
 [Help](https://github.com/chaynes56/Rhythm) link at upper right of the app page. 
 
 ## Practical considerations
 
-It takes time to start a plotly.app server, so app loading takes a minute or so, and 
+It takes time to start a `plotly.app` server, so app loading takes a minute or so, and 
 after the first recording analysis takes several seconds while additional 
 resources are loaded.
 
 App performance is satisfactory with most Wi-Fi connections but may be unsatisfactory 
 with a cellular data connection. Recording and playback are done via the browser, with 
-audio sent to the `plotly.app` server for analysis.
+audio sent to the server for analysis.
 
 Browsers need permission to use the microphone. It is usually possible, via an 
 appropriate setting, for the browser to remember this permission for the `plotly.app` 
@@ -27,14 +31,24 @@ domain so it does not need to be granted each time the app is loaded.
 - In Safari: `Settings > Websites > Microphone > ...plotly.app > Allow`
 
 Recording length is limited to 10 minutes, at which point it stops 
-automatically with an alerting tone.
+automatically with an alerting tone. Practical considerations also limit the length
+of a metronome exercise or pattern to be at most 5 minutes. 
+
+Starting a recording starts the metronome as well, with one measure of metronome before
+the recording actually begins. This is similar to a conductor counting in the 
+orchestra, and allows the performer to get into the rhythm before the recording 
+starts.
 
 ## Analysis interpretation
 
 A mouse or touch drag in the waveform selects a portion of time for display, and 
 statistics are recomputed for that segment of time. 
 To return to the full recording, double-click the display or tap the home button in 
-the zoom toolbar above the legend to the right of the waveform. 
+the zoom toolbar above the legend to the right of the waveform. Analysis depends on 
+relatively accurate determination of pulse timing, which is an imperfect science as 
+much depends on the nature of the pulse tone, acoustics, recording and metronome 
+audio characteristics, among other factors. Performance analysis is necessarily a 
+function of both the player's timing and the accuracy of pulse detection.
 
 Performance analysis is provided in the form of statistics related to the deviation 
 in milliseconds (ms) from the expected timing.
@@ -81,43 +95,44 @@ deviation from the wrong subdivision.
 - **Pattern**: 1 to 8 measures (default is 4), beginning with a metronome 
   low tone, all with the same beats/measure and subdivisions/beat.
 - **Exercise**: (Under development) A named sequence of patterns. These patterns may 
-  have differing 
-  beats/measure and subdivisions/beat. For each exercise pattern a line is displayed 
-  identifying each subdivision and beat, followed by a line for each measure of the 
+  have differing beats/measure and subdivisions/beat. For each exercise pattern a line 
+  is displayed in the metronome section identifying each subdivision and beat, 
+  followed by a line for each measure of the 
   pattern indicating which subdivisions are voiced, with intonation indicated by a 
-  letter. Odd numbered columns within a pattern, which are played with the 
-  non-dominant hand, are shaded grey.
+  letter. Odd numbered columns within a pattern, typically played with the 
+  non-dominant hand, are shaded gray.
 
-  If no exercise is selected, only the metronome beat and measures pattern is 
-  displayed. In both cases beats are highlighted as they are played (or reached 
-  silently) by the metronome. There is an option to play a higher tone (always the 
-  same) when each voiced subdivision is reached.    
+  If no exercise is selected, only a line per measure of metronome beat indicators
+  (see section below) is displayed. In both cases beats are highlighted as they are 
+  played (or reached silently) by the metronome. There is an option to play a higher 
+  tone (always the same) when each voiced subdivision is reached.    
 
   This complexity allows more advanced exercises, but most exercises are a 
-  single pattern and a number of patterns are a single measure. 
+  single pattern, and a number of patterns are a single measure. 
 
 ## Metronome beat indicator and audio latency
 
-The metronome **beat indicator** (the highlighted box that advances with each beat) 
-is synchronized to the audio output using the browser's reported hardware latency. 
-On most wired or built-in audio devices the indicator and the audible beat will 
-align closely. 
+For the metronome **beat indicator** (the highlighted box that advances with each beat) 
+to synchronized to the audio output and recording analysis to be reasonably accurate, 
+the app needs to know the latency of the browser's audio input and output. 
+Though typically stable within a few milliseconds (ms), this latency may be substantial 
+and is highly dependent on unpredictable characteristics of the browser and the
+operating system resources it is allocated. To compensate for this, the app
+performs a calibration by playing several metronome beats when it starts. 
+If headphones are used, it is important that they be placed very near the microphone 
+during this calibration. 
 
-**Bluetooth audio devices** introduce additional codec buffering (typically 100–500 ms, 
-sometimes more) that the browser cannot measure. This affects both the beat indicator 
-and recording accuracy:
+Ambient noise during calibration or an exceptionally long browser audio chain 
+warmup-up period may cause this initial calibration to be inaccurate. If in doubt, 
+run a test recording of just the metronome and check 
+that the analysis indicates errors of at most a few ms. If necessary, 
+calibration may be repeated by clicking the **Calibrate** button.
 
-- The **beat indicator** will appear to advance ahead or behind the sound you hear.
-- **Recording accuracy** is affected so your beats will be recorded late by 
-  approximately the Bluetooth latency, appearing as a consistent timing error in the
-  analysis.
-
-For best results when using Bluetooth, use the wired (built-in) speakers or headphones 
-for metronome output while recording, or account for the latency when interpreting 
-the analysis. A future version of the app will include a manual calibration step 
-(hold the Bluetooth device near the microphone while the metronome plays, then click 
-Calibrate) that measures this extra latency automatically and corrects both the 
-indicator and the analysis grid.
+On most wired or built-in audio devices the metronome indicator and the audible beat 
+will align closely, and recording analysis will be accurate to within a few ms. 
+**Bluetooth audio devices** introduce additional buffering time (typically 100–500 ms, 
+sometimes more). A Bluetooth microphone is not recommended. Bluetooth speakers 
+or headphones may be satisfactory if buffering delay is stable. 
 
 ## Settings
 
@@ -125,17 +140,18 @@ The Save Settings button stores the current settings in the browser's default
 download folder (typically `Downloads` or `My Documents`) in YAML format. 
 The Load Settings button restores the settings from the selected `.yaml` file.
 
+By editing the YAML file with a plain-text editor, it is possible to create custom 
+exercises, which are placed at the start of the dropdown exercise list.
+
 ## Local server
 
 The technically proficient may download the app from its 
 [GitHub repository](https://github.com/chaynes56/Rhythm) and run it locally (on your 
 own computer) instead of relying on the `plotly.app` server. This might result in 
-better performance. It is also then possible to create custom exercises and additional 
-voicing codes by editing `exercises.py`.
+better performance. 
 
 ## Credits and comments
 
-Thanks to Julian Douglas of [RhythmArise](https://rhythmarise.com/) for the 
-[patterns](https://rhythmarise.com/rhythm-vocabulary/). 
+Thanks to Julian Douglas of [RhythmArise](https://rhythmarise.com/) for the [patterns](https://rhythmarise.com/rhythm-vocabulary/). 
 
 Please report any issues or suggestions to the [issue tracker](https://github.com/chaynes56/Rhythm/issues).
