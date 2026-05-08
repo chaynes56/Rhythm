@@ -1750,6 +1750,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
                 x_range = relayout_data["xaxis.range"]
             elif "xaxis.autorange" in relayout_data:
                 x_range = full_x_range
+        print(f"[deviation] triggered={ctx.triggered_id} relayout={relayout_data} full={[round(v,4) for v in full_x_range] if full_x_range else None} x_range={[round(v,4) for v in x_range] if x_range else None}")
 
         fig.add_hline(y=0, line_width=1, line_color="gray", line_dash="dot")
         fig.update_layout(

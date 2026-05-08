@@ -65,10 +65,10 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session — 2026-05-06 (session 2)
+## Last session — 2026-05-07
 
-Reverted `firstToneDelaySeconds` back to 0.15s (1.0s caused 5 silent beats and wrong-beat low tone). Removed `restore_waveform_range` callback and `Patch` import — `Patch()` on `dcc.Graph` figure crashes DCC's JS via `window.Plotly` not being a global in DCC v4.1.0m. Added `doubleClick='reset'` to waveform config as an attempt to fix zoom-reset alignment; committed as e62da44 but alignment is still broken (waveform now narrower than deviation graph on both sides after reset, was right-side-only before).
+Reverted `main.py` to `b32bfd6` (removed circular callback chain that silenced metronome). Re-added `doubleClick='reset'` to waveform config — left-side alignment now correct after reset, right side still ~5% off. Cold-start calibration warmup moved into `startScheduler`: `firstToneDelaySeconds = calibrationMode ? 1.5 : 0.15` (avoids suspended `AudioContext` race before `getUserMedia`). `autoStopMs` in `startCalibration` extended by 1500ms. Debug print added to `update_deviation_graph` to diagnose right-side mismatch — paste server `[deviation]` output after zoom+reset.
 
-**Open:** zoom-reset x-axis alignment; histogram wider + x-axis ticks; startup auto-calibration accuracy with 0.15s primer (not field-tested).
+**Open:** right-side zoom-reset alignment (debug print pending test); startup auto-calibration accuracy with 1.5s cal primer (cold-browser test pending); metronome length guard re-implementation (no circular deps); histogram wider + x-axis ticks.
 
 **To update this stub:** replace the content above with a fresh 3–5 sentence summary at the end of each session.

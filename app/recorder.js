@@ -449,7 +449,10 @@ function startMetronomePlayback(options = {}) {
         const beatsPerMeasure = metronomeState.beatsPerMeasure;
         const measuresPerPattern = metronomeState.measuresPerPattern;
         const measureDuration = secondsPerBeat * beatsPerMeasure;
-        const firstToneDelaySeconds = 0.15;
+        // Calibration needs a longer primer so the hardware pipeline settles to its
+        // steady-state latency before the first calibration tone fires.  Regular
+        // metronome and recording use 0.15s (enough to open the device).
+        const firstToneDelaySeconds = calibrationMode ? 1.5 : 0.15;
 
         // Silence buffer spanning the full delay forces the audio device open
         // so the pipeline is stable before the first real tone fires.
@@ -1107,49 +1110,20 @@ try {
         },
 
         startCalibration: function(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
-            console.log('startCalibration: warming up audio pipeline before calibration');
+            console.log('startCalibration: starting calibration recording');
             calibrationMode = true;
-
-            // On a cold browser the OS audio pipeline takes up to 200ms to open
-            // and settle to its steady-state latency. Calibrating before it settles
-            // yields a wrong cal_s that requires a second manual calibration.
-            // Playing a 1.5s silent buffer first lets the pipeline stabilise without
-            // affecting the metronome firstToneDelaySeconds or count-in feel.
-            const CALIBRATION_WARMUP_SECONDS = 1.5;
+            startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
+            // Auto-stop: getUserMedia (~500ms) + pipeline warmup (1500ms, baked into
+            // firstToneDelaySeconds when calibrationMode=true) + count-in + 4 beats + buffer
             const secondsPerBeat = 60.0 / (tempo || 120);
-            const autoStopMs = 500 + ((beatsPerMeasure || 4) * secondsPerBeat * 1000) + (4 * secondsPerBeat * 1000) + 500;
-
-            const doCalibration = () => {
-                if (!calibrationMode) return;
-                console.log('startCalibration: warmup complete, starting recording');
-                startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
-                console.log(`startCalibration: auto-stop scheduled in ${autoStopMs.toFixed(0)}ms`);
-                setTimeout(() => {
-                    if (calibrationMode || currentRecordingPhase !== 'idle') {
-                        console.log('startCalibration: auto-stopping calibration recording');
-                        stopActiveRecording();
-                    }
-                }, autoStopMs);
-            };
-
-            const ctx = ensureAudioContext();
-            const startWarmup = () => {
-                const primeBuf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * CALIBRATION_WARMUP_SECONDS), ctx.sampleRate);
-                const primeSrc = ctx.createBufferSource();
-                primeSrc.buffer = primeBuf;
-                primeSrc.connect(ctx.destination);
-                primeSrc.start(ctx.currentTime);
-                setTimeout(doCalibration, CALIBRATION_WARMUP_SECONDS * 1000);
-            };
-
-            if (ctx.state === 'suspended') {
-                ctx.resume().then(startWarmup).catch(err => {
-                    console.warn('startCalibration: resume failed, proceeding without warmup:', err);
-                    doCalibration();
-                });
-            } else {
-                startWarmup();
-            }
+            const autoStopMs = 500 + 1500 + ((beatsPerMeasure || 4) * secondsPerBeat * 1000) + (4 * secondsPerBeat * 1000) + 500;
+            console.log(`startCalibration: auto-stop scheduled in ${autoStopMs.toFixed(0)}ms`);
+            setTimeout(() => {
+                if (calibrationMode || currentRecordingPhase !== 'idle') {
+                    console.log('startCalibration: auto-stopping calibration recording');
+                    stopActiveRecording();
+                }
+            }, autoStopMs);
         },
 
         reconfigureMetronome: function (isPlaying, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
@@ -1192,8 +1166,10 @@ try {
         }
     };
 
-    // reconfigureMetronome is called from a Dash clientside_callback embedded in main.py
+    // These properties are called from Dash clientside_callbacks embedded in main.py
     void window.recorderControls.reconfigureMetronome;
+    void window.recorderControls.loadMetronomeTrack;
+    void window.recorderControls.startCalibration;
     window.dash_clientside = window.dash_clientside || {};
     window.dash_clientside.recorder = window.recorderControls;
     console.log("recorder.js: recorderControls initialized successfully.");
