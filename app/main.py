@@ -563,10 +563,8 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
         template="plotly_white",
         margin=dict(l=60, r=20, t=20, b=40),
     )
-    fig.update_xaxes(
-        range=[-shift, duration - shift],
-        autorange=False,
-    )
+    fig.update_xaxes(range=[-shift, duration - shift], autorange=False)
+    fig.update_yaxes(automargin=False)
     return fig
 
 
@@ -1740,7 +1738,21 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             [-shift, duration - shift]
             if duration else None
         )
-        # Sync x range with waveform zoom
+
+        # Invisible anchor traces at the recording boundaries so that when we use
+        # autorange the extent matches the waveform's data extent exactly.
+        if full_x_range:
+            fig.add_trace(go.Scatter(
+                x=full_x_range, y=[0.0, 0.0],
+                mode='markers',
+                marker=dict(size=0, opacity=0),
+                showlegend=False,
+                hoverinfo='skip',
+            ))
+
+        # Sync x range with waveform zoom.
+        # None means "let Plotly autorange" \u2014 used when the waveform itself autoranges
+        # (double-click reset) so both graphs apply the same ~5% padding to their data.
         x_range = full_x_range
         if relayout_data and ctx.triggered_id != "audio-store":
             if "xaxis.range[0]" in relayout_data:
@@ -1749,8 +1761,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             elif "xaxis.range" in relayout_data:
                 x_range = relayout_data["xaxis.range"]
             elif "xaxis.autorange" in relayout_data:
-                x_range = full_x_range
-        print(f"[deviation] triggered={ctx.triggered_id} relayout={relayout_data} full={[round(v,4) for v in full_x_range] if full_x_range else None} x_range={[round(v,4) for v in x_range] if x_range else None}")
+                x_range = None  # match waveform: autorange with natural padding
 
         fig.add_hline(y=0, line_width=1, line_color="gray", line_dash="dot")
         fig.update_layout(
@@ -1762,8 +1773,11 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             template="plotly_white",
             margin=dict(l=60, r=20, t=20, b=40),
         )
-        if x_range:
+        if x_range is not None:
             fig.update_xaxes(range=x_range, autorange=False)
+        else:
+            fig.update_xaxes(autorange=True)
+        fig.update_yaxes(automargin=False)
         return fig
     except Exception as e:
         print(f"update_deviation_graph: {e}")
