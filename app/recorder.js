@@ -1107,19 +1107,49 @@ try {
         },
 
         startCalibration: function(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
-            console.log('startCalibration: starting calibration recording');
+            console.log('startCalibration: warming up audio pipeline before calibration');
             calibrationMode = true;
-            startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
-            // Auto-stop: getUserMedia (~500ms) + count-in measure + 4 calibration beats + buffer
+
+            // On a cold browser the OS audio pipeline takes up to 200ms to open
+            // and settle to its steady-state latency. Calibrating before it settles
+            // yields a wrong cal_s that requires a second manual calibration.
+            // Playing a 1.5s silent buffer first lets the pipeline stabilise without
+            // affecting the metronome firstToneDelaySeconds or count-in feel.
+            const CALIBRATION_WARMUP_SECONDS = 1.5;
             const secondsPerBeat = 60.0 / (tempo || 120);
             const autoStopMs = 500 + ((beatsPerMeasure || 4) * secondsPerBeat * 1000) + (4 * secondsPerBeat * 1000) + 500;
-            console.log(`startCalibration: auto-stop scheduled in ${autoStopMs.toFixed(0)}ms`);
-            setTimeout(() => {
-                if (calibrationMode || currentRecordingPhase !== 'idle') {
-                    console.log('startCalibration: auto-stopping calibration recording');
-                    stopActiveRecording();
-                }
-            }, autoStopMs);
+
+            const doCalibration = () => {
+                if (!calibrationMode) return;
+                console.log('startCalibration: warmup complete, starting recording');
+                startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
+                console.log(`startCalibration: auto-stop scheduled in ${autoStopMs.toFixed(0)}ms`);
+                setTimeout(() => {
+                    if (calibrationMode || currentRecordingPhase !== 'idle') {
+                        console.log('startCalibration: auto-stopping calibration recording');
+                        stopActiveRecording();
+                    }
+                }, autoStopMs);
+            };
+
+            const ctx = ensureAudioContext();
+            const startWarmup = () => {
+                const primeBuf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * CALIBRATION_WARMUP_SECONDS), ctx.sampleRate);
+                const primeSrc = ctx.createBufferSource();
+                primeSrc.buffer = primeBuf;
+                primeSrc.connect(ctx.destination);
+                primeSrc.start(ctx.currentTime);
+                setTimeout(doCalibration, CALIBRATION_WARMUP_SECONDS * 1000);
+            };
+
+            if (ctx.state === 'suspended') {
+                ctx.resume().then(startWarmup).catch(err => {
+                    console.warn('startCalibration: resume failed, proceeding without warmup:', err);
+                    doCalibration();
+                });
+            } else {
+                startWarmup();
+            }
         },
 
         reconfigureMetronome: function (isPlaying, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {

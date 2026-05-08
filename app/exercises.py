@@ -15,24 +15,28 @@ voicing_code = {  # voicing characters are the keys
 }
 voicing_characters = ''.join(list(voicing_code.keys()))
 
-# exercises_text is a sequence of exercises separated by `---`.
-# Each exercise consists of a name line followed by one or more patterns.
-# Each pattern begins with a subdivision line followed by one or more
-# measure lines. A subdivision line consists of sequential beat integers separated
-# by one letter for each measure subdivision. A space follows these letters
-# for readability unless the beat integer has two digits. A pattern line is a
-# sequence of voicing character that line up with the corresponding subdivision's
-# letters or beat integer. Multiple pattern lines in a measure line group share the
-# same subdivision line.
+# exercises_text is a sequence of exercises separated by `----`.
+# The exercises are separated by a line with three dashes (`----`). Each exercise
+# consists of a name line followed by one or more patterns.
+# - Each *pattern* begins with a subdivision line, which defines a time
+#   signature, followed by one or more measure lines.
+# - A *subdivision line* consists of sequential beat integers, starting with 1, separated
+#   by one letter for each additional subdivision of the beat. (The example uses a
+#   common convention for subdivision letters, but any letter that is not a number may
+#   be used.)
+# - A *pattern line* is a
+#   sequence of voicing character that line up with the corresponding subdivision's
+#   letters or beat integer. Multiple pattern lines in a measure line group share the
+#   same subdivision line.
 exercises_text = """
 3,3,2 (tresillo)
 1e&a2e&a
 x..x..x.
----
+----
 3,2,3
 1e&a2e&a
 x..x.x..
----
+----
 Gravity Grooves
 1e&a2e&a3e&a4e&a
 B...............
@@ -40,15 +44,15 @@ B.B.............
 BBB.............
 B.............B.
 B.............BB
----
+----
 3/2 Clave
 1e&a2e&a3e&a4e&a
 x..x..x...x.x...
----
+----
 Susan's Groove
 1e&a2e&a3e&a4e&a5e&a6e&a7e&a8e&a
 B.h...h.B.hB..hhB.h...h.BBBBB.hh
----
+----
 Pulses
 1&a2&a3&a4&a
 BxxBxxBxxBxx
@@ -70,7 +74,7 @@ BxBxBxBxBxBx
 # exercise_dict: exercise_name -> list(pattern)
 def make_exercises(text):  # -> exercise_dict
     exercise_dict = {}
-    for exercise_text in text.split('---'):
+    for exercise_text in text.split('----'):
         lines = exercise_text.strip().splitlines()
         exercise_name = lines[0].strip()
         subdivisions_per_beat = 0

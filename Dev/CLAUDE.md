@@ -65,10 +65,10 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session — 2026-05-06
+## Last session — 2026-05-06 (session 2)
 
-Added metronome pattern-length guard: `validate_metronome_settings` callback checks `pattern_duration > 300s`, shows a dismissable alert in `status-msg`, and reverts UI controls via a store-based revert pattern. `update_metronome_track` now reads from `last-valid-metro-settings` store. Increased cold-start audio primer from 150ms → 1s (`firstToneDelaySeconds` in `recorder.js`) to cover mobile and Plotly cloud pipeline stabilisation times; primer buffer duration now references the same constant.
+Reverted `firstToneDelaySeconds` back to 0.15s (1.0s caused 5 silent beats and wrong-beat low tone). Removed `restore_waveform_range` callback and `Patch` import — `Patch()` on `dcc.Graph` figure crashes DCC's JS via `window.Plotly` not being a global in DCC v4.1.0m. Added `doubleClick='reset'` to waveform config as an attempt to fix zoom-reset alignment; committed as e62da44 but alignment is still broken (waveform now narrower than deviation graph on both sides after reset, was right-side-only before).
 
-**Open:** startup auto-calibration accuracy with 1s primer not yet field-tested on mobile/cloud.
+**Open:** zoom-reset x-axis alignment; histogram wider + x-axis ticks; startup auto-calibration accuracy with 0.15s primer (not field-tested).
 
 **To update this stub:** replace the content above with a fresh 3–5 sentence summary at the end of each session.

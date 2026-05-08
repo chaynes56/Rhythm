@@ -64,7 +64,7 @@ Timing errors are indicated in the bar graph below the waveform, and as summary
 statistics in the Analysis section below the waveform. The Training Level selected
 determines the color-coding thresholds. In the bar graph, note especially trends 
 that indicate timing drift. A sudden flip from large positive to negative values, or 
-visa versa, is characteristic of a drift from one subdivision to another. 
+vice versa, is characteristic of a drift from one subdivision to another. 
 
 The first statistics presented in the text area 
 are the number of pulses and beats in the selected interval.
@@ -94,7 +94,7 @@ deviation from the wrong subdivision.
   per measure is 32. 
 - **Pattern**: 1 to 8 measures (default is 4), beginning with a metronome 
   low tone, all with the same beats/measure and subdivisions/beat.
-- **Exercise**: (Under development) A named sequence of patterns. These patterns may 
+- **Exercise**: (NOT YET IMPLEMENTED) A named sequence of patterns. These patterns may 
   have differing beats/measure and subdivisions/beat. For each exercise pattern a line 
   is displayed in the metronome section identifying each subdivision and beat, 
   followed by a line for each measure of the 
@@ -144,8 +144,43 @@ The Save Settings button stores the current settings in the browser's default
 download folder (typically `Downloads` or `My Documents`) in YAML format. 
 The Load Settings button restores the settings from the selected `.yaml` file.
 
+### Custom exercises
 By editing the YAML file with a plain-text editor, it is possible to create custom 
-exercises, which are placed at the start of the dropdown exercise list.
+exercises, which appear at the start of the dropdown exercise list. Here is an example.
+
+```text
+custom-exercises: |-
+  My groove
+  1e&a2e&a3e&a4e&a
+  B.x..Bh...l....h
+  ----
+  3/4 to 4/4
+  1&a2&a3&a
+  BxxBxxBxx
+  1e&a2e&a3e&a4e&a
+  BxxxBxxxBxxxBxxx
+```
+
+The general syntax for exercises is a bit complex, but it allows for a wide variety of
+exercises and is best grasped by following this example. 
+The custom exercises setting is at the end of the YAML file and begins with the line
+`custom-exercises: |-`. The following lines defining the custom exercises must 
+all be indented by two spaces (tabs not allowed). 
+
+The exercises are separated by a line with four dashes (`----`). Each exercise 
+consists of a name line followed by one or more patterns.
+- Each *pattern* begins with a subdivision line, which defines a time 
+  signature, followed by one or more measure lines. 
+- A *subdivision line* consists of sequential beat integers, starting with 1, separated
+  by one letter for each additional subdivision of the beat. (The example uses a 
+  common convention for subdivision letters, but any letter that is not a number may 
+  be used.)
+- A *pattern line* is a
+  sequence of voicing character that line up with the corresponding subdivision's
+  letters or beat integer. Multiple pattern lines in a measure line group share the
+  same subdivision line.
+- A *voicing character* is one of those used in the example and indicates the 
+  intonation of the subdivision, or a period (`.`) to indicate a ghost note (rest).
 
 ## Local server
 
