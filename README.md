@@ -15,9 +15,12 @@ You may return to this page at any time via the
 
 ## Practical considerations
 
-It takes time to start a `plotly.app` server, so app loading takes a minute or so, and 
-after the first recording analysis takes several seconds while additional 
-resources are loaded.
+It takes time to start a `plotly.app` server, so app loading can take of up a to 
+minute or so when first visiting the page. After a fairly long period of inactivity
+(perhaps 15 minutes or so), the server may go to sleep. When that happens much of 
+the app's functionality will be lost, and it is necessary to refresh or revisit the 
+app's browser page. The app settings will then revert to their defaults. 
+If this is a recurring issues, use the save settings option described below. 
 
 App performance is satisfactory with most Wi-Fi connections but may be unsatisfactory 
 with a cellular data connection. Recording and playback are done via the browser, with 

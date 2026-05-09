@@ -449,10 +449,7 @@ function startMetronomePlayback(options = {}) {
         const beatsPerMeasure = metronomeState.beatsPerMeasure;
         const measuresPerPattern = metronomeState.measuresPerPattern;
         const measureDuration = secondsPerBeat * beatsPerMeasure;
-        // Calibration needs a longer primer so the hardware pipeline settles to its
-        // steady-state latency before the first calibration tone fires.  Regular
-        // metronome and recording use 0.15s (enough to open the device).
-        const firstToneDelaySeconds = calibrationMode ? 1.5 : 0.15;
+        const firstToneDelaySeconds = 0.15;
 
         // Silence buffer spanning the full delay forces the audio device open
         // so the pipeline is stable before the first real tone fires.
@@ -842,7 +839,10 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
                     return;
                 }
 
-                const measureDelayMs = firstBeatDelayMs + outputLatencyMs + (metronomeState.beatsPerMeasure * secondsPerBeat * 1000) - RECORDING_PRE_ROLL_MS;
+                // Calibration uses 2 count-in measures so real tones warm the hardware
+                // pipeline before the first measured beat.  Regular recording uses 1.
+                const countInMeasures = calibrationMode ? 2 : 1;
+                const measureDelayMs = firstBeatDelayMs + outputLatencyMs + (countInMeasures * metronomeState.beatsPerMeasure * secondsPerBeat * 1000) - RECORDING_PRE_ROLL_MS;
                 console.log(`startRecordingWithCountIn: measureDelayMs=${measureDelayMs.toFixed(1)}ms, outputLatencyMs=${outputLatencyMs.toFixed(1)}ms`);
                 recordingDelayTimeout = setTimeout(() => beginActiveRecording(requestId), measureDelayMs);
             });
@@ -1113,10 +1113,9 @@ try {
             console.log('startCalibration: starting calibration recording');
             calibrationMode = true;
             startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
-            // Auto-stop: getUserMedia (~500ms) + pipeline warmup (1500ms, baked into
-            // firstToneDelaySeconds when calibrationMode=true) + count-in + 4 beats + buffer
+            // Auto-stop: getUserMedia (~500ms) + 0.15s primer + 2 count-in measures + 4 beats + buffer
             const secondsPerBeat = 60.0 / (tempo || 120);
-            const autoStopMs = 500 + 1500 + ((beatsPerMeasure || 4) * secondsPerBeat * 1000) + (4 * secondsPerBeat * 1000) + 500;
+            const autoStopMs = 500 + 150 + (2 * (beatsPerMeasure || 4) * secondsPerBeat * 1000) + (4 * secondsPerBeat * 1000) + 500;
             console.log(`startCalibration: auto-stop scheduled in ${autoStopMs.toFixed(0)}ms`);
             setTimeout(() => {
                 if (calibrationMode || currentRecordingPhase !== 'idle') {

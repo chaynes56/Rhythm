@@ -17,7 +17,7 @@ import plotly.graph_objects as go
 import soundfile as sf
 from dash import Dash, ctx, dcc, html, Input, no_update, Output, State, clientside_callback
 from dash.exceptions import PreventUpdate
-from ruamel.yaml import YAML
+import yaml
 from scipy.signal import welch as scipy_welch, resample as scipy_resample, find_peaks
 
 # Suppress librosa deprecation warnings to clean up console output
@@ -121,8 +121,7 @@ metronome-vol: 0.5
 custom-exercises: |-
 """
 
-_yaml = YAML(typ='safe', pure=True)
-settings = _yaml.load(DEFAULT_SETTINGS_YAML)
+settings = yaml.safe_load(DEFAULT_SETTINGS_YAML)
 
 
 def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
@@ -2113,8 +2112,7 @@ def save_settings(n_clicks, training_level, subdivisions, rec_vol, play_vol,
         "metronome-vol": metro_vol,
     }
     buf = io.StringIO()
-    _yaml_out = YAML()
-    _yaml_out.dump(current, buf)
+    yaml.dump(current, buf, default_flow_style=False)
     return dict(content=buf.getvalue(), filename="rhythm_settings.yaml")
 
 
@@ -2139,7 +2137,7 @@ def load_settings(data):
     no_change = (no_update,) * 10
     try:
         text = data["content"]
-        loaded = _yaml.load(text)
+        loaded = yaml.safe_load(text)
         if not isinstance(loaded, dict):
             raise ValueError("Settings file did not contain a YAML mapping")
         training_level_val = loaded.get("training-level", settings["training-level"])
