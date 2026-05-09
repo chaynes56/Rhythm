@@ -65,7 +65,7 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session — 2026-05-08/09
+## Last session — 2026-05-09
 
 **Typecheck warnings fixed (3de518b):** Two "Unused property" warnings in `recorder.js` (`loadMetronomeTrack`, `startCalibration`) cleared by adding `void window.recorderControls.X` references matching the existing pattern for `reconfigureMetronome`. Properties are called from Dash clientside callbacks in `main.py` which the IDE can't see cross-file.
 
@@ -75,6 +75,10 @@ The app measures output latency to synchronise recording start with metronome be
 
 **ruamel.yaml → pyyaml:** Plotly cloud lacked `ruamel.yaml`. Replaced `from ruamel.yaml import YAML` with `import yaml`; `YAML(typ='safe').load()` → `yaml.safe_load()`; `YAML().dump()` → `yaml.dump(..., default_flow_style=False)`. `uv add pyyaml && uv remove ruamel-yaml` updated `pyproject.toml`.
 
-**Open:** startup auto-calibration accuracy with 2-measure warmup (field test pending); metronome length guard re-implementation; histogram wider + x-axis ticks.
+**audio_utils.py extracted:** All pure audio-processing functions and constants moved from `main.py` into `app/audio_utils.py`. `main.py` re-imports via `from audio_utils import ...`. No logic changes.
+
+**Histogram:** Width 350px → 525px; `fig.update_xaxes(tickmode="auto", nticks=10, tickformat=".0f")` for integer ms ticks.
+
+**Open:** startup auto-calibration accuracy with 2-measure warmup (field test pending); metronome length guard re-implementation.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
