@@ -65,10 +65,16 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session — 2026-05-07
+## Last session — 2026-05-08/09
 
-Reverted `main.py` to `b32bfd6` (removed circular callback chain that silenced metronome). Re-added `doubleClick='reset'` to waveform config — left-side alignment now correct after reset, right side still ~5% off. Cold-start calibration warmup moved into `startScheduler`: `firstToneDelaySeconds = calibrationMode ? 1.5 : 0.15` (avoids suspended `AudioContext` race before `getUserMedia`). `autoStopMs` in `startCalibration` extended by 1500ms. Debug print added to `update_deviation_graph` to diagnose right-side mismatch — paste server `[deviation]` output after zoom+reset.
+**Typecheck warnings fixed (3de518b):** Two "Unused property" warnings in `recorder.js` (`loadMetronomeTrack`, `startCalibration`) cleared by adding `void window.recorderControls.X` references matching the existing pattern for `reconfigureMetronome`. Properties are called from Dash clientside callbacks in `main.py` which the IDE can't see cross-file.
 
-**Open:** right-side zoom-reset alignment (debug print pending test); startup auto-calibration accuracy with 1.5s cal primer (cold-browser test pending); metronome length guard re-implementation (no circular deps); histogram wider + x-axis ticks.
+**Zoom-reset alignment fixed — confirmed working (fe6d259):** `[deviation]` debug output diagnosed the root cause: after double-click reset, Plotly switches the waveform to autorange (adds ~5% padding) but the deviation graph was set to exact data bounds → both ends off. Fix: invisible anchor traces at `[-shift, duration-shift]` added to deviation figure so its autorange spans the full recording; `xaxis.autorange` branch now sets `x_range = None` → `fig.update_xaxes(autorange=True)` to match waveform behaviour. Added `automargin=False` to both graphs' y-axes for pixel-level parity on first display. Debug print removed.
 
-**To update this stub:** replace the content above with a fresh 3–5 sentence summary at the end of each session.
+**Startup calibration warmup approach changed (in progress, not yet field-tested):** 1.5s silent primer in `firstToneDelaySeconds` reverted to 0.15s (same as normal). Root cause: silence doesn't exercise the OS audio driver the same way as real audio content — pipeline stays cold. Fix: calibration now uses 2 count-in measures (`countInMeasures = calibrationMode ? 2 : 1` in `startRecordingWithCountIn`) so 2 full measures of real metronome tones warm the pipeline before the first measured beat. `autoStopMs` updated accordingly (500 + 150 + 2×measure + 4 beats + 500ms).
+
+**ruamel.yaml → pyyaml:** Plotly cloud lacked `ruamel.yaml`. Replaced `from ruamel.yaml import YAML` with `import yaml`; `YAML(typ='safe').load()` → `yaml.safe_load()`; `YAML().dump()` → `yaml.dump(..., default_flow_style=False)`. `uv add pyyaml && uv remove ruamel-yaml` updated `pyproject.toml`.
+
+**Open:** startup auto-calibration accuracy with 2-measure warmup (field test pending); metronome length guard re-implementation; histogram wider + x-axis ticks.
+
+**To update this stub:** replace the content above with a fresh summary after each commit.

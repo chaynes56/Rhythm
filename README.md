@@ -34,8 +34,7 @@ domain so it does not need to be granted each time the app is loaded.
 - In Safari: `Settings > Websites > Microphone > ...plotly.app > Allow`
 
 Recording length is limited to 10 minutes, at which point it stops 
-automatically with an alerting tone. Practical considerations also limit the length
-of a metronome exercise or pattern to be at most 5 minutes. 
+automatically with an alerting tone. 
 
 Starting a recording starts the metronome as well, with one measure of metronome before
 the recording actually begins. This is similar to a conductor counting in the 
@@ -111,7 +110,15 @@ deviation from the wrong subdivision.
   tone (always the same) when each voiced subdivision is reached.    
 
   This complexity allows more advanced exercises, but most exercises are a 
-  single pattern, and a number of patterns are a single measure. 
+  single pattern, and a number of patterns are a single measure.
+
+The metronome works by pre-computing an entire metronome cycle, after 
+which the selected exercise (or pattern if no exercise has been selected) is repeated. 
+Resource constraints limit the length of this cycle to 5 minutes. 
+This is a function of both the total length of the exercise (or 
+pattern) and the tempo. If a change in these selections would result in 
+exceeding the limit, an alert is issued and the change is ignored. Your choice then is 
+to shorten the exercise or reduce the tempo. 
 
 ## Audio latency
 
