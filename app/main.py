@@ -248,7 +248,7 @@ app.layout = dbc.Container([
                         dbc.Col(
                             dcc.Graph(
                                 id="interval-histogram",
-                                style={"height": "200px", "width": "350px",
+                                style={"height": "200px", "width": "525px",
                                        "display": "none"},
                                 config={"staticPlot": True},  # type: ignore[arg-type]
                             ),
@@ -853,7 +853,7 @@ clientside_callback(
 clientside_callback(
     """
     function(waveform_visible) {
-        return { height: '200px', width: '350px', display: waveform_visible ? 'block' : 'none' };
+        return { height: '200px', width: '525px', display: waveform_visible ? 'block' : 'none' };
     }
     """,
     Output("interval-histogram", "style"),
@@ -1211,6 +1211,7 @@ def update_interval_histogram(audio_json, relayout_data):
             template="plotly_white",
             margin=dict(l=50, r=20, t=20, b=40),
         )
+        fig.update_xaxes(tickmode="auto", nticks=10, tickformat=".0f")
         return fig
     except Exception as e:
         print(f"update_interval_histogram: {e}")
