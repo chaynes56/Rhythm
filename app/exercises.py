@@ -52,7 +52,9 @@ x..x..x...x.x...
 Susan's Groove
 1e&a2e&a3e&a4e&a5e&a6e&a7e&a8e&a
 B.h...h.B.hB..hhB.h...h.BBBBB.hh
-----
+"""
+
+multi_pattern_exercise_text = """
 Pulses
 1&a2&a3&a4&a
 BxxBxxBxxBxx

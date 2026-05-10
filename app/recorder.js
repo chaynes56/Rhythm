@@ -839,9 +839,9 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
                     return;
                 }
 
-                // Calibration uses 2 count-in measures so real tones warm the hardware
-                // pipeline before the first measured beat.  Regular recording uses 1.
-                const countInMeasures = calibrationMode ? 2 : 1;
+                // Calibration uses 3 count-in measures to warm the audio pipeline
+                // before the first measured beat.  Regular recording uses 1.
+                const countInMeasures = calibrationMode ? 3 : 1;
                 const measureDelayMs = firstBeatDelayMs + outputLatencyMs + (countInMeasures * metronomeState.beatsPerMeasure * secondsPerBeat * 1000) - RECORDING_PRE_ROLL_MS;
                 console.log(`startRecordingWithCountIn: measureDelayMs=${measureDelayMs.toFixed(1)}ms, outputLatencyMs=${outputLatencyMs.toFixed(1)}ms`);
                 recordingDelayTimeout = setTimeout(() => beginActiveRecording(requestId), measureDelayMs);
@@ -865,12 +865,13 @@ function shouldUseHtmlAudioMetronome() {
     const isFirefox = /Firefox|FxiOS/i.test(ua);
     const safariLike = isSafariBrowser();
     const isPlotlyCloud = /(?:^|\.)(?:plotly\.app|dash\.app|plotly\.host)$/i.test(host);
-    const useHtmlFallback = safariLike || (isPlotlyCloud && !isFirefox);
+    // Safari needs HTMLAudio because its WebAudio support is limited for certain patterns.
+    // Chrome (including on Plotly cloud) handles WebAudio fine; force it through the
+    // per-tone WebAudio fallback rather than HTMLAudio so AudioContext resume is used.
+    const useHtmlFallback = safariLike;
 
     console.log(`shouldUseHtmlAudioMetronome: host=${host}, safariLike=${safariLike}, isPlotlyCloud=${isPlotlyCloud}, isFirefox=${isFirefox}, useHtmlFallback=${useHtmlFallback}`);
 
-    // Safari local works with the HTMLAudio fallback, and Safari on plotly.app
-    // may present a UA string that misses the narrower Safari test.
     return useHtmlFallback;
 }
 
@@ -1049,6 +1050,13 @@ try {
             updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
 
             if (!is_playing) {
+                // Create and resume AudioContext synchronously while still in the
+                // user-gesture handler, before any async operations that could lose
+                // the gesture context (important for autoplay policy on Plotly cloud).
+                const ctx = ensureAudioContext();
+                if (ctx.state === 'suspended') {
+                    ctx.resume().catch(err => console.warn('toggleMetronome: pre-resume failed:', err));
+                }
                 metronomeAutoStartedByRecording = false;
                 stopMetronomePlayback();
                 startMetronomePlayback({preserveOffset: false}).catch(err => {
@@ -1113,9 +1121,10 @@ try {
             console.log('startCalibration: starting calibration recording');
             calibrationMode = true;
             startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
-            // Auto-stop: getUserMedia (~500ms) + 0.15s primer + 2 count-in measures + 4 beats + buffer
+            // Auto-stop: getUserMedia (~500ms) + 0.15s primer + 3 count-in measures + 2 measurement measures + buffer
             const secondsPerBeat = 60.0 / (tempo || 120);
-            const autoStopMs = 500 + 150 + (2 * (beatsPerMeasure || 4) * secondsPerBeat * 1000) + (4 * secondsPerBeat * 1000) + 500;
+            const bpm = beatsPerMeasure || 4;
+            const autoStopMs = 500 + 150 + (3 * bpm * secondsPerBeat * 1000) + (2 * bpm * secondsPerBeat * 1000) + 500;
             console.log(`startCalibration: auto-stop scheduled in ${autoStopMs.toFixed(0)}ms`);
             setTimeout(() => {
                 if (calibrationMode || currentRecordingPhase !== 'idle') {
@@ -1135,9 +1144,31 @@ try {
                 cancelPendingRecording();
             }
 
+            // Detect track-affecting parameter changes BEFORE updating state.
+            // If the precomputed track will change, discard the stale buffer so
+            // startMetronomePlayback uses the per-tone fallback (which derives
+            // tones from metronomeState directly and is always correct).
+            // loadMetronomeTrack will silently update metronomeTrackBuffer once
+            // the server delivers the new track.
+            const trackParamsChanged = (
+                Number(tempo) !== metronomeState.tempo ||
+                Number(beatsPerMeasure) !== metronomeState.beatsPerMeasure ||
+                Number(measuresPerPattern) !== metronomeState.measuresPerPattern ||
+                !!hiToneOn !== metronomeState.hiToneOn ||
+                !!onlyLowTone !== metronomeState.onlyLowTone
+            );
+
             updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
             metronomeAutoStartedByRecording = false;
             stopMetronomePlayback();
+
+            if (trackParamsChanged) {
+                metronomeTrackBuffer = null;
+                metronomeDecodePromise = null;
+                pendingMetronomeTrackUrl = null;
+                console.log('reconfigureMetronome: track params changed, cleared buffer to avoid stale-track mismatch');
+            }
+
             startMetronomePlayback({preserveOffset: false}).catch(err => {
                 console.error('reconfigureMetronome: startMetronomePlayback rejected:', err);
             });

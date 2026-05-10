@@ -15,6 +15,8 @@ from dash import Dash, ctx, dcc, html, Input, no_update, Output, State, clientsi
 from dash.exceptions import PreventUpdate
 import yaml
 
+from exercises import make_exercises, exercises as builtin_exercises
+
 from audio_utils import (
     WAVEFORM_DISPLAY_SHIFT_SECONDS,
     build_spectrum_figure,
@@ -48,21 +50,38 @@ SPECTRUM_GRAPH_HEIGHT_PX = 160  # px
 SPECTRUM_GRAPH_WIDTH_PX = 500  # px
 
 METRONOME_SAMPLE_RATE = 22050
-METRONOME_TICK_DURATION = 0.04  # seconds
+METRONOME_TICK_DURATION = 0.04   # seconds — beat ticks
+METRONOME_SUB_TICK_DURATION = 0.010  # seconds — subdivision ticks (brief)
 METRONOME_TARGET_LOOP_SECONDS = 30.0
 METRONOME_MAX_LOOP_SECONDS = 300.0
-_METRONOME_TONE_FREQS = {'low': 294, 'mid': 440, 'high': 587}
+_METRONOME_TONE_FREQS = {'low': 294, 'mid': 440, 'high': 587, 'sub': 1200}
+_METRONOME_TICK_DURATIONS = {
+    'low': METRONOME_TICK_DURATION,
+    'mid': METRONOME_TICK_DURATION,
+    'high': METRONOME_TICK_DURATION,
+    'sub': METRONOME_SUB_TICK_DURATION,
+}
 
 
 def _make_metronome_tick(sr, tone_type):
-    n = int(sr * METRONOME_TICK_DURATION)
+    duration = _METRONOME_TICK_DURATIONS[tone_type]
+    n = int(sr * duration)
     t = np.arange(n) / sr
     return np.sin(2 * np.pi * _METRONOME_TONE_FREQS[tone_type] * t) * np.exp(-40 * t)
 
 
-def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi, play_only_low):
+def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi,
+                             play_only_low, exercise_patterns=None, play_subdivisions=False):
     sr = METRONOME_SAMPLE_RATE
     seconds_per_beat = 60.0 / tempo
+
+    spb = 1  # subdivisions per beat — 1 in non-exercise mode
+    if exercise_patterns:
+        pat = exercise_patterns[0]
+        beats_per_measure = pat['beats_per_measure']
+        measures_per_pattern = len(pat['measures'])
+        spb = pat['subdivisions_per_beat']
+
     pattern_duration = seconds_per_beat * beats_per_measure * measures_per_pattern
     n_patterns = max(1, round(METRONOME_TARGET_LOOP_SECONDS / pattern_duration))
     while n_patterns * pattern_duration > METRONOME_MAX_LOOP_SECONDS:
@@ -70,6 +89,9 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
     n_patterns = max(1, n_patterns)
     track_samples = round(n_patterns * pattern_duration * sr)
     track = np.zeros(track_samples)
+
+    seconds_per_sub = seconds_per_beat / spb
+
     for p in range(n_patterns):
         for m in range(measures_per_pattern):
             for b in range(beats_per_measure):
@@ -80,13 +102,22 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
                 else:
                     tone_type = 'high'
                     should_play = bool(play_hi) and not bool(play_only_low)
-                if not should_play:
-                    continue
-                beat_time = ((p * measures_per_pattern + m) * beats_per_measure + b) * seconds_per_beat
-                start = round(beat_time * sr)
-                tick = _make_metronome_tick(sr, tone_type)
-                end = min(start + len(tick), track_samples)
-                track[start:end] += tick[:end - start]
+                if should_play:
+                    beat_time = ((p * measures_per_pattern + m) * beats_per_measure + b) * seconds_per_beat
+                    start = round(beat_time * sr)
+                    tick = _make_metronome_tick(sr, tone_type)
+                    end = min(start + len(tick), track_samples)
+                    track[start:end] += tick[:end - start]
+
+                if exercise_patterns and play_subdivisions:
+                    beat_time = ((p * measures_per_pattern + m) * beats_per_measure + b) * seconds_per_beat
+                    for s in range(1, spb):
+                        sub_time = beat_time + s * seconds_per_sub
+                        sub_start = round(sub_time * sr)
+                        sub_tick = _make_metronome_tick(sr, 'sub')
+                        sub_end = min(sub_start + len(sub_tick), track_samples)
+                        track[sub_start:sub_end] += sub_tick[:sub_end - sub_start]
+
     peak = np.max(np.abs(track))
     if peak > 0:
         track *= 0.9 / peak
@@ -94,6 +125,35 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
     sf.write(buf, track, sr, format='WAV', subtype='PCM_16')
     buf.seek(0)
     return 'data:audio/wav;base64,' + base64.b64encode(buf.read()).decode()
+
+
+def compute_exercise_schedule(exercise_patterns, tempo):
+    """Return schedule for one full exercise cycle (single-pattern scope).
+
+    Each entry: {time, patternIdx, measureIdx, subIdx, isBeat}
+    subIdx is position within the measure string (0 .. bpm*spb-1).
+    """
+    pat = exercise_patterns[0]
+    bpm = pat['beats_per_measure']
+    mpp = len(pat['measures'])
+    spb = pat['subdivisions_per_beat']
+    seconds_per_sub = (60.0 / tempo) / spb
+
+    schedule = []
+    for m in range(mpp):
+        for b in range(bpm):
+            for s in range(spb):
+                sub_idx = b * spb + s
+                global_sub = (m * bpm + b) * spb + s
+                schedule.append({
+                    'time': round(global_sub * seconds_per_sub, 6),
+                    'patternIdx': 0,
+                    'measureIdx': m,
+                    'subIdx': sub_idx,
+                    'isBeat': s == 0,
+                })
+    total_duration = mpp * bpm * spb * seconds_per_sub
+    return {'schedule': schedule, 'duration': round(total_duration, 6)}
 
 
 RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(
@@ -111,6 +171,7 @@ play-only-low-tone: false
 tempo-slider: 120
 metronome-vol: 0.5
 custom-exercises: |-
+exercise-name: null
 """
 
 settings = yaml.safe_load(DEFAULT_SETTINGS_YAML)
