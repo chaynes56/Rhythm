@@ -65,15 +65,16 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session — 2026-05-09
+## Last session — 2026-05-11
 
-**Bug fixes (7eb2ecd):**
-- **Low tone on wrong beat:** Race condition in `reconfigureMetronome` — stale precomputed buffer played with new beat-state. Fix: detect track-affecting param changes before `updateMetronomeState`; if changed, null buffer+decode+URL so `startMetronomePlayback` uses per-tone WebAudio fallback (correct by construction). `loadMetronomeTrack` silently updates `metronomeTrackBuffer` when the new track arrives.
-- **Calibration cold-start:** Warmup increased from 2→3 count-in measures; measurement window from 4 beats→2 measures. IBI outlier filter removed (was calibrated for ~30% IBI deviation; cold-start error is ~3%).
-- **Chrome on Plotly cloud silent:** `shouldUseHtmlAudioMetronome` now returns true only for Safari. Added early `ensureAudioContext()` + `ctx.resume()` in `toggleMetronome` start branch (synchronously in user-gesture handler).
+**Calibration silent warmup fix (5ed849b):** Prior attempt (per-tone path) was dead code — `startCalibration` never nulls the precomputed buffer, so `startMetronomePlayback` always takes the buffer path. Fix: schedule gain ramps on `metronomeGainNode` in the buffer path (0.02 during warmup, linearRamp to 1.0 at measurement start). Auto-calibration passes `warmupMeasures=3`; manual passes `warmupMeasures=1` (pipeline already warm). `startCalibration` accepts param; `autoStopMs` scales accordingly. Field-tested — excellent results in Safari and Chrome.
 
-**Exercises Stage 1 (same commit):** `from exercises import` in `main.py`; sub-tick tone constants (1200 Hz / 10 ms); `compute_metronome_track` extended with `exercise_patterns` / `play_subdivisions`; `compute_exercise_schedule` added; `exercise-name: null` in `DEFAULT_SETTINGS_YAML`; Pulses moved to `multi_pattern_exercise_text` in `exercises.py`.
+**Debug mode (5ed849b):** `is_debug_mode(store_val)` checks 3 sources: `app.server.debug`, `DEBUG_MODE` env var, YAML `debug-mode` setting. Save always writes `false`. In debug mode, `process_calibration` builds full waveform+analytics from the calibration recording (same `audio-store` format as `process_audio`). Both calibration paths now show "Calibrating..." immediately.
 
-**Open:** Exercises Stage 2 (UI layout: dropdown, pattern table, Play Subdivisions toggle); calibration 3-measure warmup field test; metronome length guard re-implementation.
+**IPI deviation dots (5ed849b):** For each pulse i>0, y = deviation of `beat_times[i]-beat_times[i-1]` from nearest subdivision interval. Immune to calibration offset. Royalblue, size 10, rendered on top of existing size-6 colored dots. Legend reorganised: "Relative to metronome" group (green/orange/red bars) + "Relative to previous pulse" group (IPI dot), via Plotly `legendgrouptitle_text`.
+
+**exercises.py (5ed849b):** Exercise dict now `{total_beats, patterns}` for upcoming metronome length guard.
+
+**Open:** Exercises Stage 2 (UI layout: dropdown, pattern table, Play Subdivisions toggle); metronome length guard re-implementation.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.

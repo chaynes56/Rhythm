@@ -96,9 +96,8 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
 
     pattern_duration = seconds_per_beat * beats_per_measure * measures_per_pattern
     n_patterns = max(1, round(METRONOME_TARGET_LOOP_SECONDS / pattern_duration))
-    while n_patterns * pattern_duration > METRONOME_MAX_LOOP_SECONDS:
+    while n_patterns > 1 and n_patterns * pattern_duration > METRONOME_MAX_LOOP_SECONDS:
         n_patterns -= 1
-    n_patterns = max(1, n_patterns)
     track_samples = round(n_patterns * pattern_duration * sr)
     track = np.zeros(track_samples)
 

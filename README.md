@@ -114,11 +114,10 @@ deviation from the wrong subdivision.
 
 The metronome works by pre-computing an entire metronome cycle, after 
 which the selected exercise (or pattern if no exercise has been selected) is repeated. 
-Resource constraints limit the length of this cycle to 5 minutes. 
-This is a function of both the total length of the exercise (or 
-pattern) and the tempo. If a change in these selections would result in 
-exceeding the limit, an alert is issued and the change is ignored. Your choice then is 
-to shorten the exercise or reduce the tempo. 
+Resource constraints limit the length of this cycle to 5 minutes.  This
+limit cannot be exceeded with the basic metronome options; only with long exercises
+at a sufficiently slow tempo. If an exercise is selected that would exceed the limit 
+at the current tempo, the selection will be rejected with an alert. 
 
 ## Audio latency
 
