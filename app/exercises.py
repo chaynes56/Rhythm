@@ -73,7 +73,8 @@ BxBxBxBxBxBx
 #          }
 # measure_line: string of voicing characters of length subdivisions_per_beat *
 #   beats_per_measure.
-# exercise_dict: exercise_name -> list(pattern)
+# exercise: { total_beats: int, patterns: list(pattern) }
+# exercise_dict: exercise_name -> exercise
 def make_exercises(text):  # -> exercise_dict
     exercise_dict = {}
     for exercise_text in text.split('----'):
@@ -114,7 +115,10 @@ def make_exercises(text):  # -> exercise_dict
                 elif len(line) != subdivisions_per_beat * num_beats:
                     error('invalid pattern line length')
                 measures.append(line)
-        exercise_dict[exercise_name] = patterns
+        total_beats = sum(pat['beats_per_measure'] * len(pat['measures'])
+                          for pat in patterns)
+        exercise_dict[exercise_name] = {'total_beats': total_beats,
+                                        'patterns': patterns}
     return exercise_dict
 
 

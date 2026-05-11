@@ -34,6 +34,7 @@ let recordingStream = null;
 let pendingRecordingRequestId = 0;
 let currentRecordingPhase = 'idle';
 let calibrationMode = false;
+let calibrationWarmupMeasures = 3;  // 3 for auto-cal (cold pipeline), 1 for manual (already warm)
 let metronomeState = {
     beatCount: 0,
     measureCount: 0,
@@ -317,9 +318,13 @@ function playScheduledTone(scheduledTime = null) {
 
             source.buffer = metronomeClickBuffers[toneKey];
 
+            const toneVolume = (calibrationMode && calibrationWarmupMeasures > 0)
+                ? (metronomeState.beatCount < calibrationWarmupMeasures * metronomeState.beatsPerMeasure ? 0.02 : 1.0)
+                : metronomeState.volume;
+
             gain.gain.cancelScheduledValues(toneTime);
             gain.gain.setValueAtTime(0.0001, toneTime);
-            gain.gain.linearRampToValueAtTime(metronomeState.volume, toneTime + 0.005);
+            gain.gain.linearRampToValueAtTime(toneVolume, toneTime + 0.005);
             gain.gain.exponentialRampToValueAtTime(0.0001, toneTime + METRONOME_TONE_DURATION_S);
 
             source.connect(gain);
@@ -357,7 +362,10 @@ function playHtmlTone() {
             const audio = new Audio();
             audio.src = /** @type {string} */ (metronomeAudioUrls[toneKey]);
             audio.preload = 'auto';
-            audio.volume = metronomeState.volume;
+            const htmlVolume = (calibrationMode && calibrationWarmupMeasures > 0)
+                ? (metronomeState.beatCount < calibrationWarmupMeasures * metronomeState.beatsPerMeasure ? 0.02 : 1.0)
+                : metronomeState.volume;
+            audio.volume = htmlVolume;
             // Add playsinline just in case, though it's for video
             audio.setAttribute('playsinline', 'true');
             activeMetronomeAudios.push(audio);
@@ -500,7 +508,15 @@ function startMetronomePlayback(options = {}) {
             source.loop = true;
             source.loopStart = 0;
             source.loopEnd = metronomeTrackBuffer.duration;
-            gainNode.gain.setValueAtTime(metronomeState.volume, ctx.currentTime);
+            if (calibrationMode && calibrationWarmupMeasures > 0) {
+                // Warmup measures play nearly silently; measurement measures at full volume.
+                const warmupEnd = startTime + calibrationWarmupMeasures * beatsPerMeasure * secondsPerBeat;
+                gainNode.gain.setValueAtTime(0.02, startTime);
+                gainNode.gain.setValueAtTime(0.02, warmupEnd - 0.010);
+                gainNode.gain.linearRampToValueAtTime(1.0, warmupEnd + 0.010);
+            } else {
+                gainNode.gain.setValueAtTime(metronomeState.volume, ctx.currentTime);
+            }
             source.connect(gainNode);
             gainNode.connect(ctx.destination);
             source.start(startTime, bufferOffset);
@@ -839,9 +855,7 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
                     return;
                 }
 
-                // Calibration uses 3 count-in measures to warm the audio pipeline
-                // before the first measured beat.  Regular recording uses 1.
-                const countInMeasures = calibrationMode ? 3 : 1;
+                const countInMeasures = calibrationMode ? calibrationWarmupMeasures : 1;
                 const measureDelayMs = firstBeatDelayMs + outputLatencyMs + (countInMeasures * metronomeState.beatsPerMeasure * secondsPerBeat * 1000) - RECORDING_PRE_ROLL_MS;
                 console.log(`startRecordingWithCountIn: measureDelayMs=${measureDelayMs.toFixed(1)}ms, outputLatencyMs=${outputLatencyMs.toFixed(1)}ms`);
                 recordingDelayTimeout = setTimeout(() => beginActiveRecording(requestId), measureDelayMs);
@@ -1117,14 +1131,15 @@ try {
             loadMetronomeTrack(dataUrl);
         },
 
-        startCalibration: function(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
-            console.log('startCalibration: starting calibration recording');
+        startCalibration: function(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone, warmupMeasures) {
+            calibrationWarmupMeasures = (warmupMeasures !== undefined) ? warmupMeasures : 3;
+            console.log(`startCalibration: warmupMeasures=${calibrationWarmupMeasures}`);
             calibrationMode = true;
             startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
-            // Auto-stop: getUserMedia (~500ms) + 0.15s primer + 3 count-in measures + 2 measurement measures + buffer
+            // Auto-stop: getUserMedia (~500ms) + 0.15s primer + warmup measures + 2 measurement measures + buffer
             const secondsPerBeat = 60.0 / (tempo || 120);
             const bpm = beatsPerMeasure || 4;
-            const autoStopMs = 500 + 150 + (3 * bpm * secondsPerBeat * 1000) + (2 * bpm * secondsPerBeat * 1000) + 500;
+            const autoStopMs = 500 + 150 + (calibrationWarmupMeasures * bpm * secondsPerBeat * 1000) + (2 * bpm * secondsPerBeat * 1000) + 500;
             console.log(`startCalibration: auto-stop scheduled in ${autoStopMs.toFixed(0)}ms`);
             setTimeout(() => {
                 if (calibrationMode || currentRecordingPhase !== 'idle') {

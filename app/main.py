@@ -4,6 +4,7 @@
 import base64
 import io
 import json
+import os
 from pathlib import Path
 from time import time as time_now
 
@@ -61,6 +62,17 @@ _METRONOME_TICK_DURATIONS = {
     'high': METRONOME_TICK_DURATION,
     'sub': METRONOME_SUB_TICK_DURATION,
 }
+
+
+def is_debug_mode(store_val=None) -> bool:
+    """True if any debug source is active: Flask debug flag, DEBUG_MODE env var, or YAML setting."""
+    if app.server.debug:
+        return True
+    if os.environ.get("DEBUG_MODE", "").strip().lower() == "true":
+        return True
+    if store_val:
+        return bool(store_val)
+    return False
 
 
 def _make_metronome_tick(sr, tone_type):
@@ -159,7 +171,9 @@ def compute_exercise_schedule(exercise_patterns, tempo):
 RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(
     encoding="utf-8").replace("</script>", r"<\/script>")
 
+
 DEFAULT_SETTINGS_YAML = """
+debug-mode: false
 training-level: Novice
 subdivisions-per-beat: 4
 recording-vol: 1.0
@@ -481,6 +495,7 @@ app.layout = dbc.Container([
     dcc.Store(id="calibration-audio-data-store"),
     dcc.Store(id="calibration-offset-store"),
     dcc.Store(id="calibration-command-store"),
+    dcc.Store(id="debug-mode-store", data=False),
     dcc.Interval(id="auto-calibrate-interval", interval=3000, n_intervals=0,
                  max_intervals=1),
 ], fluid=True)
@@ -491,12 +506,14 @@ clientside_callback(
     function(n_clicks, tempo, beats, measures, volume, hiTone, onlyLow) {
         if (n_clicks && window.recorderControls && window.recorderControls.startCalibration) {
             window.recorderControls.startCalibration(
-                tempo, beats, measures, volume, !!hiTone, !!onlyLow);
+                tempo, beats, measures, volume, !!hiTone, !!onlyLow, 1);
+            return [window.dash_clientside.no_update, 'Calibrating...'];
         }
-        return window.dash_clientside.no_update;
+        return [window.dash_clientside.no_update, window.dash_clientside.no_update];
     }
     """,
     Output("calibration-command-store", "data"),
+    Output("process-status", "children", allow_duplicate=True),
     Input("calibrate-btn", "n_clicks"),
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
@@ -513,13 +530,15 @@ clientside_callback(
         if (n_intervals > 0 && (existing === null || existing === undefined)) {
             if (window.recorderControls && window.recorderControls.startCalibration) {
                 window.recorderControls.startCalibration(
-                    tempo, beats, measures, volume, !!hiTone, !!onlyLow);
+                    tempo, beats, measures, volume, !!hiTone, !!onlyLow, 3);
+                return [window.dash_clientside.no_update, 'Calibrating...'];
             }
         }
-        return window.dash_clientside.no_update;
+        return [window.dash_clientside.no_update, window.dash_clientside.no_update];
     }
     """,
     Output("calibration-command-store", "data", allow_duplicate=True),
+    Output("process-status", "children", allow_duplicate=True),
     Input("auto-calibrate-interval", "n_intervals"),
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
@@ -550,11 +569,19 @@ clientside_callback(
 @app.callback(
     Output("calibration-offset-store", "data"),
     Output("process-status", "children", allow_duplicate=True),
+    Output("audio-store", "data", allow_duplicate=True),
+    Output("waveform-visible-store", "data", allow_duplicate=True),
+    Output("waveform-graph", "figure", allow_duplicate=True),
     Input("calibration-audio-data-store", "data"),
     State("tempo-slider", "value"),
+    State("beats-per-measure", "value"),
+    State("measures-per-pattern", "value"),
+    State("subdivisions-per-beat", "value"),
+    State("debug-mode-store", "data"),
     prevent_initial_call=True,
 )
-def process_calibration(base64_audio, tempo):
+def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pattern,
+                        subdivisions_per_beat, debug_mode_store):
     if not base64_audio:
         raise PreventUpdate
     try:
@@ -570,7 +597,7 @@ def process_calibration(base64_audio, tempo):
         except Exception:
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
-                return no_update, "Calibration failed: could not load audio"
+                return no_update, "Calibration failed: could not load audio", no_update, no_update, no_update
             y, sr = result
 
         if len(y.shape) > 1:
@@ -582,7 +609,7 @@ def process_calibration(base64_audio, tempo):
         beat_times = beat_times - WAVEFORM_DISPLAY_SHIFT_SECONDS
 
         if len(beat_times) < 2:
-            return no_update, "Calibration failed: too few beats detected"
+            return no_update, "Calibration failed: too few beats detected", no_update, no_update, no_update
 
         seconds_per_beat = 60.0 / (tempo or 120)
         phase_offset_s = float(np.median(beat_times % seconds_per_beat))
@@ -591,10 +618,43 @@ def process_calibration(base64_audio, tempo):
             phase_offset_s -= seconds_per_beat
         offset_ms = round(phase_offset_s * 1000, 1)
         print(f"process_calibration: offset={offset_ms}ms from {len(beat_times)} beats")
-        return offset_ms, f"Calibrated: {offset_ms} ms offset"
+        debug = is_debug_mode(debug_mode_store)
+        msg = f"Calibrated: {offset_ms} ms offset" if debug else ""
+
+        if not debug:
+            return offset_ms, msg, no_update, no_update, no_update
+
+        # Debug: build full analysis of the calibration recording so the waveform and
+        # all analytics panels update, making timing problems easy to diagnose.
+        duration = len(y) / sr
+        bpm = beats_per_measure or 4
+        mpp = measures_per_pattern or 1
+        spb = subdivisions_per_beat or 4
+        cal_s = phase_offset_s
+        metro_display = np.arange(cal_s % seconds_per_beat,
+                                  duration - METRONOME_END_MARGIN_SECONDS,
+                                  seconds_per_beat)
+        metro_times = np.arange(cal_s, duration - METRONOME_END_MARGIN_SECONDS, seconds_per_beat)
+        fig = build_waveform_figure(y, sr, metro_display, beat_times, bpm,
+                                    None, 512, mpp, spb,
+                                    display_offset=cal_s % seconds_per_beat)
+        fig.update_layout(uirevision=str(time_now()))
+        save_data = {
+            "audio": base64_audio,
+            "tempo": tempo,
+            "beats_per_measure": bpm,
+            "measures_per_pattern": mpp,
+            "calibration_offset_ms": offset_ms,
+            "metronome_times": metro_times.tolist(),
+            "beat_times": beat_times.tolist(),
+            "spectrum_freqs": [],
+            "spectrum_psd": [],
+            "duration": duration,
+        }
+        return offset_ms, msg, json.dumps(save_data), True, fig
     except Exception as e:
         print(f"process_calibration error: {e}")
-        return no_update, f"Calibration failed: {e}"
+        return no_update, f"Calibration failed: {e}", no_update, no_update, no_update
 
 
 @app.callback(
@@ -1317,7 +1377,21 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             abs_dev < warn_ms, 'green',
             np.where(abs_dev < alert_ms, 'orange', 'red')
         )
+
+        # Inter-pulse interval (IPI) deviations — immune to calibration errors.
+        # For pulse i, compute: interval from pulse i-1 → i, find nearest subdivision
+        # count, y = deviation from that expected interval.
+        if len(beat_times) > 1:
+            ipis = np.diff(beat_times)
+            n_subs = np.round(ipis / dt)
+            ipi_dev_ms = (ipis - n_subs * dt) * 1000
+            ipi_x = x_times[1:]
+        else:
+            ipi_dev_ms = np.array([])
+            ipi_x = np.array([])
+
         fig = go.Figure()
+        # Base dots at y=0, colored by absolute deviation (no legend entry)
         fig.add_trace(go.Scatter(
             x=x_times, y=[0.0] * len(x_times),
             mode='markers', name='Pulses',
@@ -1332,7 +1406,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             ('red', f'≥ {alert_ms} ms',
              abs_dev >= alert_ms),
         ]
-        for color, label, mask in categories:
+        for i, (color, label, mask) in enumerate(categories):
             x_values, y_values = [], []
             for xt, d in zip(x_times[mask], deviations[mask]):
                 x_values += [xt, xt, None]
@@ -1341,7 +1415,19 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
                 x=x_values, y=y_values,
                 mode='lines', name=label,
                 line=dict(color=color, width=2),
+                legendgroup='metronome',
+                legendgrouptitle_text='Relative to metronome' if i == 0 else None,
             ))
+
+        # IPI deviation dots — larger, royalblue, drawn on top
+        fig.add_trace(go.Scatter(
+            x=ipi_x, y=ipi_dev_ms.tolist() if len(ipi_dev_ms) else [],
+            mode='markers',
+            name='Rel. to prev. pulse',
+            marker=dict(color='royalblue', size=10, symbol='circle'),
+            legendgroup='ipi',
+            legendgrouptitle_text='Relative to previous pulse',
+        ))
 
         # Default x range matches the waveform (full recording, with display shift)
         full_x_range = (
@@ -1382,6 +1468,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             dragmode=False,
             template="plotly_white",
             margin=dict(l=60, r=20, t=20, b=40),
+            legend=dict(traceorder='normal', groupclick='toggleitem'),
         )
         if x_range is not None:
             fig.update_xaxes(range=x_range, autorange=False)
@@ -1721,6 +1808,7 @@ def save_settings(n_clicks, training_level, subdivisions, rec_vol, play_vol,
         "play-only-low-tone": bool(play_only_low),
         "tempo-slider": tempo,
         "metronome-vol": metro_vol,
+        "debug-mode": False,  # always saved as false; enable via env var or Flask debug flag
     }
     buf = io.StringIO()
     yaml.dump(current, buf, default_flow_style=False)
@@ -1739,13 +1827,14 @@ def save_settings(n_clicks, training_level, subdivisions, rec_vol, play_vol,
     Output("tempo-slider", "value"),
     Output("metronome-vol", "value"),
     Output("status-msg", "children", allow_duplicate=True),
+    Output("debug-mode-store", "data", allow_duplicate=True),
     Input("settings-raw-store", "data"),
     prevent_initial_call=True,
 )
 def load_settings(data):
     if data is None:
         raise PreventUpdate
-    no_change = (no_update,) * 10
+    no_change = (no_update,) * 10  # covers the 10 settings outputs
     try:
         text = data["content"]
         loaded = yaml.safe_load(text)
@@ -1765,10 +1854,11 @@ def load_settings(data):
             loaded.get("tempo-slider", settings["tempo-slider"]),
             loaded.get("metronome-vol", settings["metronome-vol"]),
             "",
+            bool(loaded.get("debug-mode", False)),
         )
     except Exception as e:
         print(f"load_settings error: {e}")
-        return (*no_change, f"Failed to load settings: {e}")
+        return (*no_change, f"Failed to load settings: {e}", no_update)
 
 
 if __name__ == '__main__':

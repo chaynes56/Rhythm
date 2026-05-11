@@ -23,7 +23,7 @@ This is a **Plotly/Dash** web app (single file: `app/main.py`) for percussion/rh
 
 **`app/assets/recorder.js`** handles:
 - Microphone access (`MediaRecorder` API)
-- Metronome playback via Web Audio API (with HTMLAudio fallback for Safari/Plotly cloud)
+- Metronome playback via Web Audio API (with HTMLAudio fallback for Safari only — Chrome, including on Plotly cloud, uses the per-tone WebAudio fallback)
 - Recording countdown delay (one measure count-in before capture begins)
 - In-browser WAV encoding (`encodeWAV`) — recorded blobs are decoded and re-encoded as WAV before sending to Python
 
@@ -67,18 +67,13 @@ The app measures output latency to synchronise recording start with metronome be
 
 ## Last session — 2026-05-09
 
-**Typecheck warnings fixed (3de518b):** Two "Unused property" warnings in `recorder.js` (`loadMetronomeTrack`, `startCalibration`) cleared by adding `void window.recorderControls.X` references matching the existing pattern for `reconfigureMetronome`. Properties are called from Dash clientside callbacks in `main.py` which the IDE can't see cross-file.
+**Bug fixes (7eb2ecd):**
+- **Low tone on wrong beat:** Race condition in `reconfigureMetronome` — stale precomputed buffer played with new beat-state. Fix: detect track-affecting param changes before `updateMetronomeState`; if changed, null buffer+decode+URL so `startMetronomePlayback` uses per-tone WebAudio fallback (correct by construction). `loadMetronomeTrack` silently updates `metronomeTrackBuffer` when the new track arrives.
+- **Calibration cold-start:** Warmup increased from 2→3 count-in measures; measurement window from 4 beats→2 measures. IBI outlier filter removed (was calibrated for ~30% IBI deviation; cold-start error is ~3%).
+- **Chrome on Plotly cloud silent:** `shouldUseHtmlAudioMetronome` now returns true only for Safari. Added early `ensureAudioContext()` + `ctx.resume()` in `toggleMetronome` start branch (synchronously in user-gesture handler).
 
-**Zoom-reset alignment fixed — confirmed working (fe6d259):** `[deviation]` debug output diagnosed the root cause: after double-click reset, Plotly switches the waveform to autorange (adds ~5% padding) but the deviation graph was set to exact data bounds → both ends off. Fix: invisible anchor traces at `[-shift, duration-shift]` added to deviation figure so its autorange spans the full recording; `xaxis.autorange` branch now sets `x_range = None` → `fig.update_xaxes(autorange=True)` to match waveform behaviour. Added `automargin=False` to both graphs' y-axes for pixel-level parity on first display. Debug print removed.
+**Exercises Stage 1 (same commit):** `from exercises import` in `main.py`; sub-tick tone constants (1200 Hz / 10 ms); `compute_metronome_track` extended with `exercise_patterns` / `play_subdivisions`; `compute_exercise_schedule` added; `exercise-name: null` in `DEFAULT_SETTINGS_YAML`; Pulses moved to `multi_pattern_exercise_text` in `exercises.py`.
 
-**Startup calibration warmup approach changed (in progress, not yet field-tested):** 1.5s silent primer in `firstToneDelaySeconds` reverted to 0.15s (same as normal). Root cause: silence doesn't exercise the OS audio driver the same way as real audio content — pipeline stays cold. Fix: calibration now uses 2 count-in measures (`countInMeasures = calibrationMode ? 2 : 1` in `startRecordingWithCountIn`) so 2 full measures of real metronome tones warm the pipeline before the first measured beat. `autoStopMs` updated accordingly (500 + 150 + 2×measure + 4 beats + 500ms).
-
-**ruamel.yaml → pyyaml:** Plotly cloud lacked `ruamel.yaml`. Replaced `from ruamel.yaml import YAML` with `import yaml`; `YAML(typ='safe').load()` → `yaml.safe_load()`; `YAML().dump()` → `yaml.dump(..., default_flow_style=False)`. `uv add pyyaml && uv remove ruamel-yaml` updated `pyproject.toml`.
-
-**audio_utils.py extracted:** All pure audio-processing functions and constants moved from `main.py` into `app/audio_utils.py`. `main.py` re-imports via `from audio_utils import ...`. No logic changes.
-
-**Histogram:** Width 350px → 525px; `fig.update_xaxes(tickmode="auto", nticks=10, tickformat=".0f")` for integer ms ticks.
-
-**Open:** startup auto-calibration accuracy with 2-measure warmup (field test pending); metronome length guard re-implementation.
+**Open:** Exercises Stage 2 (UI layout: dropdown, pattern table, Play Subdivisions toggle); calibration 3-measure warmup field test; metronome length guard re-implementation.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
