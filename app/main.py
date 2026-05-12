@@ -16,7 +16,7 @@ from dash import Dash, ctx, dcc, html, Input, no_update, Output, State, clientsi
 from dash.exceptions import PreventUpdate
 import yaml
 
-from exercises import make_exercises, exercises as builtin_exercises
+from exercises import exercises as builtin_exercises
 
 from audio_utils import (
     WAVEFORM_DISPLAY_SHIFT_SECONDS,
@@ -183,7 +183,6 @@ play-hi-tone: true
 play-only-low-tone: false
 tempo-slider: 120
 metronome-vol: 0.5
-custom-exercises: |-
 exercise-name: null
 """
 
@@ -222,28 +221,19 @@ def build_beat_indicator_boxes(beats_per_measure: int, measures_per_pattern: int
     return rows
 
 
-def get_all_exercises(custom_text=""):
-    all_ex = dict(builtin_exercises)
-    if custom_text and custom_text.strip():
-        try:
-            custom = make_exercises(custom_text)
-            merged = dict(custom)
-            merged.update({k: v for k, v in all_ex.items() if k not in merged})
-            return merged
-        except Exception:
-            pass
-    return all_ex
+def get_all_exercises():
+    return dict(builtin_exercises)
 
 
-def build_exercise_table(exercise_name: str, custom_text: str = "") -> list:
-    all_ex = get_all_exercises(custom_text)
+def build_exercise_table(exercise_name: str) -> list:
+    all_ex = get_all_exercises()
     ex = all_ex.get(exercise_name)
     if not ex:
         return []
 
-    base = {"textAlign": "center", "padding": "1px 4px",
-            "border": "1px solid #ccc", "minWidth": "16px",
-            "fontSize": "0.82rem", "fontFamily": "monospace"}
+    base = {"textAlign": "center", "padding": "3px 12px",
+            "border": "1px solid #ccc", "minWidth": "48px",
+            "fontSize": "1.5rem", "fontFamily": "monospace"}
 
     result = []
     for pat_idx, pat in enumerate(ex["patterns"]):
@@ -443,18 +433,6 @@ app.layout = dbc.Container([
                                        id="playback-vol"),
                         ], width=6),
                     ]),
-                    dbc.Row([
-                        dbc.Col([
-                            html.Label("Custom Exercises (---- separated, same format as built-in)", className="small"),
-                            dcc.Textarea(
-                                id="custom-exercises-text",
-                                value=settings.get("custom-exercises") or "",
-                                style={"width": "100%", "height": "80px",
-                                       "fontSize": "0.8rem", "fontFamily": "monospace"},
-                                placeholder="My Exercise\n1e&a2e&a\nx...x...\n----\n...",
-                            ),
-                        ], width=12),
-                    ], className="mt-2"),
                     html.Div(id="status-msg", className="mt-2"),
                 ]),
             ], className="mb-4"),
@@ -473,19 +451,6 @@ app.layout = dbc.Container([
                                 style={"width": "220px"},
                             ),
                         ], width="auto"),
-                        dbc.Col(
-                            html.Div(
-                                dbc.Switch(
-                                    id="play-subdivisions",
-                                    label="Play Subdivisions",
-                                    value=False,
-                                    style={"marginTop": "24px"},
-                                ),
-                                id="play-subdivisions-col",
-                                style={"display": "none"},
-                            ),
-                            width="auto",
-                        ),
                         dbc.Col(
                             html.Div(id="exercise-length-alert"),
                             width="auto",
@@ -532,6 +497,15 @@ app.layout = dbc.Container([
                                 id="play-only-low-tone",
                                 label="Play Only Low Tone",
                                 value=settings["play-only-low-tone"],
+                            ),
+                            html.Div(
+                                dbc.Switch(
+                                    id="play-subdivisions",
+                                    label="Play Subdivisions",
+                                    value=False,
+                                ),
+                                id="play-subdivisions-col",
+                                style={"display": "none"},
                             ),
                         ], width="auto"),
                         dbc.Col([
@@ -764,14 +738,13 @@ def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pat
     Input("play-only-low-tone", "value"),
     Input("exercise-select", "value"),
     Input("play-subdivisions", "value"),
-    State("custom-exercises-text", "value"),
 )
 def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi, play_only_low,
-                           exercise_name, play_subdivisions, custom_text):
+                           exercise_name, play_subdivisions):
     try:
         exercise_patterns = None
         if exercise_name:
-            all_ex = get_all_exercises(custom_text)
+            all_ex = get_all_exercises()
             ex = all_ex.get(exercise_name)
             if ex:
                 exercise_patterns = ex["patterns"]
@@ -1098,23 +1071,12 @@ clientside_callback(
     Input("beats-per-measure", "value"),
     Input("measures-per-pattern", "value"),
     Input("exercise-select", "value"),
-    State("custom-exercises-text", "value"),
 )
-def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern, exercise_name, custom_text):
+def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern, exercise_name):
     if exercise_name:
-        return build_exercise_table(exercise_name, custom_text or "")
+        return build_exercise_table(exercise_name)
     return build_beat_indicator_boxes(beats_per_measure, measures_per_pattern)
 
-
-@app.callback(
-    Output("exercise-select", "options"),
-    Input("custom-exercises-text", "value"),
-)
-def update_exercise_options(custom_text):
-    all_ex = get_all_exercises(custom_text or "")
-    return [{"label": "None (free metronome)", "value": ""}] + [
-        {"label": k, "value": k} for k in all_ex
-    ]
 
 
 @app.callback(
@@ -1125,14 +1087,13 @@ def update_exercise_options(custom_text):
     Output("measures-per-pattern", "value", allow_duplicate=True),
     Input("exercise-select", "value"),
     Input("tempo-slider", "value"),
-    State("custom-exercises-text", "value"),
     prevent_initial_call=True,
 )
-def update_exercise_ui(exercise_name, tempo, custom_text):
+def update_exercise_ui(exercise_name, tempo):
     if not exercise_name:
         return {"display": "block"}, {"display": "none"}, None, no_update, no_update
 
-    all_ex = get_all_exercises(custom_text or "")
+    all_ex = get_all_exercises()
     ex = all_ex.get(exercise_name)
     if not ex:
         return {"display": "block"}, {"display": "none"}, None, no_update, no_update
@@ -1159,12 +1120,11 @@ def update_exercise_ui(exercise_name, tempo, custom_text):
     Output("exercise-schedule-store", "data"),
     Input("exercise-select", "value"),
     Input("tempo-slider", "value"),
-    State("custom-exercises-text", "value"),
 )
-def update_exercise_schedule(exercise_name, tempo, custom_text):
+def update_exercise_schedule(exercise_name, tempo):
     if not exercise_name:
         return None
-    all_ex = get_all_exercises(custom_text or "")
+    all_ex = get_all_exercises()
     ex = all_ex.get(exercise_name)
     if not ex:
         return None
@@ -1992,12 +1952,11 @@ clientside_callback(
     State("tempo-slider", "value"),
     State("metronome-vol", "value"),
     State("exercise-select", "value"),
-    State("custom-exercises-text", "value"),
     prevent_initial_call=True,
 )
 def save_settings(n_clicks, training_level, subdivisions, rec_vol, play_vol,
                   measures, beats, play_hi, play_only_low, tempo, metro_vol,
-                  exercise_name, custom_exercises):
+                  exercise_name):
     current = {
         "training-level": training_level,
         "subdivisions-per-beat": subdivisions,
@@ -2011,7 +1970,6 @@ def save_settings(n_clicks, training_level, subdivisions, rec_vol, play_vol,
         "metronome-vol": metro_vol,
         "debug-mode": False,  # always saved as false; enable via env var or Flask debug flag
         "exercise-name": exercise_name or None,
-        "custom-exercises": custom_exercises or "",
     }
     buf = io.StringIO()
     yaml.dump(current, buf, default_flow_style=False)
@@ -2032,14 +1990,13 @@ def save_settings(n_clicks, training_level, subdivisions, rec_vol, play_vol,
     Output("status-msg", "children", allow_duplicate=True),
     Output("debug-mode-store", "data", allow_duplicate=True),
     Output("exercise-select", "value"),
-    Output("custom-exercises-text", "value"),
     Input("settings-raw-store", "data"),
     prevent_initial_call=True,
 )
 def load_settings(data):
     if data is None:
         raise PreventUpdate
-    no_change = (no_update,) * 12  # covers 10 settings + status-msg + debug-mode-store
+    no_change = (no_update,) * 13  # 10 settings + status-msg + debug-mode-store + exercise-select
     try:
         text = data["content"]
         loaded = yaml.safe_load(text)
@@ -2061,11 +2018,10 @@ def load_settings(data):
             "",
             bool(loaded.get("debug-mode", False)),
             loaded.get("exercise-name") or "",
-            loaded.get("custom-exercises") or "",
         )
     except Exception as e:
         print(f"load_settings error: {e}")
-        return (*no_change, f"Failed to load settings: {e}", no_update, no_update)
+        return no_change
 
 
 if __name__ == '__main__':

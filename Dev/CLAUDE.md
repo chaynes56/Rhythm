@@ -65,25 +65,18 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session — 2026-05-11
+## Last session -- 2026-05-11
 
-**Exercises Stage 2b (uncommitted):** JS cell highlighting + load_recording context restore:
-- recorder.js: `exerciseSchedule` global, `highlightExercisePosition(m, s)`, `setExerciseSchedule(data)` (exposed on recorderControls); buffer-path 10ms poll does binary search on schedule to find current subdivision and highlights `ex-cell-0-{m}-{s}`; `advanceMetronomePosition` handles per-tone fallback; `resetBeatIndicators` handles exercise mode
-- `compute_exercise_schedule` now includes `spb` key; `exercise-schedule-store` + `update_exercise_schedule` callback + clientside callback push schedule to JS on exercise/tempo change
-- `load_recording` now has 5 outputs including `exercise-select` value (restored from `exercise_name` in recording JSON)
+**UI cleanup (this commit):** removed Custom Exercises textarea, consolidated three metronome switches into one column (Play Hi Tone / Play Only Low Tone / Play Subdivisions), scaled beat/exercise table cells 3x larger.
+- `get_all_exercises()` and `build_exercise_table(exercise_name)`: `custom_text` parameter removed; builtins only
+- `save_settings` / `load_settings`: `custom-exercises-text` Output/State removed; `no_change` is now 13-tuple
+- `DEFAULT_SETTINGS_YAML`: `custom-exercises` key removed
+- `make_exercises` import removed (no longer used)
 
-**Exercises Stage 2a (efc9ecb):** exercise-select dropdown, beats-measures-controls hide/show, exercise pattern table, play-subdivisions toggle, custom-exercises-text textarea, metronome track uses exercise patterns, settings save/load.
+**Exercises Stage 2b (commit before this):** JS cell highlighting + load_recording context restore.
 
-**Open:** commit 2b; then Stage 2c (parse error feedback, subdivision table SPB auto-set from exercise).
+**Exercises Stage 2a (efc9ecb):** exercise-select dropdown, beats-measures-controls hide/show, exercise pattern table, play-subdivisions toggle, metronome track uses exercise patterns, settings save/load.
 
-**To update this stub:** replace the content above with a fresh summary after each commit.
-- `exercise-select` dropdown in Metronome card; options rebuilt from `custom-exercises-text` textarea (Settings card) via `update_exercise_options`.
-- `update_exercise_ui` callback: hides `beats-measures-controls` div, shows `play-subdivisions-col` div, fires `dbc.Alert` if exercise > 300s, sets beats/measures dropdowns to exercise values on selection.
-- `build_exercise_table(exercise_name, custom_text)`: HTML table with subdivision header row + measure rows; cell IDs `ex-cell-{pat_idx}-{m_idx}-{col_idx}` for future JS highlighting.
-- `update_metronome_track`: now accepts `exercise-select`, `play-subdivisions`, `custom-exercises-text`; passes exercise patterns to `compute_metronome_track`.
-- `save_settings`/`load_settings`: persist `exercise-name` and `custom-exercises`.
-- `process_audio`: saves `exercise_name` in audio-store JSON.
-
-**Open:** commit this; then Stage 2b (JS cell highlighting, `compute_exercise_schedule` -> JS store, restore exercise on load_recording).
+**Open:** Stage 2c -- subdivision table SPB auto-set from exercise's first pattern when exercise mode is active.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
