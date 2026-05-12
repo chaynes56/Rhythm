@@ -35,6 +35,8 @@ let pendingRecordingRequestId = 0;
 let currentRecordingPhase = 'idle';
 let calibrationMode = false;
 let calibrationWarmupMeasures = 3;  // 3 for auto-cal (cold pipeline), 1 for manual (already warm)
+let exerciseSchedule = null;  // null = free mode; set to {schedule, duration, spb} in exercise mode
+let lastExerciseCellId = null;
 let metronomeState = {
     beatCount: 0,
     measureCount: 0,
@@ -155,6 +157,20 @@ function setMetronomePlayingState(isPlaying) {
 }
 
 function resetBeatIndicators() {
+    if (exerciseSchedule) {
+        if (lastExerciseCellId) {
+            const prev = document.getElementById(lastExerciseCellId);
+            if (prev) {
+                const parts = lastExerciseCellId.split('-');
+                const colIdx = parseInt(parts[parts.length - 1], 10);
+                prev.style.backgroundColor = colIdx % 2 === 1 ? '#e8e8e8' : '#ffffff';
+                prev.style.color = '';
+                prev.style.outline = '';
+            }
+            lastExerciseCellId = null;
+        }
+        return;
+    }
     const beatsPerMeasure = Math.max(1, Number(metronomeState.beatsPerMeasure) || 1);
     const measuresPerPattern = Math.max(1, Number(metronomeState.measuresPerPattern) || 1);
     for (let m = 0; m < measuresPerPattern; m++) {
@@ -168,6 +184,36 @@ function resetBeatIndicators() {
             box.style.borderColor = '#adb5bd';
         }
     }
+}
+
+function highlightExercisePosition(measureIdx, subIdx) {
+    const cellId = `ex-cell-0-${measureIdx}-${subIdx}`;
+    if (cellId === lastExerciseCellId) return;
+    if (lastExerciseCellId) {
+        const prev = document.getElementById(lastExerciseCellId);
+        if (prev) {
+            const parts = lastExerciseCellId.split('-');
+            const colIdx = parseInt(parts[parts.length - 1], 10);
+            prev.style.backgroundColor = colIdx % 2 === 1 ? '#e8e8e8' : '#ffffff';
+            prev.style.color = '';
+            prev.style.outline = '';
+        }
+    }
+    const cell = document.getElementById(cellId);
+    if (cell) {
+        cell.style.backgroundColor = '#198754';
+        cell.style.color = '#ffffff';
+        cell.style.outline = '2px solid #198754';
+    }
+    lastExerciseCellId = cellId;
+}
+
+function setExerciseSchedule(data) {
+    exerciseSchedule = data || null;
+    lastExerciseCellId = null;
+    console.log('setExerciseSchedule:', exerciseSchedule
+        ? `${exerciseSchedule.schedule.length} entries, duration=${exerciseSchedule.duration}s, spb=${exerciseSchedule.spb}`
+        : 'none (free mode)');
 }
 
 function highlightBeatIndicator(activeMeasureIndex, activeBeatIndex) {
@@ -290,7 +336,11 @@ function getMetronomeBeatState() {
 
 function advanceMetronomePosition(positionInMeasure) {
     const positionInPattern = metronomeState.measureCount % metronomeState.measuresPerPattern;
-    highlightBeatIndicator(positionInPattern, positionInMeasure);
+    if (exerciseSchedule) {
+        highlightExercisePosition(positionInPattern, positionInMeasure * (exerciseSchedule.spb || 1));
+    } else {
+        highlightBeatIndicator(positionInPattern, positionInMeasure);
+    }
     metronomeState.beatCount += 1;
     if (metronomeState.beatCount % metronomeState.beatsPerMeasure === 0) {
         metronomeState.measureCount += 1;
@@ -524,19 +574,36 @@ function startMetronomePlayback(options = {}) {
             metronomeGainNode = gainNode;
 
             let lastBeatIdx = -1;
+            let lastExerciseSchedIdx = -1;
             const totalBeatsPerPattern = beatsPerMeasure * measuresPerPattern;
             metronomeScheduler = setInterval(() => {
                 if (!metronomeSourceNode) return;
                 const now = ctx.currentTime;
                 if (now < indicatorStartTime) return;
                 const elapsed = (now - indicatorStartTime) + bufferOffset;
-                const beatIdx = Math.floor(elapsed / secondsPerBeat);
-                if (beatIdx !== lastBeatIdx) {
-                    lastBeatIdx = beatIdx;
-                    const beatInPattern = beatIdx % totalBeatsPerPattern;
-                    const posInMeasure = beatInPattern % beatsPerMeasure;
-                    const posInPattern = Math.floor(beatInPattern / beatsPerMeasure);
-                    highlightBeatIndicator(posInPattern, posInMeasure);
+                if (exerciseSchedule && exerciseSchedule.schedule && exerciseSchedule.schedule.length > 0) {
+                    const sched = exerciseSchedule.schedule;
+                    const posInCycle = elapsed % exerciseSchedule.duration;
+                    let lo = 0, hi = sched.length - 1, found = 0;
+                    while (lo <= hi) {
+                        const mid = (lo + hi) >> 1;
+                        if (sched[mid].time <= posInCycle) { found = mid; lo = mid + 1; }
+                        else hi = mid - 1;
+                    }
+                    if (found !== lastExerciseSchedIdx) {
+                        lastExerciseSchedIdx = found;
+                        const entry = sched[found];
+                        highlightExercisePosition(entry.measureIdx, entry.subIdx);
+                    }
+                } else {
+                    const beatIdx = Math.floor(elapsed / secondsPerBeat);
+                    if (beatIdx !== lastBeatIdx) {
+                        lastBeatIdx = beatIdx;
+                        const beatInPattern = beatIdx % totalBeatsPerPattern;
+                        const posInMeasure = beatInPattern % beatsPerMeasure;
+                        const posInPattern = Math.floor(beatInPattern / beatsPerMeasure);
+                        highlightBeatIndicator(posInPattern, posInMeasure);
+                    }
                 }
             }, 10);
 
@@ -1208,13 +1275,16 @@ try {
                 .catch(err => {
                     console.warn("Silent permission trigger failed (user may have denied):", err);
                 });
-        }
+        },
+
+        setExerciseSchedule: function(data) { setExerciseSchedule(data); },
     };
 
     // These properties are called from Dash clientside_callbacks embedded in main.py
     void window.recorderControls.reconfigureMetronome;
     void window.recorderControls.loadMetronomeTrack;
     void window.recorderControls.startCalibration;
+    void window.recorderControls.setExerciseSchedule;
     window.dash_clientside = window.dash_clientside || {};
     window.dash_clientside.recorder = window.recorderControls;
     console.log("recorder.js: recorderControls initialized successfully.");

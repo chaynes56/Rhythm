@@ -65,9 +65,18 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session — 2026-05-10
+## Last session — 2026-05-11
 
-**Exercises Stage 2a (uncommitted):** Full UI for exercise mode:
+**Exercises Stage 2b (uncommitted):** JS cell highlighting + load_recording context restore:
+- recorder.js: `exerciseSchedule` global, `highlightExercisePosition(m, s)`, `setExerciseSchedule(data)` (exposed on recorderControls); buffer-path 10ms poll does binary search on schedule to find current subdivision and highlights `ex-cell-0-{m}-{s}`; `advanceMetronomePosition` handles per-tone fallback; `resetBeatIndicators` handles exercise mode
+- `compute_exercise_schedule` now includes `spb` key; `exercise-schedule-store` + `update_exercise_schedule` callback + clientside callback push schedule to JS on exercise/tempo change
+- `load_recording` now has 5 outputs including `exercise-select` value (restored from `exercise_name` in recording JSON)
+
+**Exercises Stage 2a (efc9ecb):** exercise-select dropdown, beats-measures-controls hide/show, exercise pattern table, play-subdivisions toggle, custom-exercises-text textarea, metronome track uses exercise patterns, settings save/load.
+
+**Open:** commit 2b; then Stage 2c (parse error feedback, subdivision table SPB auto-set from exercise).
+
+**To update this stub:** replace the content above with a fresh summary after each commit.
 - `exercise-select` dropdown in Metronome card; options rebuilt from `custom-exercises-text` textarea (Settings card) via `update_exercise_options`.
 - `update_exercise_ui` callback: hides `beats-measures-controls` div, shows `play-subdivisions-col` div, fires `dbc.Alert` if exercise > 300s, sets beats/measures dropdowns to exercise values on selection.
 - `build_exercise_table(exercise_name, custom_text)`: HTML table with subdivision header row + measure rows; cell IDs `ex-cell-{pat_idx}-{m_idx}-{col_idx}` for future JS highlighting.

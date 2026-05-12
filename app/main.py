@@ -164,7 +164,7 @@ def compute_exercise_schedule(exercise_patterns, tempo):
                     'isBeat': s == 0,
                 })
     total_duration = mpp * bpm * spb * seconds_per_sub
-    return {'schedule': schedule, 'duration': round(total_duration, 6)}
+    return {'schedule': schedule, 'duration': round(total_duration, 6), 'spb': spb}
 
 
 RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(
@@ -593,6 +593,7 @@ app.layout = dbc.Container([
     dcc.Store(id="calibration-offset-store"),
     dcc.Store(id="calibration-command-store"),
     dcc.Store(id="debug-mode-store", data=False),
+    dcc.Store(id="exercise-schedule-store"),
     dcc.Interval(id="auto-calibrate-interval", interval=3000, n_intervals=0,
                  max_intervals=1),
 ], fluid=True)
@@ -1151,6 +1152,37 @@ def update_exercise_ui(exercise_name, tempo, custom_text):
     if ctx.triggered_id == "exercise-select":
         return {"display": "none"}, {"display": "block"}, alert, bpm, mpp
     return {"display": "none"}, {"display": "block"}, alert, no_update, no_update
+
+
+@app.callback(
+    Output("exercise-schedule-store", "data"),
+    Input("exercise-select", "value"),
+    Input("tempo-slider", "value"),
+    State("custom-exercises-text", "value"),
+)
+def update_exercise_schedule(exercise_name, tempo, custom_text):
+    if not exercise_name:
+        return None
+    all_ex = get_all_exercises(custom_text or "")
+    ex = all_ex.get(exercise_name)
+    if not ex:
+        return None
+    return compute_exercise_schedule(ex["patterns"], tempo or 120)
+
+
+clientside_callback(
+    """
+    function(scheduleData) {
+        if (window.recorderControls && window.recorderControls.setExerciseSchedule) {
+            window.recorderControls.setExerciseSchedule(scheduleData);
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("metronome-command-store", "data", allow_duplicate=True),
+    Input("exercise-schedule-store", "data"),
+    prevent_initial_call=True,
+)
 
 
 # noinspection PyUnusedLocal
@@ -1796,6 +1828,7 @@ def save_recording(n_clicks, audio_json):
     Output("waveform-visible-store", "data", allow_duplicate=True),
     Output("waveform-graph", "figure", allow_duplicate=True),
     Output("status-msg", "children"),
+    Output("exercise-select", "value", allow_duplicate=True),
     Input("upload-audio", "contents"),
     State("beats-per-measure", "value"),
     State("subdivisions-per-beat", "value"),
@@ -1805,7 +1838,7 @@ def save_recording(n_clicks, audio_json):
 def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
                    calibration_offset_ms):
     if not contents:
-        return None, False, go.Figure(), ""
+        return None, False, go.Figure(), "", no_update
 
     try:
         print(f"load_recording: contents length = {len(contents) if contents else 0}")
@@ -1820,10 +1853,10 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
                 f"load_recording: JSON parsed successfully, keys = {list(data.keys())}")
         except UnicodeDecodeError as e:
             print(f"load_recording: UnicodeDecodeError: {e}")
-            return None, False, go.Figure(), "Error: Uploaded file is not a valid JSON recording saved by this app."
+            return None, False, go.Figure(), "Error: Uploaded file is not a valid JSON recording saved by this app.", no_update
         except json.JSONDecodeError as e:
             print(f"load_recording: JSONDecodeError: {e}")
-            return None, False, go.Figure(), "Error: Uploaded file contains invalid JSON."
+            return None, False, go.Figure(), "Error: Uploaded file contains invalid JSON.", no_update
 
         base64_audio = data["audio"]
         # Set global for playback
@@ -1849,10 +1882,10 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
             # For large recordings, use timeout
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
-                return None, False, go.Figure(), "Error: Recording too long or corrupted. Max length is 10 minutes."
+                return None, False, go.Figure(), "Error: Recording too long or corrupted. Max length is 10 minutes.", no_update
 
             if not isinstance(result, tuple) or result[0] is None or result[1] is None:
-                return None, False, go.Figure(), "Error: Failed to load recording. File may be corrupted or in unsupported format."
+                return None, False, go.Figure(), "Error: Failed to load recording. File may be corrupted or in unsupported format.", no_update
 
             y, sr = result
             print(f"load_recording: Loaded with librosa, sr={sr}")
@@ -1895,12 +1928,12 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
             f"load_recording: Returning data with {len(metronome_times_display)} metronome points, {len(beat_times)} beat points")
 
         data["duration"] = duration
+        exercise_name = data.get("exercise_name") or ""
         # Don't show a success message (waveform appearing is enough feedback)
-        return json.dumps(data), True, fig, ""
+        return json.dumps(data), True, fig, "", exercise_name
     except Exception as e:
         print(f"Error loading recording: {e}")
-        # Don't show the error message to the user
-        return None, False, go.Figure(), ""
+        return None, False, go.Figure(), "", no_update
 
 
 clientside_callback(
