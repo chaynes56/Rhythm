@@ -1121,11 +1121,12 @@ def update_exercise_options(custom_text):
     Output("beats-measures-controls", "style"),
     Output("play-subdivisions-col", "style"),
     Output("exercise-length-alert", "children"),
-    Output("beats-per-measure", "value"),
-    Output("measures-per-pattern", "value"),
+    Output("beats-per-measure", "value", allow_duplicate=True),
+    Output("measures-per-pattern", "value", allow_duplicate=True),
     Input("exercise-select", "value"),
     Input("tempo-slider", "value"),
     State("custom-exercises-text", "value"),
+    prevent_initial_call=True,
 )
 def update_exercise_ui(exercise_name, tempo, custom_text):
     if not exercise_name:
