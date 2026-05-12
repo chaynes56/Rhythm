@@ -923,8 +923,13 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
                 }
 
                 const countInMeasures = calibrationMode ? calibrationWarmupMeasures : 1;
-                const measureDelayMs = firstBeatDelayMs + outputLatencyMs + (countInMeasures * metronomeState.beatsPerMeasure * secondsPerBeat * 1000) - RECORDING_PRE_ROLL_MS;
-                console.log(`startRecordingWithCountIn: measureDelayMs=${measureDelayMs.toFixed(1)}ms, outputLatencyMs=${outputLatencyMs.toFixed(1)}ms`);
+                // outputLatencyMs intentionally excluded: cold-start AudioContext measures
+                // near-zero latency while warm recordings measure the true ~50ms value,
+                // causing a systematic offset in cal_s. By anchoring both calibration and
+                // normal recordings to the scheduled beat (not the heard beat), cal_s
+                // captures the full acoustic offset consistently regardless of context state.
+                const measureDelayMs = firstBeatDelayMs + (countInMeasures * metronomeState.beatsPerMeasure * secondsPerBeat * 1000) - RECORDING_PRE_ROLL_MS;
+                console.log(`startRecordingWithCountIn: measureDelayMs=${measureDelayMs.toFixed(1)}ms (outputLatencyMs=${outputLatencyMs.toFixed(1)}ms excluded from delay)`);
                 recordingDelayTimeout = setTimeout(() => beginActiveRecording(requestId), measureDelayMs);
             });
         })

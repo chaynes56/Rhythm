@@ -1574,6 +1574,16 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
                 legendgrouptitle_text='Relative to<br>metronome' if i == 0 else None,
             ))
 
+        # IPI legend: legendgrouptitle_text doesn't render for single-trace groups in
+        # the bundled Plotly.js, so use an invisible header trace to put text above the dot.
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None],
+            mode='markers',
+            name='Relative to prev. pulse',
+            marker=dict(size=0, opacity=0),
+            legendgroup='ipi',
+            showlegend=True,
+        ))
         # IPI deviation dots — larger, royalblue, drawn on top
         fig.add_trace(go.Scatter(
             x=ipi_x, y=ipi_dev_ms.tolist() if len(ipi_dev_ms) else [],
@@ -1581,32 +1591,49 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             name=' ',
             marker=dict(color='royalblue', size=10, symbol='circle'),
             legendgroup='ipi',
-            legendgrouptitle_text='Relative to<br>prev. pulse',
         ))
 
-        # Default x range matches the waveform (full recording, with display shift)
+        # Compute anchor x_max to match the waveform's actual rightmost data point.
+        # The waveform draws metronome markers (and subdivision markers beyond mt[-1]),
+        # so it autoranges wider than duration-shift. The anchor must reach the same
+        # extent so that zoom-reset autorange aligns both graphs.
+        mt_all = np.array(data.get("metronome_times", [])) - display_offset
+        x_anchor_max = duration - shift if duration else 0.0
+        if len(mt_all) > 0:
+            x_anchor_max = max(x_anchor_max, float(mt_all[-1]))
+            if len(mt_all) > 1 and spb > 1:
+                last_beat_dur = float(mt_all[-1] - mt_all[-2])
+                x_anchor_max = max(x_anchor_max,
+                                   float(mt_all[-1]) + (spb - 1) / spb * last_beat_dur)
+
+        # Initial display range matches the waveform's initial fixed range exactly.
         full_x_range = (
             [-shift, duration - shift]
             if duration else None
         )
+        # Anchor range extends to the waveform's full data extent (for autorange alignment).
+        anchor_range = [-shift, x_anchor_max] if duration else None
 
-        # Invisible anchor traces at the recording boundaries so that when we use
-        # autorange the extent matches the waveform's data extent exactly.
-        if full_x_range:
+        # Invisible anchor traces so autorange covers the waveform's full data extent.
+        if anchor_range:
             fig.add_trace(go.Scatter(
-                x=full_x_range, y=[0.0, 0.0],
+                x=anchor_range, y=[0.0, 0.0],
                 mode='markers',
                 marker=dict(size=0, opacity=0),
                 showlegend=False,
                 hoverinfo='skip',
             ))
 
-        # Sync x range with waveform zoom. On reset (xaxis.autorange) use the same
-        # fixed full range as the waveform initial figure, avoiding autorange padding mismatch.
+        # Sync x range with waveform zoom.
+        # On double-click reset (xaxis.autorange), Plotly adds ~5% padding around data.
+        # Use autorange=True here too so both graphs apply the same padding to their
+        # matched data extents. On normal zoom, apply the exact range from relayoutData.
+        use_autorange = False
         x_range = full_x_range
         if relayout_data and ctx.triggered_id != "audio-store":
             if "xaxis.autorange" in relayout_data:
-                x_range = full_x_range  # zoom reset -- ignore stale range values sent alongside
+                use_autorange = True
+                x_range = None
             elif "xaxis.range[0]" in relayout_data:
                 x_range = [relayout_data["xaxis.range[0]"],
                            relayout_data["xaxis.range[1]"]]
@@ -1625,7 +1652,9 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             legend=dict(traceorder='normal', groupclick='toggleitem',
                         grouptitlefont=dict(size=12)),
         )
-        if x_range is not None:
+        if use_autorange:
+            fig.update_xaxes(autorange=True)
+        elif x_range is not None:
             fig.update_xaxes(range=x_range, autorange=False)
         fig.update_yaxes(automargin=False)
         return fig
