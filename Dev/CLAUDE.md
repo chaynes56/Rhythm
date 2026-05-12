@@ -65,16 +65,16 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session — 2026-05-11
+## Last session — 2026-05-10
 
-**Calibration silent warmup fix (5ed849b):** Prior attempt (per-tone path) was dead code — `startCalibration` never nulls the precomputed buffer, so `startMetronomePlayback` always takes the buffer path. Fix: schedule gain ramps on `metronomeGainNode` in the buffer path (0.02 during warmup, linearRamp to 1.0 at measurement start). Auto-calibration passes `warmupMeasures=3`; manual passes `warmupMeasures=1` (pipeline already warm). `startCalibration` accepts param; `autoStopMs` scales accordingly. Field-tested — excellent results in Safari and Chrome.
+**Exercises Stage 2a (uncommitted):** Full UI for exercise mode:
+- `exercise-select` dropdown in Metronome card; options rebuilt from `custom-exercises-text` textarea (Settings card) via `update_exercise_options`.
+- `update_exercise_ui` callback: hides `beats-measures-controls` div, shows `play-subdivisions-col` div, fires `dbc.Alert` if exercise > 300s, sets beats/measures dropdowns to exercise values on selection.
+- `build_exercise_table(exercise_name, custom_text)`: HTML table with subdivision header row + measure rows; cell IDs `ex-cell-{pat_idx}-{m_idx}-{col_idx}` for future JS highlighting.
+- `update_metronome_track`: now accepts `exercise-select`, `play-subdivisions`, `custom-exercises-text`; passes exercise patterns to `compute_metronome_track`.
+- `save_settings`/`load_settings`: persist `exercise-name` and `custom-exercises`.
+- `process_audio`: saves `exercise_name` in audio-store JSON.
 
-**Debug mode (5ed849b):** `is_debug_mode(store_val)` checks 3 sources: `app.server.debug`, `DEBUG_MODE` env var, YAML `debug-mode` setting. Save always writes `false`. In debug mode, `process_calibration` builds full waveform+analytics from the calibration recording (same `audio-store` format as `process_audio`). Both calibration paths now show "Calibrating..." immediately.
-
-**IPI deviation dots (5ed849b):** For each pulse i>0, y = deviation of `beat_times[i]-beat_times[i-1]` from nearest subdivision interval. Immune to calibration offset. Royalblue, size 10, rendered on top of existing size-6 colored dots. Legend reorganised: "Relative to metronome" group (green/orange/red bars) + "Relative to previous pulse" group (IPI dot), via Plotly `legendgrouptitle_text`.
-
-**exercises.py (5ed849b):** Exercise dict now `{total_beats, patterns}` for upcoming metronome length guard.
-
-**Open:** Exercises Stage 2 (UI layout: dropdown, pattern table, Play Subdivisions toggle); metronome length guard re-implementation.
+**Open:** commit this; then Stage 2b (JS cell highlighting, `compute_exercise_schedule` -> JS store, restore exercise on load_recording).
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
