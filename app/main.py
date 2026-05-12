@@ -183,7 +183,7 @@ play-hi-tone: true
 play-only-low-tone: false
 tempo-slider: 120
 metronome-vol: 0.5
-exercise-name: null
+exercise-name: |-
 """
 
 settings = yaml.safe_load(DEFAULT_SETTINGS_YAML)
@@ -444,7 +444,7 @@ app.layout = dbc.Container([
                             html.Label("Exercise", className="small"),
                             dcc.Dropdown(
                                 id="exercise-select",
-                                options=[{"label": "None (free metronome)", "value": ""}] +
+                                options=[{"label": "None", "value": ""}] +
                                         [{"label": k, "value": k} for k in builtin_exercises],
                                 value=settings.get("exercise-name") or "",
                                 clearable=False,
@@ -1571,17 +1571,17 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
                 mode='lines', name=label,
                 line=dict(color=color, width=2),
                 legendgroup='metronome',
-                legendgrouptitle_text='Relative to metronome' if i == 0 else None,
+                legendgrouptitle_text='Relative to<br>metronome' if i == 0 else None,
             ))
 
         # IPI deviation dots — larger, royalblue, drawn on top
         fig.add_trace(go.Scatter(
             x=ipi_x, y=ipi_dev_ms.tolist() if len(ipi_dev_ms) else [],
             mode='markers',
-            name='Rel. to prev. pulse',
+            name=' ',
             marker=dict(color='royalblue', size=10, symbol='circle'),
             legendgroup='ipi',
-            legendgrouptitle_text='Relative to previous pulse',
+            legendgrouptitle_text='Relative to<br>prev. pulse',
         ))
 
         # Default x range matches the waveform (full recording, with display shift)
@@ -1601,18 +1601,17 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
                 hoverinfo='skip',
             ))
 
-        # Sync x range with waveform zoom.
-        # None means "let Plotly autorange" \u2014 used when the waveform itself autoranges
-        # (double-click reset) so both graphs apply the same ~5% padding to their data.
+        # Sync x range with waveform zoom. On reset (xaxis.autorange) use the same
+        # fixed full range as the waveform initial figure, avoiding autorange padding mismatch.
         x_range = full_x_range
         if relayout_data and ctx.triggered_id != "audio-store":
-            if "xaxis.range[0]" in relayout_data:
+            if "xaxis.autorange" in relayout_data:
+                x_range = full_x_range  # zoom reset -- ignore stale range values sent alongside
+            elif "xaxis.range[0]" in relayout_data:
                 x_range = [relayout_data["xaxis.range[0]"],
                            relayout_data["xaxis.range[1]"]]
             elif "xaxis.range" in relayout_data:
                 x_range = relayout_data["xaxis.range"]
-            elif "xaxis.autorange" in relayout_data:
-                x_range = None  # match waveform: autorange with natural padding
 
         fig.add_hline(y=0, line_width=1, line_color="gray", line_dash="dot")
         fig.update_layout(
@@ -1622,13 +1621,12 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             yaxis_fixedrange=True,
             dragmode=False,
             template="plotly_white",
-            margin=dict(l=60, r=20, t=20, b=40),
-            legend=dict(traceorder='normal', groupclick='toggleitem'),
+            margin=dict(l=60, r=230, t=20, b=40),
+            legend=dict(traceorder='normal', groupclick='toggleitem',
+                        grouptitlefont=dict(size=12)),
         )
         if x_range is not None:
             fig.update_xaxes(range=x_range, autorange=False)
-        else:
-            fig.update_xaxes(autorange=True)
         fig.update_yaxes(automargin=False)
         return fig
     except Exception as e:

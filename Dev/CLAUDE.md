@@ -65,17 +65,19 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-11
+## Last session -- 2026-05-12
 
-**UI cleanup (this commit):** removed Custom Exercises textarea, consolidated three metronome switches into one column (Play Hi Tone / Play Only Low Tone / Play Subdivisions), scaled beat/exercise table cells 3x larger.
-- `get_all_exercises()` and `build_exercise_table(exercise_name)`: `custom_text` parameter removed; builtins only
-- `save_settings` / `load_settings`: `custom-exercises-text` Output/State removed; `no_change` is now 13-tuple
-- `DEFAULT_SETTINGS_YAML`: `custom-exercises` key removed
-- `make_exercises` import removed (no longer used)
+**This commit:** beat/deviation graph alignment fixes, warmup volume, beat highlight timing, beat filter spacing.
 
-**Exercises Stage 2b (commit before this):** JS cell highlighting + load_recording context restore.
-
-**Exercises Stage 2a (efc9ecb):** exercise-select dropdown, beats-measures-controls hide/show, exercise pattern table, play-subdivisions toggle, metronome track uses exercise patterns, settings save/load.
+- **Waveform/deviation alignment:** both graphs now use `margin=dict(l=60, r=230, ...)` so plot areas are equal width regardless of legend text.
+- **Zoom restore alignment (main.py `update_deviation_graph`):** `xaxis.autorange` check now comes first in relayout_data handling, before `xaxis.range[0]`. Plotly sends both on double-click reset; wrong order was applying stale zoom range to deviation graph while waveform reset.
+- **Deviation graph legend:** IPI trace `name=' '` (single space, not empty string -- empty suppresses group title), `legendgrouptitle_text='Relative to<br>prev. pulse'`, `grouptitlefont=dict(size=12)` for uniform font size.
+- **Beat highlight timing (recorder.js):** `indicatorStartTime = startTime + outputLatencySeconds` so visual fires when user hears the tone, not when scheduled.
+- **Highlight guard (recorder.js):** `if (entry.isBeat)` before `highlightExercisePosition` -- subdivisions never highlight.
+- **Calibration warmup volume (recorder.js):** 0.02 -> 0.003 in three places (per-tone fallback x2, buffer gainNode x2).
+- **`BEAT_MIN_SPACING_SECONDS` (audio_utils.py):** 0.05 -> 0.065 (65ms minimum gap between detected pulses).
+- **`DEFAULT_SETTINGS_YAML`:** `exercise-name: |-` instead of `null` (avoids null in YAML default).
+- **UI:** exercise dropdown label "None (free metronome)" -> "None"; metronome `legendgrouptitle_text` uses `<br>` for line break.
 
 **Open:** Stage 2c -- subdivision table SPB auto-set from exercise's first pattern when exercise mode is active.
 

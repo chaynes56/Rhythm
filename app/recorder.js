@@ -369,7 +369,7 @@ function playScheduledTone(scheduledTime = null) {
             source.buffer = metronomeClickBuffers[toneKey];
 
             const toneVolume = (calibrationMode && calibrationWarmupMeasures > 0)
-                ? (metronomeState.beatCount < calibrationWarmupMeasures * metronomeState.beatsPerMeasure ? 0.02 : 1.0)
+                ? (metronomeState.beatCount < calibrationWarmupMeasures * metronomeState.beatsPerMeasure ? 0.003 : 1.0)
                 : metronomeState.volume;
 
             gain.gain.cancelScheduledValues(toneTime);
@@ -413,7 +413,7 @@ function playHtmlTone() {
             audio.src = /** @type {string} */ (metronomeAudioUrls[toneKey]);
             audio.preload = 'auto';
             const htmlVolume = (calibrationMode && calibrationWarmupMeasures > 0)
-                ? (metronomeState.beatCount < calibrationWarmupMeasures * metronomeState.beatsPerMeasure ? 0.02 : 1.0)
+                ? (metronomeState.beatCount < calibrationWarmupMeasures * metronomeState.beatsPerMeasure ? 0.003 : 1.0)
                 : metronomeState.volume;
             audio.volume = htmlVolume;
             // Add playsinline just in case, though it's for video
@@ -520,9 +520,9 @@ function startMetronomePlayback(options = {}) {
         }
         const startTime = ctx.currentTime + firstToneDelaySeconds;
 
-        // Measure output latency for logging/recording timing; not applied to the
-        // visual indicator (indicatorStartTime uses the scheduled startTime directly
-        // so the beat lights up on schedule rather than being delayed by latency).
+        // Measure output latency so the visual indicator fires when the user hears the tone,
+        // not when it is scheduled. Audio reaches the speaker at startTime + outputLatency;
+        // delaying indicatorStartTime by the same amount aligns the visual with the heard beat.
         let outputLatencySeconds = 0;
         try {
             const ts = ctx.getOutputTimestamp();
@@ -539,8 +539,8 @@ function startMetronomePlayback(options = {}) {
         if (outputLatencySeconds <= 0) {
             outputLatencySeconds = (ctx.outputLatency || 0) + (ctx.baseLatency || 0);
         }
-        const indicatorStartTime = startTime;
-        console.log(`startMetronomePlayback: outputLatency=${(outputLatencySeconds * 1000).toFixed(1)}ms, indicatorStartTime at startTime`);
+        const indicatorStartTime = startTime + outputLatencySeconds;
+        console.log(`startMetronomePlayback: outputLatency=${(outputLatencySeconds * 1000).toFixed(1)}ms, indicatorStartTime offset by latency`);
 
         // For recording count-in: start buffer at the last measure of the pattern
         const countInMeasure = preserveOffset ? (measuresPerPattern - 1) : 0;
@@ -561,8 +561,8 @@ function startMetronomePlayback(options = {}) {
             if (calibrationMode && calibrationWarmupMeasures > 0) {
                 // Warmup measures play nearly silently; measurement measures at full volume.
                 const warmupEnd = startTime + calibrationWarmupMeasures * beatsPerMeasure * secondsPerBeat;
-                gainNode.gain.setValueAtTime(0.02, startTime);
-                gainNode.gain.setValueAtTime(0.02, warmupEnd - 0.010);
+                gainNode.gain.setValueAtTime(0.003, startTime);
+                gainNode.gain.setValueAtTime(0.003, warmupEnd - 0.010);
                 gainNode.gain.linearRampToValueAtTime(1.0, warmupEnd + 0.010);
             } else {
                 gainNode.gain.setValueAtTime(metronomeState.volume, ctx.currentTime);
@@ -593,7 +593,7 @@ function startMetronomePlayback(options = {}) {
                     if (found !== lastExerciseSchedIdx) {
                         lastExerciseSchedIdx = found;
                         const entry = sched[found];
-                        highlightExercisePosition(entry.measureIdx, entry.subIdx);
+                        if (entry.isBeat) highlightExercisePosition(entry.measureIdx, entry.subIdx);
                     }
                 } else {
                     const beatIdx = Math.floor(elapsed / secondsPerBeat);
