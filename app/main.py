@@ -183,7 +183,8 @@ play-hi-tone: true
 play-only-low-tone: false
 tempo-slider: 120
 metronome-vol: 0.5
-exercise-name: |-
+exercise-name: ~
+custom-exercises: |-
 """
 
 settings = yaml.safe_load(DEFAULT_SETTINGS_YAML)
@@ -566,6 +567,7 @@ app.layout = dbc.Container([
     dcc.Store(id="calibration-audio-data-store"),
     dcc.Store(id="calibration-offset-store"),
     dcc.Store(id="calibration-command-store"),
+    dcc.Store(id="calibration-auto-retry-done", data=False),
     dcc.Store(id="debug-mode-store", data=False),
     dcc.Store(id="exercise-schedule-store"),
     dcc.Interval(id="auto-calibrate-interval", interval=3000, n_intervals=0,
@@ -635,6 +637,39 @@ clientside_callback(
     """,
     Output("calibration-audio-data-store", "data"),
     Input("calibration-process-btn", "n_clicks"),
+)
+
+# Auto-retry calibration once if the result looks like a cold-start Safari artifact.
+# On first page load, Safari reports ~0ms outputLatency while the actual hardware
+# latency is ~450ms. This gives cal_s ~ -50ms (at 120 BPM). After the first
+# calibration, the device is warm and a second pass gives the correct result.
+clientside_callback(
+    """
+    function(offset_ms, retryDone, tempo, beats, measures, volume, hiTone, onlyLow) {
+        if (offset_ms === null || offset_ms === undefined) {
+            return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+        }
+        if (!retryDone && offset_ms < -20) {
+            if (window.recorderControls && window.recorderControls.startCalibration) {
+                setTimeout(() => window.recorderControls.startCalibration(
+                    tempo, beats, measures, volume, !!hiTone, !!onlyLow, 1), 200);
+            }
+            return [true, 'Calibrating...'];
+        }
+        return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+    }
+    """,
+    Output("calibration-auto-retry-done", "data"),
+    Output("process-status", "children", allow_duplicate=True),
+    Input("calibration-offset-store", "data"),
+    State("calibration-auto-retry-done", "data"),
+    State("tempo-slider", "value"),
+    State("beats-per-measure", "value"),
+    State("measures-per-pattern", "value"),
+    State("metronome-vol", "value"),
+    State("play-hi-tone", "value"),
+    State("play-only-low-tone", "value"),
+    prevent_initial_call=True,
 )
 
 

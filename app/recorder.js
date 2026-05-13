@@ -35,6 +35,7 @@ let pendingRecordingRequestId = 0;
 let currentRecordingPhase = 'idle';
 let calibrationMode = false;
 let calibrationWarmupMeasures = 3;  // 3 for auto-cal (cold pipeline), 1 for manual (already warm)
+let calibrationRecordingEnded = false;  // snapshotted synchronously so stop-event handler routes correctly
 let exerciseSchedule = null;  // null = free mode; set to {schedule, duration, spb} in exercise mode
 let lastExerciseCellId = null;
 let metronomeState = {
@@ -368,9 +369,7 @@ function playScheduledTone(scheduledTime = null) {
 
             source.buffer = metronomeClickBuffers[toneKey];
 
-            const toneVolume = (calibrationMode && calibrationWarmupMeasures > 0)
-                ? (metronomeState.beatCount < calibrationWarmupMeasures * metronomeState.beatsPerMeasure ? 0.003 : 1.0)
-                : metronomeState.volume;
+            const toneVolume = metronomeState.volume;
 
             gain.gain.cancelScheduledValues(toneTime);
             gain.gain.setValueAtTime(0.0001, toneTime);
@@ -412,9 +411,7 @@ function playHtmlTone() {
             const audio = new Audio();
             audio.src = /** @type {string} */ (metronomeAudioUrls[toneKey]);
             audio.preload = 'auto';
-            const htmlVolume = (calibrationMode && calibrationWarmupMeasures > 0)
-                ? (metronomeState.beatCount < calibrationWarmupMeasures * metronomeState.beatsPerMeasure ? 0.003 : 1.0)
-                : metronomeState.volume;
+            const htmlVolume = metronomeState.volume;
             audio.volume = htmlVolume;
             // Add playsinline just in case, though it's for video
             audio.setAttribute('playsinline', 'true');
@@ -558,15 +555,11 @@ function startMetronomePlayback(options = {}) {
             source.loop = true;
             source.loopStart = 0;
             source.loopEnd = metronomeTrackBuffer.duration;
-            if (calibrationMode && calibrationWarmupMeasures > 0) {
-                // Warmup measures play nearly silently; measurement measures at full volume.
-                const warmupEnd = startTime + calibrationWarmupMeasures * beatsPerMeasure * secondsPerBeat;
-                gainNode.gain.setValueAtTime(0.003, startTime);
-                gainNode.gain.setValueAtTime(0.003, warmupEnd - 0.010);
-                gainNode.gain.linearRampToValueAtTime(1.0, warmupEnd + 0.010);
-            } else {
-                gainNode.gain.setValueAtTime(metronomeState.volume, ctx.currentTime);
-            }
+            // Play at normal volume throughout (calibration warmup + measurement).
+            // Audible warmup tones prime the OS audio pipeline; near-silent warmup
+            // (0.003) was leaving the hardware cold and causing a systematic ~51ms
+            // timing offset in auto-calibration.
+            gainNode.gain.setValueAtTime(metronomeState.volume, ctx.currentTime);
             source.connect(gainNode);
             gainNode.connect(ctx.destination);
             source.start(startTime, bufferOffset);
@@ -771,9 +764,9 @@ function configureMediaRecorder(stream) {
                 wavReader.addEventListener('loadend', () => {
                     const dataUrl = /** @type {string} */ (wavReader.result);
                     console.log('Converted to WAV, trimmed pre-roll, length:', dataUrl.length);
-                    if (calibrationMode) {
+                    if (calibrationRecordingEnded) {
+                        calibrationRecordingEnded = false;
                         window.calibrationRecordedAudio = dataUrl;
-                        calibrationMode = false;
                         clickHiddenButton('calibration-process-btn');
                     } else {
                         window.lastRecordedAudio = dataUrl;
@@ -811,6 +804,7 @@ function cancelPendingRecording() {
         metronomeAutoStartedByRecording = false;
     }
     calibrationMode = false;
+    calibrationRecordingEnded = false;
     setRecordingPhase('idle');
 }
 
@@ -842,6 +836,12 @@ function beginActiveRecording(requestId) {
             if (mediaRecorder && mediaRecorder.state === 'recording') {
                 if (isCalibration) {
                     console.log('Calibration recording: scheduled stop reached');
+                    // Reset calibrationMode synchronously before stop() so that any
+                    // immediate metronome start (user clicking the button while the
+                    // stop-event chain is still async) does not apply the silent
+                    // warmup gain schedule.
+                    calibrationRecordingEnded = true;
+                    calibrationMode = false;
                 } else {
                     console.log('Automatic stop: Recording reached maximum time limit (10 minutes)');
                     window.recorderControls.playEndAlarm();
@@ -875,6 +875,10 @@ function stopActiveRecording() {
         stopMetronomePlayback();
         metronomeAutoStartedByRecording = false;
     }
+    // Manual stop: calibration is incomplete, clear both flags so stop-event handler
+    // routes to the normal recording path and calibrationMode does not linger.
+    calibrationMode = false;
+    calibrationRecordingEnded = false;
     setRecordingPhase('idle');
 }
 

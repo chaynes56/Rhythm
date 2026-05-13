@@ -32,7 +32,7 @@ WAVEFORM_TRANSIENT_CLIP_PERCENTILE = 98.0
 
 # Onset / beat filtering
 BEAT_MIN_AMPLITUDE_FRACTION = 0.4  # drop beats < this fraction of the robust peak reference
-BEAT_MIN_SPACING_SECONDS = 0.065   # drop beats within this many seconds of a prior beat
+BEAT_MIN_SPACING_SECONDS = 0.080   # drop beats within this many seconds of a prior beat
 ONSET_ROBUST_PEAK_RANK = 3         # use Nth largest onset peak as envelope reference (skips outliers)
 
 # ---------------------------------------------------------------------------
