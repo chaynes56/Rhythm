@@ -825,12 +825,28 @@ function beginActiveRecording(requestId) {
         console.log('MediaRecorder started with timeslice=100ms after measure delay');
         setRecordingPhase('recording');
 
-        const maxRecordingTime = 600000;
+        // For calibration: stop after exactly 2 measurement measures + 1s buffer,
+        // regardless of how long getUserMedia or startMetronomePlayback took.
+        // For normal recording: 10-minute safety limit.
+        const isCalibration = calibrationMode;
+        let maxRecordingTime;
+        if (isCalibration) {
+            const secondsPerBeat = 60.0 / metronomeState.tempo;
+            maxRecordingTime = Math.round((2 * metronomeState.beatsPerMeasure * secondsPerBeat + 1.0) * 1000);
+            console.log(`Calibration recording: scheduled stop in ${maxRecordingTime}ms`);
+        } else {
+            maxRecordingTime = 600000;
+        }
 
         recordingTimeout = setTimeout(() => {
             if (mediaRecorder && mediaRecorder.state === 'recording') {
-                console.log('Automatic stop: Recording reached maximum time limit (10 minutes)');
-                window.recorderControls.playEndAlarm();
+                if (isCalibration) {
+                    console.log('Calibration recording: scheduled stop reached');
+                } else {
+                    console.log('Automatic stop: Recording reached maximum time limit (10 minutes)');
+                    window.recorderControls.playEndAlarm();
+                    window.recorderControls.showAutoStopMessage();
+                }
                 mediaRecorder.stop();
                 cleanupRecordingStream();
                 if (metronomeAutoStartedByRecording) {
@@ -838,7 +854,6 @@ function beginActiveRecording(requestId) {
                     metronomeAutoStartedByRecording = false;
                 }
                 setRecordingPhase('idle');
-                window.recorderControls.showAutoStopMessage();
             }
         }, maxRecordingTime);
     } catch (err) {
@@ -954,7 +969,11 @@ function shouldUseHtmlAudioMetronome() {
     // Safari needs HTMLAudio because its WebAudio support is limited for certain patterns.
     // Chrome (including on Plotly cloud) handles WebAudio fine; force it through the
     // per-tone WebAudio fallback rather than HTMLAudio so AudioContext resume is used.
-    const useHtmlFallback = safariLike;
+    // Per-tone Web Audio scheduling works on all browsers once AudioContext is resumed.
+    // HTMLAudio fallback is not used: audio.play() from setInterval fails in Safari
+    // (no user gesture context), causing silent count-in and decode-latency inconsistency
+    // that corrupts calibration on cold first use.
+    const useHtmlFallback = false;
 
     console.log(`shouldUseHtmlAudioMetronome: host=${host}, safariLike=${safariLike}, isPlotlyCloud=${isPlotlyCloud}, isFirefox=${isFirefox}, useHtmlFallback=${useHtmlFallback}`);
 
@@ -1208,14 +1227,15 @@ try {
             console.log(`startCalibration: warmupMeasures=${calibrationWarmupMeasures}`);
             calibrationMode = true;
             startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
-            // Auto-stop: getUserMedia (~500ms) + 0.15s primer + warmup measures + 2 measurement measures + buffer
+            // Safety-net stop: fires only if beginActiveRecording's duration timer fails.
+            // Normal completion is handled by recordingTimeout inside beginActiveRecording.
             const secondsPerBeat = 60.0 / (tempo || 120);
             const bpm = beatsPerMeasure || 4;
-            const autoStopMs = 500 + 150 + (calibrationWarmupMeasures * bpm * secondsPerBeat * 1000) + (2 * bpm * secondsPerBeat * 1000) + 500;
-            console.log(`startCalibration: auto-stop scheduled in ${autoStopMs.toFixed(0)}ms`);
+            const autoStopMs = 30000 + (calibrationWarmupMeasures + 2) * bpm * secondsPerBeat * 1000;
+            console.log(`startCalibration: safety-net auto-stop in ${autoStopMs.toFixed(0)}ms`);
             setTimeout(() => {
                 if (calibrationMode || currentRecordingPhase !== 'idle') {
-                    console.log('startCalibration: auto-stopping calibration recording');
+                    console.log('startCalibration: safety-net auto-stop fired (unexpected)');
                     stopActiveRecording();
                 }
             }, autoStopMs);

@@ -1561,6 +1561,17 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             ('red', f'≥ {alert_ms} ms',
              abs_dev >= alert_ms),
         ]
+        # Invisible header trace so legend shows "Rel. to metronome" above the color bars.
+        # legendgrouptitle_text is unreliable in the bundled Plotly.js for single-trace groups,
+        # so the same invisible-header approach used by the IPI group is applied here.
+        fig.add_trace(go.Scatter(
+            x=[None], y=[None],
+            mode='markers',
+            name='Rel. to metronome',
+            marker=dict(size=0, opacity=0),
+            legendgroup='metronome',
+            showlegend=True,
+        ))
         for i, (color, label, mask) in enumerate(categories):
             x_values, y_values = [], []
             for xt, d in zip(x_times[mask], deviations[mask]):
@@ -1571,15 +1582,13 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
                 mode='lines', name=label,
                 line=dict(color=color, width=2),
                 legendgroup='metronome',
-                legendgrouptitle_text='Relative to<br>metronome' if i == 0 else None,
             ))
 
-        # IPI legend: legendgrouptitle_text doesn't render for single-trace groups in
-        # the bundled Plotly.js, so use an invisible header trace to put text above the dot.
+        # IPI legend: invisible header trace puts text above the blue dot.
         fig.add_trace(go.Scatter(
             x=[None], y=[None],
             mode='markers',
-            name='Relative to prev. pulse',
+            name='Rel. to prev. pulse',
             marker=dict(size=0, opacity=0),
             legendgroup='ipi',
             showlegend=True,
@@ -1625,15 +1634,17 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             ))
 
         # Sync x range with waveform zoom.
-        # On double-click reset (xaxis.autorange), Plotly adds ~5% padding around data.
-        # Use autorange=True here too so both graphs apply the same padding to their
-        # matched data extents. On normal zoom, apply the exact range from relayoutData.
-        use_autorange = False
+        # On double-click reset, Plotly fires xaxis.autorange in relayoutData.
+        # Replicate the waveform's 5% padding explicitly so both graphs use identical ranges.
         x_range = full_x_range
         if relayout_data and ctx.triggered_id != "audio-store":
             if "xaxis.autorange" in relayout_data:
-                use_autorange = True
-                x_range = None
+                if anchor_range:
+                    lo, hi = anchor_range
+                    pad = 0.05 * (hi - lo)
+                    x_range = [lo - pad, hi + pad]
+                else:
+                    x_range = full_x_range
             elif "xaxis.range[0]" in relayout_data:
                 x_range = [relayout_data["xaxis.range[0]"],
                            relayout_data["xaxis.range[1]"]]
@@ -1652,9 +1663,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             legend=dict(traceorder='normal', groupclick='toggleitem',
                         grouptitlefont=dict(size=12)),
         )
-        if use_autorange:
-            fig.update_xaxes(autorange=True)
-        elif x_range is not None:
+        if x_range is not None:
             fig.update_xaxes(range=x_range, autorange=False)
         fig.update_yaxes(automargin=False)
         return fig
