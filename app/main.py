@@ -779,6 +779,7 @@ def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pat
 
 @app.callback(
     Output("metronome-track-store", "data"),
+    Output("status-msg", "children", allow_duplicate=True),
     Input("tempo-slider", "value"),
     Input("beats-per-measure", "value"),
     Input("measures-per-pattern", "value"),
@@ -786,19 +787,27 @@ def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pat
     Input("play-only-low-tone", "value"),
     Input("exercise-select", "value"),
     Input("play-subdivisions", "value"),
+    prevent_initial_call="initial_duplicate",
 )
 def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi, play_only_low,
                            exercise_name, play_subdivisions):
     try:
+        t = tempo or 120
         exercise_patterns = None
         if exercise_name:
             all_ex = get_all_exercises()
             ex = all_ex.get(exercise_name)
             if ex:
+                total_seconds = ex["total_beats"] * (60.0 / t)
+                if total_seconds > METRONOME_MAX_LOOP_SECONDS:
+                    return no_update, (
+                        f"Exercise too long at {t} BPM "
+                        f"({total_seconds:.0f}s; limit {int(METRONOME_MAX_LOOP_SECONDS / 60)} min)."
+                    )
                 exercise_patterns = ex["patterns"]
 
         data_url = compute_metronome_track(
-            tempo or 120,
+            t,
             beats_per_measure or 4,
             measures_per_pattern or 1,
             bool(play_hi),
@@ -806,8 +815,8 @@ def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_
             exercise_patterns=exercise_patterns,
             play_subdivisions=bool(play_subdivisions),
         )
-        print(f"update_metronome_track: {beats_per_measure}/{measures_per_pattern} at {tempo} BPM, exercise={exercise_name!r}")
-        return data_url
+        print(f"update_metronome_track: {beats_per_measure}/{measures_per_pattern} at {t} BPM, exercise={exercise_name!r}")
+        return data_url, no_update
     except Exception as e:
         print(f"update_metronome_track error: {e}")
         raise PreventUpdate
