@@ -1134,11 +1134,6 @@ def update_exercise_ui(exercise_name, tempo):
     if not ex:
         return {"display": "block"}, {"display": "none"}, None, no_update, no_update, no_update
 
-    pat = ex["patterns"][0]
-    bpm = pat["beats_per_measure"]
-    mpp = len(pat["measures"])
-    spb = pat["subdivisions_per_beat"]
-
     alert = None
     if tempo:
         duration = ex["total_beats"] * (60.0 / tempo)
@@ -1149,7 +1144,9 @@ def update_exercise_ui(exercise_name, tempo):
             )
 
     if ctx.triggered_id == "exercise-select":
-        return {"display": "none"}, {"display": "block"}, alert, bpm, mpp, spb
+        pat = ex["patterns"][0]
+        return ({"display": "none"}, {"display": "block"}, alert,
+                pat["beats_per_measure"], len(pat["measures"]), pat["subdivisions_per_beat"])
     return {"display": "none"}, {"display": "block"}, alert, no_update, no_update, no_update
 
 
