@@ -187,8 +187,8 @@ function resetBeatIndicators() {
     }
 }
 
-function highlightExercisePosition(measureIdx, subIdx) {
-    const cellId = `ex-cell-0-${measureIdx}-${subIdx}`;
+function highlightExercisePosition(patternIdx, measureIdx, subIdx) {
+    const cellId = `ex-cell-${patternIdx}-${measureIdx}-${subIdx}`;
     if (cellId === lastExerciseCellId) return;
     if (lastExerciseCellId) {
         const prev = document.getElementById(lastExerciseCellId);
@@ -338,7 +338,7 @@ function getMetronomeBeatState() {
 function advanceMetronomePosition(positionInMeasure) {
     const positionInPattern = metronomeState.measureCount % metronomeState.measuresPerPattern;
     if (exerciseSchedule) {
-        highlightExercisePosition(positionInPattern, positionInMeasure * (exerciseSchedule.spb || 1));
+        highlightExercisePosition(0, positionInPattern, positionInMeasure * (exerciseSchedule.spb || 1));
     } else {
         highlightBeatIndicator(positionInPattern, positionInMeasure);
     }
@@ -586,7 +586,7 @@ function startMetronomePlayback(options = {}) {
                     if (found !== lastExerciseSchedIdx) {
                         lastExerciseSchedIdx = found;
                         const entry = sched[found];
-                        if (entry.isBeat) highlightExercisePosition(entry.measureIdx, entry.subIdx);
+                        if (entry.isBeat) highlightExercisePosition(entry.patternIdx, entry.measureIdx, entry.subIdx);
                     }
                 } else {
                     const beatIdx = Math.floor(elapsed / secondsPerBeat);

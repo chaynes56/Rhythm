@@ -100,47 +100,73 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
     sr = METRONOME_SAMPLE_RATE
     seconds_per_beat = 60.0 / tempo
 
-    spb = 1  # subdivisions per beat — 1 in non-exercise mode
     if exercise_patterns:
-        pat = exercise_patterns[0]
-        beats_per_measure = pat['beats_per_measure']
-        measures_per_pattern = len(pat['measures'])
-        spb = pat['subdivisions_per_beat']
+        pat_durations = [
+            seconds_per_beat * pat['beats_per_measure'] * len(pat['measures'])
+            for pat in exercise_patterns
+        ]
+        cycle_duration = sum(pat_durations)
+        n_cycles = max(1, round(METRONOME_TARGET_LOOP_SECONDS / cycle_duration))
+        while n_cycles > 1 and n_cycles * cycle_duration > METRONOME_MAX_LOOP_SECONDS:
+            n_cycles -= 1
+        track_samples = round(n_cycles * cycle_duration * sr)
+        track = np.zeros(track_samples)
 
-    pattern_duration = seconds_per_beat * beats_per_measure * measures_per_pattern
-    n_patterns = max(1, round(METRONOME_TARGET_LOOP_SECONDS / pattern_duration))
-    while n_patterns > 1 and n_patterns * pattern_duration > METRONOME_MAX_LOOP_SECONDS:
-        n_patterns -= 1
-    track_samples = round(n_patterns * pattern_duration * sr)
-    track = np.zeros(track_samples)
+        for c in range(n_cycles):
+            pat_offset = c * cycle_duration
+            for pi, pat in enumerate(exercise_patterns):
+                bpm_p = pat['beats_per_measure']
+                mpp_p = len(pat['measures'])
+                spb_p = pat['subdivisions_per_beat']
+                seconds_per_sub_p = seconds_per_beat / spb_p
+                for m in range(mpp_p):
+                    for b in range(bpm_p):
+                        if b == 0 and m == 0:
+                            tone_type, should_play = 'low', True
+                        elif b == 0:
+                            tone_type, should_play = 'mid', not bool(play_only_low)
+                        else:
+                            tone_type = 'high'
+                            should_play = bool(play_hi) and not bool(play_only_low)
+                        if should_play:
+                            beat_time = pat_offset + (m * bpm_p + b) * seconds_per_beat
+                            start = round(beat_time * sr)
+                            tick = _make_metronome_tick(sr, tone_type)
+                            end = min(start + len(tick), track_samples)
+                            track[start:end] += tick[:end - start]
+                        if play_subdivisions:
+                            beat_time = pat_offset + (m * bpm_p + b) * seconds_per_beat
+                            for s in range(1, spb_p):
+                                sub_time = beat_time + s * seconds_per_sub_p
+                                sub_start = round(sub_time * sr)
+                                sub_tick = _make_metronome_tick(sr, 'sub')
+                                sub_end = min(sub_start + len(sub_tick), track_samples)
+                                track[sub_start:sub_end] += sub_tick[:sub_end - sub_start]
+                pat_offset += pat_durations[pi]
+    else:
+        pattern_duration = seconds_per_beat * beats_per_measure * measures_per_pattern
+        n_patterns = max(1, round(METRONOME_TARGET_LOOP_SECONDS / pattern_duration))
+        while n_patterns > 1 and n_patterns * pattern_duration > METRONOME_MAX_LOOP_SECONDS:
+            n_patterns -= 1
+        track_samples = round(n_patterns * pattern_duration * sr)
+        track = np.zeros(track_samples)
 
-    seconds_per_sub = seconds_per_beat / spb
-
-    for p in range(n_patterns):
-        for m in range(measures_per_pattern):
-            for b in range(beats_per_measure):
-                if b == 0 and m == 0:
-                    tone_type, should_play = 'low', True
-                elif b == 0:
-                    tone_type, should_play = 'mid', not bool(play_only_low)
-                else:
-                    tone_type = 'high'
-                    should_play = bool(play_hi) and not bool(play_only_low)
-                if should_play:
-                    beat_time = ((p * measures_per_pattern + m) * beats_per_measure + b) * seconds_per_beat
-                    start = round(beat_time * sr)
-                    tick = _make_metronome_tick(sr, tone_type)
-                    end = min(start + len(tick), track_samples)
-                    track[start:end] += tick[:end - start]
-
-                if exercise_patterns and play_subdivisions:
-                    beat_time = ((p * measures_per_pattern + m) * beats_per_measure + b) * seconds_per_beat
-                    for s in range(1, spb):
-                        sub_time = beat_time + s * seconds_per_sub
-                        sub_start = round(sub_time * sr)
-                        sub_tick = _make_metronome_tick(sr, 'sub')
-                        sub_end = min(sub_start + len(sub_tick), track_samples)
-                        track[sub_start:sub_end] += sub_tick[:sub_end - sub_start]
+        for p in range(n_patterns):
+            for m in range(measures_per_pattern):
+                for b in range(beats_per_measure):
+                    if b == 0 and m == 0:
+                        tone_type, should_play = 'low', True
+                    elif b == 0:
+                        tone_type, should_play = 'mid', not bool(play_only_low)
+                    else:
+                        tone_type = 'high'
+                        should_play = bool(play_hi) and not bool(play_only_low)
+                    if should_play:
+                        beat_time = ((p * measures_per_pattern + m) * beats_per_measure + b) * seconds_per_beat
+                        start = round(beat_time * sr)
+                        tick = _make_metronome_tick(sr, tone_type)
+                        end = min(start + len(tick), track_samples)
+                        track[start:end] += tick[:end - start]
 
     peak = np.max(np.abs(track))
     if peak > 0:
@@ -152,32 +178,37 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
 
 
 def compute_exercise_schedule(exercise_patterns, tempo):
-    """Return schedule for one full exercise cycle (single-pattern scope).
+    """Return schedule for one full exercise cycle across all patterns.
 
     Each entry: {time, patternIdx, measureIdx, subIdx, isBeat}
     subIdx is position within the measure string (0 .. bpm*spb-1).
     """
-    pat = exercise_patterns[0]
-    bpm = pat['beats_per_measure']
-    mpp = len(pat['measures'])
-    spb = pat['subdivisions_per_beat']
-    seconds_per_sub = (60.0 / tempo) / spb
-
+    seconds_per_beat = 60.0 / tempo
     schedule = []
-    for m in range(mpp):
-        for b in range(bpm):
-            for s in range(spb):
-                sub_idx = b * spb + s
-                global_sub = (m * bpm + b) * spb + s
-                schedule.append({
-                    'time': round(global_sub * seconds_per_sub, 6),
-                    'patternIdx': 0,
-                    'measureIdx': m,
-                    'subIdx': sub_idx,
-                    'isBeat': s == 0,
-                })
-    total_duration = mpp * bpm * spb * seconds_per_sub
-    return {'schedule': schedule, 'duration': round(total_duration, 6), 'spb': spb}
+    t = 0.0
+    for pi, pat in enumerate(exercise_patterns):
+        bpm = pat['beats_per_measure']
+        mpp = len(pat['measures'])
+        spb = pat['subdivisions_per_beat']
+        seconds_per_sub = seconds_per_beat / spb
+        for m in range(mpp):
+            for b in range(bpm):
+                for s in range(spb):
+                    sub_idx = b * spb + s
+                    global_sub = (m * bpm + b) * spb + s
+                    schedule.append({
+                        'time': round(t + global_sub * seconds_per_sub, 6),
+                        'patternIdx': pi,
+                        'measureIdx': m,
+                        'subIdx': sub_idx,
+                        'isBeat': s == 0,
+                    })
+        t += bpm * mpp * seconds_per_beat
+    return {
+        'schedule': schedule,
+        'duration': round(t, 6),
+        'spb': exercise_patterns[0]['subdivisions_per_beat'],
+    }
 
 
 RECORDER_INLINE_SCRIPT = (Path(__file__).parent / "recorder.js").read_text(
@@ -454,26 +485,28 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
-                            html.Label("Exercise", className="small"),
-                            dcc.Dropdown(
-                                id="exercise-select",
-                                options=[{"label": "None", "value": ""}] +
-                                        [{"label": k, "value": k} for k in builtin_exercises],
-                                value=settings.get("exercise-name") or "",
-                                clearable=False,
-                                style={"width": "220px"},
+                            html.Div([
+                                html.Label("Exercise", className="small"),
+                                dcc.Dropdown(
+                                    id="exercise-select",
+                                    options=[{"label": "None", "value": ""}] +
+                                            [{"label": k, "value": k} for k in builtin_exercises],
+                                    value=settings.get("exercise-name") or "",
+                                    clearable=False,
+                                    style={"width": "175px"},
+                                ),
+                            ]),
+                            html.Div(
+                                dbc.Button("Start Metronome", id="metronome-btn",
+                                           color="primary"),
+                                className="d-grid",
                             ),
-                        ], width="auto"),
+                        ], width="auto",
+                           className="align-self-stretch d-flex flex-column justify-content-between"),
                         dbc.Col(
                             html.Div(id="exercise-length-alert"),
                             width="auto",
                         ),
-                    ], className="mb-2"),
-                    dbc.Row([
-                        dbc.Col([
-                            dbc.Button("Start Metronome", id="metronome-btn",
-                                       color="primary"),
-                        ], width="auto"),
                         dbc.Col([
                             html.Div(
                                 id="beats-measures-controls",

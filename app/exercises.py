@@ -28,7 +28,7 @@ voicing_characters = ''.join(list(voicing_code.keys()))
 #   sequence of voicing character that line up with the corresponding subdivision's
 #   letters or beat integer. Multiple pattern lines in a measure line group share the
 #   same subdivision line.
-exercises_text = """
+EXERCISES_TEXT = """
 3,3,2 (tresillo)
 1e&a2e&a
 x..x..x.
@@ -52,9 +52,7 @@ x..x..x...x.x...
 Susan's Groove
 1e&a2e&a3e&a4e&a5e&a6e&a7e&a8e&a
 B.h...h.B.hB..hhB.h...h.BBBBB.hh
-"""
-
-multi_pattern_exercise_text = """
+----
 Pulses
 1&a2&a3&a4&a
 BxxBxxBxxBxx
@@ -122,7 +120,7 @@ def make_exercises(text):  # -> exercise_dict
     return exercise_dict
 
 
-exercises = make_exercises(exercises_text)
+exercises = make_exercises(EXERCISES_TEXT)
 
 if __name__ == '__main__':
     pprint(exercises)
