@@ -65,19 +65,13 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-13
+## Last session -- 2026-05-14
 
-**This change:** Exercises Stage 3 complete -- custom exercises from settings YAML + status-msg consolidation.
+**This change:** Metronome length guard.
 
-- **exercises.py:** `error()` raises `ValueError` (no "Error: " prefix, uses `!r` repr).
-- **main.py:** `_yaml_str_presenter` for literal-block YAML. Module-level `_custom_exercises`/`_custom_exercises_text`. `get_all_exercises()` returns `_custom_exercises | builtin_exercises`. `load_settings` parses `custom-exercises:`, handles YAML syntax errors (with line number), type coercion errors (`safe_num`), updates `exercise-select.options`, surfaces all errors in `status-msg`. `save_settings` round-trips `custom-exercises:` with `sort_keys=False`.
-- All status messages consolidated to `status-msg` (bold); Analysis card `process-status` removed.
-- Error-beep clientside callback (220 Hz, 0.7 s) fires on error/invalid/failed/syntax messages.
-- Fixed Dash 4.1.0 "Duplicate callback outputs": `process_audio` is sole primary for `status-msg`; `load_recording` uses `allow_duplicate=True`.
+- **main.py:** `update_metronome_track` now checks `ex["total_beats"] * (60/tempo)` before building. If > `METRONOME_MAX_LOOP_SECONDS` (300 s), returns `no_update` for the track store and writes an error message to `status-msg` (triggers error beep). Added `Output("status-msg", "children", allow_duplicate=True)` and `prevent_initial_call="initial_duplicate"` (required by Dash when allow_duplicate is present but initial call must still fire).
 
-**No in-app exercise editor** -- custom exercises are edited externally in the settings YAML.
-
-**Previous change:** Exercises Stage 2c: SPB auto-set from exercise on select.
+**Previous change:** Exercises Stage 3: custom exercises from settings YAML.
 
 **Open:** (none)
 
