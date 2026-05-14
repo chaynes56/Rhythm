@@ -172,8 +172,9 @@ custom-exercises: |-
 
 The general syntax for exercises is a bit complex, but it allows for a wide variety of
 exercises and is best grasped by following this example. 
-The custom exercises setting is at the end of the YAML file and begins with the line
-`custom-exercises: |-`. The following lines defining the custom exercises must 
+The custom exercises setting is at the end of the YAML file and begins initially with
+`custom-exercises: ''`. To create custom exercises, change the `''` to `|-` 
+and add following lines defining your own exercises. These lines must 
 all be indented by two spaces (tabs not allowed). 
 
 The exercises are separated by a line with four dashes (`----`). Each exercise 

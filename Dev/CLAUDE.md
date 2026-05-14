@@ -67,9 +67,12 @@ The app measures output latency to synchronise recording start with metronome be
 
 ## Last session -- 2026-05-14
 
-**This change:** Metronome length guard.
+**This change:** Multi-pattern exercises + metronome length guard + layout.
 
-- **main.py:** `update_metronome_track` now checks `ex["total_beats"] * (60/tempo)` before building. If > `METRONOME_MAX_LOOP_SECONDS` (300 s), returns `no_update` for the track store and writes an error message to `status-msg` (triggers error beep). Added `Output("status-msg", "children", allow_duplicate=True)` and `prevent_initial_call="initial_duplicate"` (required by Dash when allow_duplicate is present but initial call must still fire).
+- **exercises.py:** Renamed `exercises_text` -> `EXERCISES_TEXT`. Added Pulses as first multi-pattern built-in (3 patterns: triplet/16th/8th subdivisions).
+- **main.py:** `compute_metronome_track` now sequences all exercise patterns per cycle (each with its own BPM/MPP/SPB) instead of repeating pattern 0. `compute_exercise_schedule` builds schedule across all patterns with correct time offsets and `patternIdx` per entry. Metronome length guard in `update_metronome_track` (checks `total_beats * 60/tempo > 300s`, posts error to `status-msg`; uses `prevent_initial_call="initial_duplicate"`).
+- **recorder.js:** `highlightExercisePosition` gains `patternIdx` param; buffer-path uses `entry.patternIdx`; per-tone fallback passes 0.
+- **Layout:** Exercise dropdown and Start Metronome button merged into one column, dropdown top / button bottom via `d-flex flex-column justify-content-between align-self-stretch`.
 
 **Previous change:** Exercises Stage 3: custom exercises from settings YAML.
 
