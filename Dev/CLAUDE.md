@@ -67,12 +67,18 @@ The app measures output latency to synchronise recording start with metronome be
 
 ## Last session -- 2026-05-13
 
-**This change:** Exercises Stage 2c -- SPB auto-set from exercise definition.
+**This change:** Exercises Stage 3 complete -- custom exercises from settings YAML + status-msg consolidation.
 
-- **Stage 2c (main.py):** `update_exercise_ui` now outputs `subdivisions-per-beat` in addition to `beats-per-measure` and `measures-per-pattern`. When an exercise is selected, all three metronome parameters auto-populate from the first pattern's values (`bpm`, `mpp`, `spb`). Added `Output("subdivisions-per-beat", "value", allow_duplicate=True)` to the callback; `no_update` on `tempo-slider` trigger.
+- **exercises.py:** `error()` raises `ValueError` (no "Error: " prefix, uses `!r` repr).
+- **main.py:** `_yaml_str_presenter` for literal-block YAML. Module-level `_custom_exercises`/`_custom_exercises_text`. `get_all_exercises()` returns `_custom_exercises | builtin_exercises`. `load_settings` parses `custom-exercises:`, handles YAML syntax errors (with line number), type coercion errors (`safe_num`), updates `exercise-select.options`, surfaces all errors in `status-msg`. `save_settings` round-trips `custom-exercises:` with `sort_keys=False`.
+- All status messages consolidated to `status-msg` (bold); Analysis card `process-status` removed.
+- Error-beep clientside callback (220 Hz, 0.7 s) fires on error/invalid/failed/syntax messages.
+- Fixed Dash 4.1.0 "Duplicate callback outputs": `process_audio` is sole primary for `status-msg`; `load_recording` uses `allow_duplicate=True`.
 
-**Previous commit:** Exercises dropdown blank fix (`exercise-name: ~` in YAML); auto-calibration cold-start -50ms Safari fix (auto-retry if cal_s < -20ms).
+**No in-app exercise editor** -- custom exercises are edited externally in the settings YAML.
 
-**Open:** (none in exercises pipeline)
+**Previous change:** Exercises Stage 2c: SPB auto-set from exercise on select.
+
+**Open:** (none)
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
