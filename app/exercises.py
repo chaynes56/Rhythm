@@ -86,8 +86,8 @@ def make_exercises(text):  # -> exercise_dict
         measures = []  # avoid reference before assignment warning
         for line in lines[1:]:
             def error(message):
-                raise SystemExit(
-                    f"Error: {message} in exercise {exercise_name} line {line}"
+                raise ValueError(
+                    f"{message} in exercise {exercise_name!r} line {line!r}"
                 )
 
             line = line.strip()

@@ -16,7 +16,20 @@ from dash import Dash, ctx, dcc, html, Input, no_update, Output, State, clientsi
 from dash.exceptions import PreventUpdate
 import yaml
 
-from exercises import exercises as builtin_exercises
+
+def _yaml_str_presenter(dumper, data):
+    if "\n" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+yaml.add_representer(str, _yaml_str_presenter)
+
+from exercises import make_exercises, exercises as builtin_exercises
+
+# Session-scoped custom exercises, populated by load_settings.
+_custom_exercises: dict = {}
+_custom_exercises_text: str = ""
 
 from audio_utils import (
     WAVEFORM_DISPLAY_SHIFT_SECONDS,
@@ -223,7 +236,7 @@ def build_beat_indicator_boxes(beats_per_measure: int, measures_per_pattern: int
 
 
 def get_all_exercises():
-    return dict(builtin_exercises)
+    return _custom_exercises | builtin_exercises
 
 
 def build_exercise_table(exercise_name: str) -> list:
@@ -387,7 +400,6 @@ app.layout = dbc.Container([
                             width="auto",
                         )] if SHOW_SPECTRUM else []),
                     ], align="start", className="g-3"),
-                    html.P(id="process-status", className="mt-1 fw-bold fs-6"),
                 ]),
             ], className="mb-4"),
         ], width=12)
@@ -434,7 +446,7 @@ app.layout = dbc.Container([
                                        id="playback-vol"),
                         ], width=6),
                     ]),
-                    html.Div(id="status-msg", className="mt-2"),
+                    html.Div(id="status-msg", className="mt-2 fw-bold"),
                 ]),
             ], className="mb-4"),
             dbc.Card([
@@ -570,6 +582,7 @@ app.layout = dbc.Container([
     dcc.Store(id="calibration-auto-retry-done", data=False),
     dcc.Store(id="debug-mode-store", data=False),
     dcc.Store(id="exercise-schedule-store"),
+    dcc.Store(id="error-beep-sink"),
     dcc.Interval(id="auto-calibrate-interval", interval=3000, n_intervals=0,
                  max_intervals=1),
 ], fluid=True)
@@ -587,7 +600,7 @@ clientside_callback(
     }
     """,
     Output("calibration-command-store", "data"),
-    Output("process-status", "children", allow_duplicate=True),
+    Output("status-msg", "children", allow_duplicate=True),
     Input("calibrate-btn", "n_clicks"),
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
@@ -612,7 +625,7 @@ clientside_callback(
     }
     """,
     Output("calibration-command-store", "data", allow_duplicate=True),
-    Output("process-status", "children", allow_duplicate=True),
+    Output("status-msg", "children", allow_duplicate=True),
     Input("auto-calibrate-interval", "n_intervals"),
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
@@ -660,7 +673,7 @@ clientside_callback(
     }
     """,
     Output("calibration-auto-retry-done", "data"),
-    Output("process-status", "children", allow_duplicate=True),
+    Output("status-msg", "children", allow_duplicate=True),
     Input("calibration-offset-store", "data"),
     State("calibration-auto-retry-done", "data"),
     State("tempo-slider", "value"),
@@ -675,7 +688,7 @@ clientside_callback(
 
 @app.callback(
     Output("calibration-offset-store", "data"),
-    Output("process-status", "children", allow_duplicate=True),
+    Output("status-msg", "children", allow_duplicate=True),
     Output("audio-store", "data", allow_duplicate=True),
     Output("waveform-visible-store", "data", allow_duplicate=True),
     Output("waveform-graph", "figure", allow_duplicate=True),
@@ -1224,6 +1237,36 @@ def clear_msg_on_load(n_clicks):
     return ""
 
 
+clientside_callback(
+    """
+    function(msg) {
+        if (!msg || typeof msg !== 'string') return window.dash_clientside.no_update;
+        const lower = msg.toLowerCase();
+        const isError = lower.includes('error') || lower.includes('invalid') ||
+                        lower.includes('failed') || lower.includes('syntax');
+        if (isError) {
+            try {
+                const ac = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ac.createOscillator();
+                const gain = ac.createGain();
+                osc.connect(gain);
+                gain.connect(ac.destination);
+                osc.type = 'sine';
+                osc.frequency.value = 220;
+                gain.gain.setValueAtTime(0.5, ac.currentTime);
+                gain.gain.linearRampToValueAtTime(0, ac.currentTime + 0.7);
+                osc.start(ac.currentTime);
+                osc.stop(ac.currentTime + 0.7);
+            } catch(e) {}
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("error-beep-sink", "data"),
+    Input("status-msg", "children"),
+    prevent_initial_call=True,
+)
+
 
 @app.callback(
     Output("record-btn", "children"),
@@ -1270,7 +1313,7 @@ if SHOW_SPECTRUM:
 
 
 @app.callback(
-    Output("process-status", "children"),
+    Output("status-msg", "children", allow_duplicate=True),
     Input("audio-data-store", "data"),
     prevent_initial_call=True,
 )
@@ -1282,7 +1325,7 @@ def show_analyzing_message(data):
 
 @app.callback(
     Output("analysis-data-block", "children"),
-    Output("process-status", "children", allow_duplicate=True),
+    Output("status-msg", "children", allow_duplicate=True),
     Input("audio-store", "data"),
     Input("waveform-graph", "relayoutData"),
     State("subdivisions-per-beat", "value"),
@@ -1710,7 +1753,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
     Output("audio-store", "data"),
     Output("waveform-visible-store", "data"),
     Output("waveform-graph", "figure"),
-    Output("status-msg", "children", allow_duplicate=True),
+    Output("status-msg", "children"),
     Input("audio-data-store", "data"),
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
@@ -1858,7 +1901,7 @@ def save_recording(n_clicks, audio_json):
     Output("audio-store", "data", allow_duplicate=True),
     Output("waveform-visible-store", "data", allow_duplicate=True),
     Output("waveform-graph", "figure", allow_duplicate=True),
-    Output("status-msg", "children"),
+    Output("status-msg", "children", allow_duplicate=True),
     Output("exercise-select", "value", allow_duplicate=True),
     Input("upload-audio", "contents"),
     State("beats-per-measure", "value"),
@@ -2040,9 +2083,10 @@ def save_settings(n_clicks, training_level, subdivisions, rec_vol, play_vol,
         "metronome-vol": metro_vol,
         "debug-mode": False,  # always saved as false; enable via env var or Flask debug flag
         "exercise-name": exercise_name or None,
+        "custom-exercises": _custom_exercises_text,
     }
     buf = io.StringIO()
-    yaml.dump(current, buf, default_flow_style=False)
+    yaml.dump(current, buf, default_flow_style=False, sort_keys=False)
     return dict(content=buf.getvalue(), filename="rhythm_settings.yaml")
 
 
@@ -2060,34 +2104,80 @@ def save_settings(n_clicks, training_level, subdivisions, rec_vol, play_vol,
     Output("status-msg", "children", allow_duplicate=True),
     Output("debug-mode-store", "data", allow_duplicate=True),
     Output("exercise-select", "value"),
+    Output("exercise-select", "options", allow_duplicate=True),
     Input("settings-raw-store", "data"),
     prevent_initial_call=True,
 )
 def load_settings(data):
     if data is None:
         raise PreventUpdate
-    no_change = (no_update,) * 13  # 10 settings + status-msg + debug-mode-store + exercise-select
+    no_change = (no_update,) * 14  # 10 settings + status-msg + debug-mode-store + exercise-select + options
     try:
         text = data["content"]
-        loaded = yaml.safe_load(text)
+        try:
+            loaded = yaml.safe_load(text)
+        except yaml.YAMLError as ye:
+            mark = getattr(ye, "problem_mark", None)
+            loc = f" at line {mark.line}" if mark is not None else ""
+            prob = getattr(ye, "problem", str(ye))
+            err = [no_update] * 14
+            err[10] = f"Invalid YAML syntax{loc}: {prob}"
+            return tuple(err)
         if not isinstance(loaded, dict):
             raise ValueError("Settings file did not contain a YAML mapping")
         training_level_val = loaded.get("training-level", settings["training-level"])
         print(f"load_settings: loaded keys = {list(loaded.keys())}, training-level = {training_level_val!r}")
+
+        bad_keys: list[str] = []
+
+        def safe_num(key: str, default):
+            val = loaded.get(key, default)
+            try:
+                return type(default)(val)
+            except (TypeError, ValueError):
+                bad_keys.append(key)
+                return default
+
+        global _custom_exercises, _custom_exercises_text
+        custom_text = loaded.get("custom-exercises", "") or ""
+        error_parts: list[str] = []
+        if custom_text.strip():
+            try:
+                parsed = make_exercises(custom_text)
+                _custom_exercises = parsed
+                _custom_exercises_text = custom_text
+            except (ValueError, IndexError) as e:
+                error_parts.append(f"Custom exercises parse error: {e}")
+        else:
+            _custom_exercises = {}
+            _custom_exercises_text = ""
+        new_options = (
+            [{"label": "None", "value": ""}]
+            + [{"label": k, "value": k} for k in get_all_exercises()]
+        )
+
+        subdiv   = safe_num("subdivisions-per-beat", settings["subdivisions-per-beat"])
+        rec_vol  = safe_num("recording-vol",         settings["recording-vol"])
+        play_vol = safe_num("playback-vol",           settings["playback-vol"])
+        mpp      = safe_num("measures-per-pattern",  settings["measures-per-pattern"])
+        bpm      = safe_num("beats-per-measure",      settings["beats-per-measure"])
+        tempo    = safe_num("tempo-slider",           settings["tempo-slider"])
+        metro_vol = safe_num("metronome-vol",         settings["metronome-vol"])
+
+        if bad_keys:
+            error_parts.append("Invalid setting for: " + ", ".join(bad_keys))
+        status_msg = "; ".join(error_parts)
+
         return (
             training_level_val,
-            loaded.get("subdivisions-per-beat", settings["subdivisions-per-beat"]),
-            loaded.get("recording-vol", settings["recording-vol"]),
-            loaded.get("playback-vol", settings["playback-vol"]),
-            loaded.get("measures-per-pattern", settings["measures-per-pattern"]),
-            loaded.get("beats-per-measure", settings["beats-per-measure"]),
-            loaded.get("play-hi-tone", settings["play-hi-tone"]),
+            subdiv, rec_vol, play_vol, mpp, bpm,
+            loaded.get("play-hi-tone",      settings["play-hi-tone"]),
             loaded.get("play-only-low-tone", settings["play-only-low-tone"]),
-            loaded.get("tempo-slider", settings["tempo-slider"]),
-            loaded.get("metronome-vol", settings["metronome-vol"]),
-            "",
+            tempo, metro_vol,
+            status_msg,
             bool(loaded.get("debug-mode", False)),
             loaded.get("exercise-name") or "",
+            new_options,
         )
     except Exception as e:
         print(f"load_settings error: {e}")
