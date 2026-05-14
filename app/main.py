@@ -1120,22 +1120,24 @@ def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern, exercis
     Output("exercise-length-alert", "children"),
     Output("beats-per-measure", "value", allow_duplicate=True),
     Output("measures-per-pattern", "value", allow_duplicate=True),
+    Output("subdivisions-per-beat", "value", allow_duplicate=True),
     Input("exercise-select", "value"),
     Input("tempo-slider", "value"),
     prevent_initial_call=True,
 )
 def update_exercise_ui(exercise_name, tempo):
     if not exercise_name:
-        return {"display": "block"}, {"display": "none"}, None, no_update, no_update
+        return {"display": "block"}, {"display": "none"}, None, no_update, no_update, no_update
 
     all_ex = get_all_exercises()
     ex = all_ex.get(exercise_name)
     if not ex:
-        return {"display": "block"}, {"display": "none"}, None, no_update, no_update
+        return {"display": "block"}, {"display": "none"}, None, no_update, no_update, no_update
 
     pat = ex["patterns"][0]
     bpm = pat["beats_per_measure"]
     mpp = len(pat["measures"])
+    spb = pat["subdivisions_per_beat"]
 
     alert = None
     if tempo:
@@ -1147,8 +1149,8 @@ def update_exercise_ui(exercise_name, tempo):
             )
 
     if ctx.triggered_id == "exercise-select":
-        return {"display": "none"}, {"display": "block"}, alert, bpm, mpp
-    return {"display": "none"}, {"display": "block"}, alert, no_update, no_update
+        return {"display": "none"}, {"display": "block"}, alert, bpm, mpp, spb
+    return {"display": "none"}, {"display": "block"}, alert, no_update, no_update, no_update
 
 
 @app.callback(

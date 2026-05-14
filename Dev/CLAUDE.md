@@ -67,13 +67,12 @@ The app measures output latency to synchronise recording start with metronome be
 
 ## Last session -- 2026-05-13
 
-**This commit:** Exercises dropdown blank fix; auto-calibration cold-start -50ms fix.
+**This change:** Exercises Stage 2c -- SPB auto-set from exercise definition.
 
-- **Exercises dropdown blank (main.py):** `exercise-name: None` in DEFAULT_SETTINGS_YAML was being parsed by PyYAML as the string `'None'`, not Python `None`. The dropdown value `'None'` matched no option and showed blank. Fix: changed to `exercise-name: ~` (YAML null), which parses as Python `None`, then `None or ""` = `""` matching the `{"label": "None", "value": ""}` option correctly.
-- **Auto-calibration cold-start -50ms (main.py):** On Safari cold page load, the audio hardware reports ~0ms outputLatency but actual is ~450ms. At 120 BPM (0.5s/beat): 450ms % 500ms = 450ms > 250ms → cal_s = -50ms (wrong). After the first calibration the device is warm and recalibration gives the correct result (~+50ms). Fix: added a `calibration-auto-retry-done` store and a clientside callback watching `calibration-offset-store`. If cal_s < -20ms AND retry not yet done, automatically starts a second calibration (warmupMeasures=1, device now warm) and sets the retry flag. One retry only, so no infinite loop.
+- **Stage 2c (main.py):** `update_exercise_ui` now outputs `subdivisions-per-beat` in addition to `beats-per-measure` and `measures-per-pattern`. When an exercise is selected, all three metronome parameters auto-populate from the first pattern's values (`bpm`, `mpp`, `spb`). Added `Output("subdivisions-per-beat", "value", allow_duplicate=True)` to the callback; `no_update` on `tempo-slider` trigger.
 
-**Session before this:** Safari auto-cal -51ms warmup volume fix (turned out wrong root cause); post-calibration metronome wrong-beat race fix; DEFAULT_SETTINGS_YAML restored.
+**Previous commit:** Exercises dropdown blank fix (`exercise-name: ~` in YAML); auto-calibration cold-start -50ms Safari fix (auto-retry if cal_s < -20ms).
 
-**Open:** Stage 2c -- subdivision table SPB auto-set from exercise's first pattern when exercise mode is active.
+**Open:** (none in exercises pipeline)
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
