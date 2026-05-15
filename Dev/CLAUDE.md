@@ -67,14 +67,18 @@ The app measures output latency to synchronise recording start with metronome be
 
 ## Last session -- 2026-05-14
 
-**This change:** Wrong-note detection in analysis table + dot-position sub-tick suppression.
+**This change:** Hardware architecture design discussion (no code changes).
 
-- **main.py `compute_metronome_track`:** subdivision ticks (Play Subdivisions mode) are skipped at `.` positions in the exercise pattern.
-- **main.py `update_subdivision_table`:** when a single-pattern exercise is active and BPM/SPB match the recording, analysis cells where the user played on a `.` position are rendered `#c0392b` (dark red, white text) -- distinct from timing-off `#ffcdd2` light pink. Guard: multi-pattern exercises skipped for now.
-- Wrong-note highlights are in the **analysis** subdivision table only. Metronome exercise table retains green-only playback highlight.
+- RPi Zero 2W + Codec Zero HAT (WM8960, I2S) confirmed as right hardware over USB dongle.
+- Primary architecture: Pi serves Dash app locally (port 8006) + separate FastAPI audio server (port 8007) using sounddevice for hardware-timed metronome + mic capture. Dash never touches audio directly.
+- Browser JS (recorder.js) routes to audio server in SBC mode instead of Web Audio API. Single codebase, mode-switched.
+- `.local` mDNS access works on all modern devices over LAN WiFi. USB gadget mode (Ethernet over OTG) for laptop-tethered use without WiFi.
+- Key pitfalls documented: HAT/DSI touchscreen GPIO conflict (use HDMI+USB touch instead), USB gadget incompatible with stand-alone display mouse, librosa latency ~10-20s on 1 GHz ARM (acceptable post-recording), USB power budget in tethered mode.
+- Stand-alone display (monitor + mouse via OTG hub) viable; requires WiFi mode not gadget mode.
+- Next: decide primary use scenario, then stage implementation starting with Pi running existing Dash app in browser-audio mode (zero code changes).
 
-**Previous change:** Multi-pattern exercises (Pulses) + metronome length guard + layout merge.
+**Previous change:** Wrong-note detection in analysis table + dot-position sub-tick suppression.
 
-**Open:** (none)
+**Open:** Hardware implementation staging (not started).
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
