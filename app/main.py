@@ -1448,18 +1448,11 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
             return None
 
         spb = int(subdivisions_per_beat or 1)
-        dt = 60.0 / tempo / spb  # seconds per subdivision
         cal_s = data.get("calibration_offset_ms", 0) / 1000.0
         warn_ms, alert_ms = TRAINING_LEVEL.get(training_level, TRAINING_LEVEL["Novice"])
 
         exercise_name = data.get("exercise_name") or ""
-        ex_pat = None
-        if exercise_name:
-            ex = get_all_exercises().get(exercise_name)
-            if ex and len(ex["patterns"]) == 1:
-                pat = ex["patterns"][0]
-                if pat["beats_per_measure"] == bpm and pat["subdivisions_per_beat"] == spb:
-                    ex_pat = pat
+        ex = get_all_exercises().get(exercise_name) if exercise_name else None
 
         # Filter by zoom window if applicable
         beat_times = all_beat_times
@@ -1477,11 +1470,127 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
         if len(beat_times) == 0:
             return None
 
+        if ex:
+            # Exercise mode: stacked tables (one per pattern) matching metronome layout.
+            # Header uses subdivision_line chars; cells show "median:n".
+            seconds_per_beat = 60.0 / tempo
+            patterns = ex["patterns"]
+
+            pat_starts = []
+            t_acc = 0.0
+            for pat in patterns:
+                pat_starts.append(t_acc)
+                t_acc += pat["beats_per_measure"] * len(pat["measures"]) * seconds_per_beat
+            cycle_duration = t_acc
+
+            # cell_devs_by_pat[pi][m_idx][sub_pos] = list of deviations (ms)
+            cell_devs_by_pat = []
+            for pat in patterns:
+                pat_mpp_i = len(pat["measures"])
+                pat_spm_i = pat["beats_per_measure"] * pat["subdivisions_per_beat"]
+                cell_devs_by_pat.append(
+                    [[[] for _ in range(pat_spm_i)] for _ in range(pat_mpp_i)])
+
+            for t in beat_times:
+                pos = (t - cal_s) % cycle_duration
+                for pi, pat in enumerate(patterns):
+                    pat_bpm_i = pat["beats_per_measure"]
+                    pat_spb_i = pat["subdivisions_per_beat"]
+                    pat_mpp_i = len(pat["measures"])
+                    pat_spm_i = pat_bpm_i * pat_spb_i
+                    pat_dt_i = seconds_per_beat / pat_spb_i
+                    pat_dur_i = pat_bpm_i * pat_mpp_i * seconds_per_beat
+                    if pat_starts[pi] <= pos < pat_starts[pi] + pat_dur_i:
+                        local_t = pos - pat_starts[pi]
+                        nearest_n = int(round(local_t / pat_dt_i))
+                        total_subs = pat_bpm_i * pat_mpp_i * pat_spb_i
+                        nearest_n = max(0, min(nearest_n, total_subs - 1))
+                        m_idx = nearest_n // pat_spm_i
+                        sub_pos = nearest_n % pat_spm_i
+                        dev_ms = (local_t - nearest_n * pat_dt_i) * 1000
+                        cell_devs_by_pat[pi][m_idx][sub_pos].append(dev_ms)
+                        break
+
+            def cell_bg_ex(devs, pat, m_idx, sub_pos):
+                if not devs:
+                    return "#e8e8e8"
+                m = m_idx % len(pat["measures"])
+                if sub_pos < len(pat["measures"][m]) and pat["measures"][m][sub_pos] == '.':
+                    return "#c0392b"
+                med = abs(float(np.median(devs)))
+                if med < warn_ms:
+                    return "#c8e6c9"
+                if med < alert_ms:
+                    return "#ffe0b2"
+                return "#ffcdd2"
+
+            def cell_text_ex(devs):
+                if not devs:
+                    return "\u2014"
+                med = int(round(float(np.median(devs))))
+                return f"{med}:{len(devs)}"
+
+            base_cell_ex = {"textAlign": "center", "padding": "3px 6px",
+                            "border": "1px solid #ccc", "minWidth": "52px",
+                            "fontSize": "0.75rem", "fontFamily": "monospace"}
+            base_th_ex = {"textAlign": "center", "padding": "2px 4px",
+                          "border": "1px solid #ccc", "minWidth": "52px",
+                          "fontSize": "0.75rem", "fontFamily": "monospace",
+                          "borderBottom": "1px solid #aaa"}
+            label_style = {"padding": "2px 5px", "fontSize": "0.75rem",
+                           "fontWeight": "600", "borderRight": "1px solid #bbb",
+                           "whiteSpace": "nowrap", "background": "#f5f5f5",
+                           "minWidth": "30px"}
+
+            tables = []
+            for pi, pat in enumerate(patterns):
+                sub_line = pat["subdivision_line"]
+                pat_mpp_i = len(pat["measures"])
+                pat_spm_i = pat["beats_per_measure"] * pat["subdivisions_per_beat"]
+
+                header_cells = [html.Th("", style={**base_th_ex,
+                                                   "background": "#f5f5f5",
+                                                   "minWidth": "30px",
+                                                   "border": "none"})]
+                for col_idx, ch in enumerate(sub_line):
+                    bg = "#d8d8d8" if col_idx % 2 == 1 else "#f0f0f0"
+                    header_cells.append(html.Th(
+                        ch, style={**base_th_ex, "backgroundColor": bg,
+                                   "fontWeight": "bold"}
+                    ))
+                rows = [html.Tr(header_cells)]
+
+                for m_idx in range(pat_mpp_i):
+                    row_cells = [html.Td(f"M{m_idx + 1}", style=label_style)]
+                    for sub_pos in range(pat_spm_i):
+                        devs = cell_devs_by_pat[pi][m_idx][sub_pos]
+                        bg = cell_bg_ex(devs, pat, m_idx, sub_pos)
+                        txt = cell_text_ex(devs)
+                        cell_style = {**base_cell_ex, "backgroundColor": bg}
+                        if bg == "#c0392b":
+                            cell_style["color"] = "#ffffff"
+                        row_cells.append(html.Td(txt, style=cell_style))
+                    rows.append(html.Tr(row_cells))
+
+                tables.append(html.Table(
+                    rows,
+                    style={"borderCollapse": "collapse", "border": "1px solid #aaa",
+                           "marginBottom": "8px"},
+                ))
+
+            title = html.P(
+                "Median pulse deviation relative to beat : number of pulses",
+                style={"fontSize": "0.75rem", "marginBottom": "4px", "color": "#444",
+                       "fontStyle": "italic"}
+            )
+            return html.Div([title] + tables, style={"overflowX": "auto"})
+
+        # Free metronome mode: single table with beat/sub header rows and mean deviation.
+        dt = 60.0 / tempo / spb
         deviations_ms = np.array(
             [((t - cal_s - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
 
         subs_per_measure = bpm * spb
-        # cell_devs[measure][beat][sub] = list of abs deviations
         cell_devs = [[[[] for _ in range(spb)] for _ in range(bpm)] for _ in range(mpp)]
 
         for t, dev in zip(beat_times, deviations_ms):
@@ -1498,16 +1607,11 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
         def cell_bg(deviations, m_idx, b_idx, s_idx):
             if not deviations:
                 return "#e8e8e8"
-            if ex_pat is not None:
-                sub_pos = b_idx * spb + s_idx
-                m = m_idx % len(ex_pat["measures"])
-                if sub_pos < len(ex_pat["measures"][m]) and ex_pat["measures"][m][sub_pos] == '.':
-                    return "#c0392b"  # wrong note -- dark red
             if abs(float(np.mean(deviations))) < warn_ms:
-                return "#c8e6c9"  # light green
+                return "#c8e6c9"
             if abs(float(np.mean(deviations))) < alert_ms:
-                return "#ffe0b2"  # light orange
-            return "#ffcdd2"  # light red (timing off)
+                return "#ffe0b2"
+            return "#ffcdd2"
 
         def cell_text(deviations):
             if not deviations:
@@ -1521,10 +1625,8 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
                    "background": "#f5f5f5"}
 
         def beat_border(beat_index):
-            """Thicker right border between beats; thin on last."""
             return "2px solid #666" if beat_index < bpm - 1 else "1px solid #bbb"
 
-        # Header row: beat labels spanning spb columns
         header_cells = [html.Th("", style={**base_th, "minWidth": "30px"})]
         for b in range(bpm):
             header_cells.append(html.Th(
@@ -1534,7 +1636,6 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
 
         rows = [html.Tr(header_cells)]
 
-        # Sub-header row when spb > 1
         if spb > 1:
             sub_cells = [html.Th("", style={**base_th, "fontSize": "0.65rem"})]
             for b in range(bpm):
@@ -1548,7 +1649,6 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
                     ))
             rows.append(html.Tr(sub_cells))
 
-        # Data rows
         for m in range(mpp):
             row_cells = [html.Td(
                 f"M{m + 1}",
