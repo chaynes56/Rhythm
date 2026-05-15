@@ -67,14 +67,13 @@ The app measures output latency to synchronise recording start with metronome be
 
 ## Last session -- 2026-05-14
 
-**This change:** Multi-pattern exercises + metronome length guard + layout.
+**This change:** Wrong-note detection in analysis table + dot-position sub-tick suppression.
 
-- **exercises.py:** Renamed `exercises_text` -> `EXERCISES_TEXT`. Added Pulses as first multi-pattern built-in (3 patterns: triplet/16th/8th subdivisions).
-- **main.py:** `compute_metronome_track` now sequences all exercise patterns per cycle (each with its own BPM/MPP/SPB) instead of repeating pattern 0. `compute_exercise_schedule` builds schedule across all patterns with correct time offsets and `patternIdx` per entry. Metronome length guard in `update_metronome_track` (checks `total_beats * 60/tempo > 300s`, posts error to `status-msg`; uses `prevent_initial_call="initial_duplicate"`).
-- **recorder.js:** `highlightExercisePosition` gains `patternIdx` param; buffer-path uses `entry.patternIdx`; per-tone fallback passes 0.
-- **Layout:** Exercise dropdown and Start Metronome button merged into one column, dropdown top / button bottom via `d-flex flex-column justify-content-between align-self-stretch`.
+- **main.py `compute_metronome_track`:** subdivision ticks (Play Subdivisions mode) are skipped at `.` positions in the exercise pattern.
+- **main.py `update_subdivision_table`:** when a single-pattern exercise is active and BPM/SPB match the recording, analysis cells where the user played on a `.` position are rendered `#c0392b` (dark red, white text) -- distinct from timing-off `#ffcdd2` light pink. Guard: multi-pattern exercises skipped for now.
+- Wrong-note highlights are in the **analysis** subdivision table only. Metronome exercise table retains green-only playback highlight.
 
-**Previous change:** Exercises Stage 3: custom exercises from settings YAML.
+**Previous change:** Multi-pattern exercises (Pulses) + metronome length guard + layout merge.
 
 **Open:** (none)
 
