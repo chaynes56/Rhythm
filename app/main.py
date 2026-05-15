@@ -137,6 +137,8 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
                         if play_subdivisions:
                             beat_time = pat_offset + (m * bpm_p + b) * seconds_per_beat
                             for s in range(1, spb_p):
+                                if pat['measures'][m][b * spb_p + s] == '.':
+                                    continue
                                 sub_time = beat_time + s * seconds_per_sub_p
                                 sub_start = round(sub_time * sr)
                                 sub_tick = _make_metronome_tick(sr, 'sub')
@@ -1450,6 +1452,15 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
         cal_s = data.get("calibration_offset_ms", 0) / 1000.0
         warn_ms, alert_ms = TRAINING_LEVEL.get(training_level, TRAINING_LEVEL["Novice"])
 
+        exercise_name = data.get("exercise_name") or ""
+        ex_pat = None
+        if exercise_name:
+            ex = get_all_exercises().get(exercise_name)
+            if ex and len(ex["patterns"]) == 1:
+                pat = ex["patterns"][0]
+                if pat["beats_per_measure"] == bpm and pat["subdivisions_per_beat"] == spb:
+                    ex_pat = pat
+
         # Filter by zoom window if applicable
         beat_times = all_beat_times
         if relayout_data and ctx.triggered_id != "audio-store":
@@ -1484,14 +1495,19 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
             if 0 <= measure_idx < mpp and 0 <= beat_idx < bpm and 0 <= sub_idx < spb:
                 cell_devs[measure_idx][beat_idx][sub_idx].append(dev)
 
-        def cell_bg(deviations):
+        def cell_bg(deviations, m_idx, b_idx, s_idx):
             if not deviations:
                 return "#e8e8e8"
+            if ex_pat is not None:
+                sub_pos = b_idx * spb + s_idx
+                m = m_idx % len(ex_pat["measures"])
+                if sub_pos < len(ex_pat["measures"][m]) and ex_pat["measures"][m][sub_pos] == '.':
+                    return "#c0392b"  # wrong note -- dark red
             if abs(float(np.mean(deviations))) < warn_ms:
                 return "#c8e6c9"  # light green
             if abs(float(np.mean(deviations))) < alert_ms:
                 return "#ffe0b2"  # light orange
-            return "#ffcdd2"  # light red
+            return "#ffcdd2"  # light red (timing off)
 
         def cell_text(deviations):
             if not deviations:
@@ -1544,14 +1560,14 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
                 for s in range(spb):
                     devs = cell_devs[m][b][s]
                     is_last = (s == spb - 1)
-                    row_cells.append(html.Td(
-                        cell_text(devs),
-                        style={**base_cell,
-                               "backgroundColor": cell_bg(devs),
-                               "borderRight": beat_border(
-                                   b) if is_last else "1px solid #ddd",
-                               "borderBottom": "1px solid #ddd"},
-                    ))
+                    bg = cell_bg(devs, m, b, s)
+                    cell_style = {**base_cell,
+                                  "backgroundColor": bg,
+                                  "borderRight": beat_border(b) if is_last else "1px solid #ddd",
+                                  "borderBottom": "1px solid #ddd"}
+                    if bg == "#c0392b":
+                        cell_style["color"] = "#ffffff"
+                    row_cells.append(html.Td(cell_text(devs), style=cell_style))
             rows.append(html.Tr(row_cells))
 
         table = html.Table(
