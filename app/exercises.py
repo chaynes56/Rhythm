@@ -163,7 +163,7 @@ x.x.xx.x.x.x
 4 beat 4x3 passport
 1&a2&a3&a4&a
 hl.h..hl.h..
-h .h..h.lh..
+h.lh..h.lh..
 h..hl.h..hl.
 h..h.lh..h.l
 hllh..hllh..
@@ -174,7 +174,7 @@ hl.h.lhl.h.l
 3 beat 4x3 passport
 1e&a2e&a3e&a
 hl.h..hl.h..
-h .h..h.lh..
+h.lh..h.lh..
 h..hl.h..hl.
 h..h.lh..h.l
 hllh..hllh..
@@ -185,7 +185,7 @@ hl.h.lhl.h.l
 6 beat 4x3 passport
 1&2&3&4&5&6&
 hl.h..hl.h..
-h .h..h.lh..
+h.lh..h.lh..
 h..hl.h..hl.
 h..h.lh..h.l
 hllh..hllh..
