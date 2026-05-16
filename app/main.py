@@ -273,11 +273,11 @@ def get_all_exercises():
 
 def build_exercise_table(exercise_name: str) -> list:
     all_ex = get_all_exercises()
-    ex = all_ex.get(exercise_name)
-    if ex is None:
+    if exercise_name not in all_ex:
         return []
+    ex = all_ex[exercise_name]
 
-    base = {"textAlign": "center", "padding": "3px 12px",
+    base ={"textAlign": "center", "padding": "3px 12px",
             "border": "1px solid #ccc", "minWidth": "48px",
             "fontSize": "1.5rem", "fontFamily": "monospace"}
 
@@ -830,8 +830,8 @@ def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_
         exercise_patterns = None
         if exercise_name:
             all_ex = get_all_exercises()
-            ex = all_ex.get(exercise_name)
-            if ex is not None:
+            if exercise_name in all_ex:
+                ex = all_ex[exercise_name]
                 total_seconds = ex["total_beats"] * (60.0 / t)
                 if total_seconds > METRONOME_MAX_LOOP_SECONDS:
                     return no_update, (
@@ -1159,9 +1159,9 @@ clientside_callback(
 
 def build_exercise_voicing_key(exercise_name: str) -> str:
     all_ex = get_all_exercises()
-    ex = all_ex.get(exercise_name)
-    if ex is None:
+    if exercise_name not in all_ex:
         return "Beat"
+    ex = all_ex[exercise_name]
     chars_used = set()
     for pat in ex["patterns"]:
         for measure in pat["measures"]:
@@ -1179,7 +1179,9 @@ def build_exercise_voicing_key(exercise_name: str) -> str:
 )
 def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern, exercise_name):
     if exercise_name:
-        return build_exercise_table(exercise_name), build_exercise_voicing_key(exercise_name)
+        return (build_exercise_table(exercise_name),
+                (  # "Use non-dominant hand in gray columns\n" +
+                 build_exercise_voicing_key(exercise_name)))
     return build_beat_indicator_boxes(beats_per_measure, measures_per_pattern), "Beat"
 
 
@@ -1200,9 +1202,9 @@ def update_exercise_ui(exercise_name, tempo):
         return {"display": "block"}, {"display": "none"}, None, no_update, no_update, no_update
 
     all_ex = get_all_exercises()
-    ex = all_ex.get(exercise_name)
-    if ex is None:
+    if exercise_name not in all_ex:
         return {"display": "block"}, {"display": "none"}, None, no_update, no_update, no_update
+    ex = all_ex[exercise_name]
 
     alert = None
     if tempo:
@@ -1229,9 +1231,9 @@ def update_exercise_schedule(exercise_name, tempo):
     if not exercise_name:
         return None
     all_ex = get_all_exercises()
-    ex = all_ex.get(exercise_name)
-    if ex is None:
+    if exercise_name not in all_ex:
         return None
+    ex = all_ex[exercise_name]
     return compute_exercise_schedule(ex["patterns"], tempo or 120)
 
 
@@ -1465,7 +1467,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
         warn_ms, alert_ms = TRAINING_LEVEL.get(training_level, TRAINING_LEVEL["Novice"])
 
         exercise_name = data.get("exercise_name") or ""
-        ex = get_all_exercises().get(exercise_name) if exercise_name else None
+        all_ex = get_all_exercises()
 
         # Filter by zoom window if applicable
         beat_times = all_beat_times
@@ -1483,7 +1485,8 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
         if len(beat_times) == 0:
             return None
 
-        if ex is not None:
+        if exercise_name and exercise_name in all_ex:
+            ex = all_ex[exercise_name]
             # Exercise mode: stacked tables (one per pattern) matching metronome layout.
             # Header uses subdivision_line chars; cells show "median:n".
             seconds_per_beat = 60.0 / tempo

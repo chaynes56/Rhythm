@@ -1,7 +1,9 @@
 #!python3
 # Copyright 2026 Christopher T   Haynes   See the project LICENSE file.
 
-# Thanks to https://rhythmarise.com/rhythm-vocabulary/ for these patterns.
+# Thanks to https://rhythmarise.com/rhythm-vocabulary/ for the exercises.
+#   Julio Llerena shared the Afro-Peruvian groove with the Earthfolk Drum and Dance
+#   clinic in 2024.
 
 from pprint import pprint
 
@@ -11,7 +13,8 @@ voicing_code = {  # voicing characters are the keys
     'l': 'low',
     'h': 'high',
     's': 'slap',
-    'T': 'tone',
+    't': 'tone',
+    'F': 'flam',
     '.': 'none (ghost note)'
 }
 voicing_characters = ''.join(list(voicing_code.keys()))
@@ -56,22 +59,22 @@ Upbeat Passport
 ----
 Binary Groove
 1e&a2e&a3e&a4e&a
-B...T...B...T...
+B...t...B...t...
 ----
 Binary Groove & Floating Accent
 1e&a2e&a3e&a4e&a
-Bx..T...B...T...
-B.x.T...B...T...
-B..xT...B...T...
-B...Tx..B...T...
-B...T.x.B...T...
-B...T..xB...T...
-B...T...Bx..T...
-B...T...B.x.T...
-B...T...B..xT...
-B...T...B...Tx..
-B...T...B...T.x.
-B...T...B...T..x
+Bx..t...B...t...
+B.x.t...B...t...
+B..xt...B...t...
+B...tx..B...t...
+B...t.x.B...t...
+B...t..xB...t...
+B...t...Bx..t...
+B...t...B.x.t...
+B...t...B..xt...
+B...t...B...tx..
+B...t...B...t.x.
+B...t...B...t..x
 ----
 Gravity Grooves
 1e&a2e&a3e&a4e&a
@@ -140,6 +143,81 @@ BxxBxxBxxBxx
 BxxxBxxxBxxxBxxx
 1&2&3&4&5&6&
 BxBxBxBxBxBx
+----
+2/3 Clave (12 box)
+1&a2&a3&a4&a
+.x.x..x.x.x.
+1e&a2e&a3e&a
+.x.x..x.x.x.
+1&2&3&4&5&6&
+.x.x..x.x.x.
+----
+3/2 Clave Bell Pattern (12 box)
+1&a2&a3&a4&a
+x.x.xx.x.x.x
+1e&a2e&a3e&a
+x.x.xx.x.x.x
+1&2&3&4&5&6&
+x.x.xx.x.x.x
+----
+4 beat 4x3 passport
+1&a2&a3&a4&a
+hl.h..hl.h..
+h .h..h.lh..
+h..hl.h..hl.
+h..h.lh..h.l
+hllh..hllh..
+h..hllh..hll
+h.lhl.h.lhl.
+hl.h.lhl.h.l
+----
+3 beat 4x3 passport
+1e&a2e&a3e&a
+hl.h..hl.h..
+h .h..h.lh..
+h..hl.h..hl.
+h..h.lh..h.l
+hllh..hllh..
+h..hllh..hll
+h.lhl.h.lhl.
+hl.h.lhl.h.l
+----
+6 beat 4x3 passport
+1&2&3&4&5&6&
+hl.h..hl.h..
+h .h..h.lh..
+h..hl.h..hl.
+h..h.lh..h.l
+hllh..hllh..
+h..hllh..hll
+h.lhl.h.lhl.
+hl.h.lhl.h.l
+----
+4 beat 3x2 passport
+1&a2&a3&a4&a
+l.l...l.l...
+..l.l...l.l.
+..l.ll..l.ll
+llh...llh...
+----
+3 beat 3x2 passport
+1e&a2e&a3e&a
+l.l...l.l...
+..l.l...l.l.
+..l.ll..l.ll
+llh...llh...
+----
+6 beat 3x2 passport
+1&2&3&4&5&6&
+l.l...l.l...
+..l.l...l.l.
+..l.ll..l.ll
+llh...llh...
+----
+Afro-Peruvian groove
+1e&a2e&a3e&a
+FBB.t.BB.tB.
+t.B.Btt.B.Bt
 """
 
 
