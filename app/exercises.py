@@ -1,9 +1,9 @@
 #!python3
 # Copyright 2026 Christopher T   Haynes   See the project LICENSE file.
 
-# Thanks to https://rhythmarise.com/rhythm-vocabulary/ for the exercises.
-#   Julio Llerena shared the Afro-Peruvian groove with the Earthfolk Drum and Dance
-#   clinic in 2024.
+# Thanks to Julian Douglas for the exercises
+# at https://rhythmarise.com/rhythm-vocabulary/. Julio Llerena shared the Afro-Peruvian
+# groove with the Earthfolk Drum and Dance clinic in 2024.
 
 from pprint import pprint
 

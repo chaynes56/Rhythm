@@ -10,6 +10,7 @@ python app/main.py          # runs on http://localhost:8006 in debug mode
 
 Dependencies are managed via `app/pyproject.toml` with a virtual env at `.venv/`. Python 3.14+ required.
 
+
 ## Architecture
 
 This is a **Plotly/Dash** web app (single file: `app/main.py`) for percussion/rhythm analysis. Deployed to Plotly cloud (URL in README.md).
@@ -83,3 +84,28 @@ The app measures output latency to synchronise recording start with metronome be
 **Open:** Hardware implementation staging (not started).
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
+
+---
+
+## Debugging Approach
+
+- Diagnose root cause before proposing fixes; avoid speculative patches like adding many path candidates or combining detectors without evidence.
+- When a fix regresses other behavior (e.g., timing, alignment), stop and investigate state/side effects before iterating further.
+- Prefer minimal, targeted changes over broad refactors when debugging.
+
+## Audio/Rhythm App Conventions
+
+- When changing sample rate or hop_length, update ALL librosa calls consistently: frames_to_time, onset_detect, n_fft scaling.
+- Beat filtering should use the smoothed onset envelope, not instantaneous waveform values.
+- Any shift/offset constant must be applied to both beat_times and the waveform display.
+- Centralize defaults in the settings dict rather than hardcoding.
+
+## Session Wrap-Up Behavior
+
+- When the user says they want to wrap up, commit notes, or update memory files: do ONLY that. Do not start new exploration or investigation.
+- Confirm scope before running additional Read/Bash/Grep commands at end of session.
+
+## Tooling Preferences
+
+- For Python venv/dependency issues, prefer running `uv venv` directly when requested rather than suggesting shell-level VIRTUAL_ENV workarounds.
+- Respect IDE-native solutions (e.g., PyCharm interpreter settings) over global shell hacks.

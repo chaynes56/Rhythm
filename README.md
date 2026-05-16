@@ -151,7 +151,17 @@ the issue tracker mentioned below.
 
 The Save Settings button stores the current settings in the browser's default 
 download folder (typically `Downloads` or `My Documents`) in YAML format. 
-The Load Settings button restores the settings from the selected `.yaml` file.
+The Load Settings button restores the settings from the selected `.yaml` file. The 
+`debug-mode` and `custom-exercises` settings the user may wish to edit, as 
+the graphic user interface does not support changing them. It is essential to edit 
+the YAML file with a plain-text editor, or the file will be corrupted.
+
+### Debug mode
+The default is `debug-mode: false`. If `false` is replaced with `true` and the 
+settings file then loaded, additional information will be provided in the browser 
+interface and the browser and server logs that may assist debugging. This change is 
+not persistent: it will not automatically be made when new settings are saved and 
+reverts to the default when the app page is revisited.
 
 ### Custom exercises
 By editing the YAML file with a plain-text editor, it is possible to create custom 
