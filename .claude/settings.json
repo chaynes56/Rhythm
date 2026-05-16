@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Edit|Write",
+      "hooks": [{"type": "command", "command": "ruff check $CLAUDE_FILE_PATHS 2>&1 | head -20"}]
+    }]
+  }
+}
