@@ -65,23 +65,20 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-15 (session 2)
+## Last session -- 2026-05-16
 
-**This change:** Voicing key label, new exercises, and type/lint warning cleanup.
+**This change:** Type narrowing fix + remaining exercises added.
 
-- `beat-label` above metronome exercise table: when exercise selected, "Beat" replaced
-  with "Voicing key: x = any, ..." listing only the voicing chars used in that exercise's
-  patterns (ordered by `voicing_code` definition). Label returns to "Beat" when no exercise.
-- `exercises.py`: added `'T': 'tone'` to `voicing_code`; updated `'.'` description to
-  `'none (ghost note)'`. Added 14 new built-in exercises (Passport variants, Binary Groove
-  & Floating Accent, claves, cascara, cicada, Fanga, Baladi, Tumbau, montuno).
-- `main.py`: `if not ex:` -> `if ex is None:` / `if ex is not None:` throughout for proper
-  type narrowing; inner function param renames to avoid shadowing; unused params prefixed `_`;
-  exception clause narrowed; `mark.line` via `getattr` to avoid `Any | None` warning.
-- `recorder.js`: inlined redundant `htmlVolume`; destructured `sched[found]` to resolve
-  unresolved-variable warnings on `patternIdx`, `measureIdx`, `subIdx`.
+- `main.py`: replaced all `all_ex.get(exercise_name)` + `is None` guards with
+  `exercise_name not in all_ex` / `in all_ex` + direct subscript. PyCharm cannot
+  narrow `Any | None` (the return type of `.get()` on an unparameterized dict) through
+  `is None`, but direct subscript returns plain `Any`, which is not flagged. Eliminated
+  all 8 remaining `__getitem__` type warnings.
+- `exercises.py`: renamed `T` -> `t` (tone); added `F` (flam) voicing char; added
+  remaining exercises including 12-box clave patterns and Afro-Peruvian grooves;
+  updated attribution comment.
 
-**Previous change:** Exercise analysis table restructured to match metronome table layout.
+**Previous change:** Voicing key label, new exercises, and type/lint warning cleanup.
 
 **Open:** Hardware implementation staging (not started).
 
