@@ -129,6 +129,10 @@ Susan's Groove
 1e&a2e&a3e&a4e&a5e&a6e&a7e&a8e&a
 B.h...h.B.hB..hhB.h...h.BBBBB.hh
 ----
+7,9 - (8th note resolution)
+1e&a2e&a3e&a4e&a5e&a6e&a7e&a8e&a
+B...l...h.....B...l...h.....BBBB
+----
 Pulses
 1&a2&a3&a4&a
 BxxBxxBxxBxx
