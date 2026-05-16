@@ -11,7 +11,8 @@ voicing_code = {  # voicing characters are the keys
     'l': 'low',
     'h': 'high',
     's': 'slap',
-    '.': 'ghost note'
+    'T': 'tone',
+    '.': 'none (ghost note)'
 }
 voicing_characters = ''.join(list(voicing_code.keys()))
 
@@ -37,6 +38,41 @@ x..x..x.
 1e&a2e&a
 x..x.x..
 ----
+2,3,3
+1e&a2e&a
+x.x..x..
+----
+2,3,3 Passport
+1e&a2e&a
+B.ll.hh.
+----
+3,3,2 Passport
+1e&a2e&a
+B.lB..h.
+----
+Upbeat Passport
+1e&a2e&a
+..ll..hh
+----
+Binary Groove
+1e&a2e&a3e&a4e&a
+B...T...B...T...
+----
+Binary Groove & Floating Accent
+1e&a2e&a3e&a4e&a
+Bx..T...B...T...
+B.x.T...B...T...
+B..xT...B...T...
+B...Tx..B...T...
+B...T.x.B...T...
+B...T..xB...T...
+B...T...Bx..T...
+B...T...B.x.T...
+B...T...B..xT...
+B...T...B...Tx..
+B...T...B...T.x.
+B...T...B...T..x
+----
 Gravity Grooves
 1e&a2e&a3e&a4e&a
 B...............
@@ -48,6 +84,46 @@ B.............BB
 3/2 Clave
 1e&a2e&a3e&a4e&a
 x..x..x...x.x...
+----
+2/3 Clave
+1e&a2e&a3e&a4e&a
+..x.x...x..x..x.
+----
+Brazilian Clave (Bossa Nova Stick Pattern)
+1e&a2e&a3e&a4e&a
+..x.x...x..x..x.
+----
+Rumba Clave
+1e&a2e&a3e&a4e&a
+x..x...x..x.x...
+----
+7/9
+1e&a2e&a3e&a4e&a
+x.x.x..x.x.x.x..
+----
+cascara
+1e&a2e&a3e&a4e&a
+x.x.xx.xx.xx.x.x
+----
+cicada
+1e&a2e&a3e&a4e&a
+x.x..xxx.xxx.x.x
+----
+Fanga
+1e&a2e&a3e&a4e&a
+B.ll.hh.B.B.hh..
+----
+Baladi
+1e&a2e&a3e&a4e&a
+B.B.lll.B.lll.hh
+----
+Tumbau
+1e&a2e&a3e&a4e&a
+..s...ll..sBB.ll
+----
+montuno
+1e&a2e&a3e&a4e&a
+B.hB.h.B.h.BB.h.
 ----
 Susan's Groove
 1e&a2e&a3e&a4e&a5e&a6e&a7e&a8e&a

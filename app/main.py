@@ -25,7 +25,7 @@ def _yaml_str_presenter(dumper, data):
 
 yaml.add_representer(str, _yaml_str_presenter)
 
-from exercises import make_exercises, exercises as builtin_exercises
+from exercises import make_exercises, exercises as builtin_exercises, voicing_code
 
 # Session-scoped custom exercises, populated by load_settings.
 _custom_exercises: dict = {}
@@ -37,7 +37,6 @@ from audio_utils import (
     build_waveform_figure,
     compute_spectrum,
     detect_onsets_rms,
-    filter_beat_times,
     load_audio_from_bytes,
     normalize_waveform_for_display,
     serialize_audio_to_base64_wav,
@@ -275,7 +274,7 @@ def get_all_exercises():
 def build_exercise_table(exercise_name: str) -> list:
     all_ex = get_all_exercises()
     ex = all_ex.get(exercise_name)
-    if not ex:
+    if ex is None:
         return []
 
     base = {"textAlign": "center", "padding": "3px 12px",
@@ -557,7 +556,7 @@ app.layout = dbc.Container([
                             ),
                         ], width="auto"),
                         dbc.Col([
-                            html.Label("Beat", className="small d-block"),
+                            html.Label("Beat", id="beat-label", className="small d-block"),
                             html.Div(
                                 id="beat-indicator-container",
                                 children=build_beat_indicator_boxes(settings["beats-per-measure"], settings["measures-per-pattern"]),
@@ -749,7 +748,7 @@ def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pat
         try:
             with io.BytesIO(audio_bytes) as f:
                 y, sr = sf.read(f)
-        except Exception:
+        except (sf.SoundFileError, OSError, ValueError):
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
                 return no_update, "Calibration failed: could not load audio", no_update, no_update, no_update
@@ -832,7 +831,7 @@ def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_
         if exercise_name:
             all_ex = get_all_exercises()
             ex = all_ex.get(exercise_name)
-            if ex:
+            if ex is not None:
                 total_seconds = ex["total_beats"] * (60.0 / t)
                 if total_seconds > METRONOME_MAX_LOOP_SECONDS:
                     return no_update, (
@@ -1158,16 +1157,30 @@ clientside_callback(
 )
 
 
+def build_exercise_voicing_key(exercise_name: str) -> str:
+    all_ex = get_all_exercises()
+    ex = all_ex.get(exercise_name)
+    if ex is None:
+        return "Beat"
+    chars_used = set()
+    for pat in ex["patterns"]:
+        for measure in pat["measures"]:
+            chars_used.update(measure)
+    items = [f"{ch} = {voicing_code[ch]}" for ch in voicing_code if ch in chars_used]
+    return "Voicing key: " + ", ".join(items)
+
+
 @app.callback(
     Output("beat-indicator-container", "children"),
+    Output("beat-label", "children"),
     Input("beats-per-measure", "value"),
     Input("measures-per-pattern", "value"),
     Input("exercise-select", "value"),
 )
 def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern, exercise_name):
     if exercise_name:
-        return build_exercise_table(exercise_name)
-    return build_beat_indicator_boxes(beats_per_measure, measures_per_pattern)
+        return build_exercise_table(exercise_name), build_exercise_voicing_key(exercise_name)
+    return build_beat_indicator_boxes(beats_per_measure, measures_per_pattern), "Beat"
 
 
 
@@ -1188,7 +1201,7 @@ def update_exercise_ui(exercise_name, tempo):
 
     all_ex = get_all_exercises()
     ex = all_ex.get(exercise_name)
-    if not ex:
+    if ex is None:
         return {"display": "block"}, {"display": "none"}, None, no_update, no_update, no_update
 
     alert = None
@@ -1217,7 +1230,7 @@ def update_exercise_schedule(exercise_name, tempo):
         return None
     all_ex = get_all_exercises()
     ex = all_ex.get(exercise_name)
-    if not ex:
+    if ex is None:
         return None
     return compute_exercise_schedule(ex["patterns"], tempo or 120)
 
@@ -1470,7 +1483,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
         if len(beat_times) == 0:
             return None
 
-        if ex:
+        if ex is not None:
             # Exercise mode: stacked tables (one per pattern) matching metronome layout.
             # Header uses subdivision_line chars; cells show "median:n".
             seconds_per_beat = 60.0 / tempo
@@ -1511,24 +1524,24 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
                         cell_devs_by_pat[pi][m_idx][sub_pos].append(dev_ms)
                         break
 
-            def cell_bg_ex(devs, pat, m_idx, sub_pos):
-                if not devs:
+            def cell_bg_ex(d, cell_pat, cell_m_idx, cell_sub_pos):
+                if not d:
                     return "#e8e8e8"
-                m = m_idx % len(pat["measures"])
-                if sub_pos < len(pat["measures"][m]) and pat["measures"][m][sub_pos] == '.':
+                row_idx = cell_m_idx % len(cell_pat["measures"])
+                if cell_sub_pos < len(cell_pat["measures"][row_idx]) and cell_pat["measures"][row_idx][cell_sub_pos] == '.':
                     return "#c0392b"
-                med = abs(float(np.median(devs)))
+                med = abs(float(np.median(d)))
                 if med < warn_ms:
                     return "#c8e6c9"
                 if med < alert_ms:
                     return "#ffe0b2"
                 return "#ffcdd2"
 
-            def cell_text_ex(devs):
-                if not devs:
+            def cell_text_ex(d):
+                if not d:
                     return "\u2014"
-                med = int(round(float(np.median(devs))))
-                return f"{med}:{len(devs)}"
+                med = int(round(float(np.median(d))))
+                return f"{med}:{len(d)}"
 
             base_cell_ex = {"textAlign": "center", "padding": "3px 6px",
                             "border": "1px solid #ccc", "minWidth": "52px",
@@ -1604,7 +1617,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
             if 0 <= measure_idx < mpp and 0 <= beat_idx < bpm and 0 <= sub_idx < spb:
                 cell_devs[measure_idx][beat_idx][sub_idx].append(dev)
 
-        def cell_bg(deviations, m_idx, b_idx, s_idx):
+        def cell_bg(deviations, _m_idx, _b_idx, _s_idx):
             if not deviations:
                 return "#e8e8e8"
             if abs(float(np.mean(deviations))) < warn_ms:
@@ -2068,7 +2081,7 @@ def save_recording(n_clicks, audio_json):
     prevent_initial_call=True
 )
 def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
-                   calibration_offset_ms):
+                   _calibration_offset_ms):
     if not contents:
         return None, False, go.Figure(), "", no_update
 
@@ -2225,7 +2238,7 @@ clientside_callback(
     State("exercise-select", "value"),
     prevent_initial_call=True,
 )
-def save_settings(n_clicks, training_level, subdivisions, rec_vol, play_vol,
+def save_settings(_n_clicks, training_level, subdivisions, rec_vol, play_vol,
                   measures, beats, play_hi, play_only_low, tempo, metro_vol,
                   exercise_name):
     current = {
@@ -2276,7 +2289,8 @@ def load_settings(data):
             loaded = yaml.safe_load(text)
         except yaml.YAMLError as ye:
             mark = getattr(ye, "problem_mark", None)
-            loc = f" at line {mark.line}" if mark is not None else ""
+            line_num = getattr(mark, "line", None)
+            loc = f" at line {line_num}" if line_num is not None else ""
             prob = getattr(ye, "problem", str(ye))
             err = [no_update] * 14
             err[10] = f"Invalid YAML syntax{loc}: {prob}"

@@ -280,7 +280,7 @@ function ensureAudioContext() {
 
 function _decodeMetronomeTrack(dataUrl) {
     if (!audioContext) return Promise.resolve(null);
-    // Return the in-flight promise if a decode is already running for this URL,
+    // Return the in-flight promise if decode is already running for this URL,
     // so concurrent callers share one decode instead of doing duplicate work.
     if (metronomeDecodePromise) return metronomeDecodePromise;
     const base64 = dataUrl.split(',')[1];
@@ -411,8 +411,7 @@ function playHtmlTone() {
             const audio = new Audio();
             audio.src = /** @type {string} */ (metronomeAudioUrls[toneKey]);
             audio.preload = 'auto';
-            const htmlVolume = metronomeState.volume;
-            audio.volume = htmlVolume;
+            audio.volume = metronomeState.volume;
             // Add playsinline just in case, though it's for video
             audio.setAttribute('playsinline', 'true');
             activeMetronomeAudios.push(audio);
@@ -585,8 +584,8 @@ function startMetronomePlayback(options = {}) {
                     }
                     if (found !== lastExerciseSchedIdx) {
                         lastExerciseSchedIdx = found;
-                        const entry = sched[found];
-                        if (entry.isBeat) highlightExercisePosition(entry.patternIdx, entry.measureIdx, entry.subIdx);
+                        const { isBeat, patternIdx, measureIdx, subIdx } = sched[found];
+                        if (isBeat) highlightExercisePosition(patternIdx, measureIdx, subIdx);
                     }
                 } else {
                     const beatIdx = Math.floor(elapsed / secondsPerBeat);

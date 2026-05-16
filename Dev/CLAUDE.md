@@ -65,19 +65,23 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-14
+## Last session -- 2026-05-15 (session 2)
 
-**This change:** Hardware architecture design discussion (no code changes).
+**This change:** Voicing key label, new exercises, and type/lint warning cleanup.
 
-- RPi Zero 2W + Codec Zero HAT (WM8960, I2S) confirmed as right hardware over USB dongle.
-- Primary architecture: Pi serves Dash app locally (port 8006) + separate FastAPI audio server (port 8007) using sounddevice for hardware-timed metronome + mic capture. Dash never touches audio directly.
-- Browser JS (recorder.js) routes to audio server in SBC mode instead of Web Audio API. Single codebase, mode-switched.
-- `.local` mDNS access works on all modern devices over LAN WiFi. USB gadget mode (Ethernet over OTG) for laptop-tethered use without WiFi.
-- Key pitfalls documented: HAT/DSI touchscreen GPIO conflict (use HDMI+USB touch instead), USB gadget incompatible with stand-alone display mouse, librosa latency ~10-20s on 1 GHz ARM (acceptable post-recording), USB power budget in tethered mode.
-- Stand-alone display (monitor + mouse via OTG hub) viable; requires WiFi mode not gadget mode.
-- Next: decide primary use scenario, then stage implementation starting with Pi running existing Dash app in browser-audio mode (zero code changes).
+- `beat-label` above metronome exercise table: when exercise selected, "Beat" replaced
+  with "Voicing key: x = any, ..." listing only the voicing chars used in that exercise's
+  patterns (ordered by `voicing_code` definition). Label returns to "Beat" when no exercise.
+- `exercises.py`: added `'T': 'tone'` to `voicing_code`; updated `'.'` description to
+  `'none (ghost note)'`. Added 14 new built-in exercises (Passport variants, Binary Groove
+  & Floating Accent, claves, cascara, cicada, Fanga, Baladi, Tumbau, montuno).
+- `main.py`: `if not ex:` -> `if ex is None:` / `if ex is not None:` throughout for proper
+  type narrowing; inner function param renames to avoid shadowing; unused params prefixed `_`;
+  exception clause narrowed; `mark.line` via `getattr` to avoid `Any | None` warning.
+- `recorder.js`: inlined redundant `htmlVolume`; destructured `sched[found]` to resolve
+  unresolved-variable warnings on `patternIdx`, `measureIdx`, `subIdx`.
 
-**Previous change:** Wrong-note detection in analysis table + dot-position sub-tick suppression.
+**Previous change:** Exercise analysis table restructured to match metronome table layout.
 
 **Open:** Hardware implementation staging (not started).
 
