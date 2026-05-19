@@ -46,6 +46,22 @@ FFT_MAX_DISPLAY_FREQ_HZ = 1000  # Hz — upper display limit
 FFT_SEGMENT_OVERLAP = 0.5       # fraction — Welch segment overlap
 FFT_DISPLAY_POINTS = 500        # log-spaced output points for serialization
 
+# ---------------------------------------------------------------------------
+# Metronome constants
+# ---------------------------------------------------------------------------
+
+# name -> {frequency_hz, duration_s}; tone field reserved for future audio clip routing
+METRONOME_TONES: dict[str, tuple[int, float]] = {
+    'low':  (294,  0.040),
+    'mid':  (440,  0.040),
+    'high': (587,  0.040),
+    'sub':  (1200, 0.010),
+}
+
+METRONOME_SAMPLE_RATE = 22050
+METRONOME_TARGET_LOOP_SECONDS = 30.0
+METRONOME_MAX_LOOP_SECONDS = 300.0
+
 
 # ---------------------------------------------------------------------------
 # Audio loading
@@ -493,19 +509,6 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
 # ---------------------------------------------------------------------------
 # Metronome track generation
 # ---------------------------------------------------------------------------
-
-# name -> (frequency_hz, duration_s)
-# In future these pairs may be replaced by an audio clip filename.
-METRONOME_TONES: dict[str, tuple[int, float]] = {
-    'low':  (294,  0.040),
-    'mid':  (440,  0.040),
-    'high': (587,  0.040),
-    'sub':  (1200, 0.010),
-}
-
-METRONOME_SAMPLE_RATE = 22050
-METRONOME_TARGET_LOOP_SECONDS = 30.0
-METRONOME_MAX_LOOP_SECONDS = 300.0
 
 
 def _make_metronome_tick(sr: int, tone_type: str) -> np.ndarray:

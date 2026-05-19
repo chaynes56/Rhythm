@@ -33,7 +33,6 @@ _custom_exercises_text: str = ""
 
 from audio_utils import (
     METRONOME_MAX_LOOP_SECONDS,
-    METRONOME_TONES,
     WAVEFORM_DISPLAY_SHIFT_SECONDS,
     build_spectrum_figure,
     build_waveform_figure,
