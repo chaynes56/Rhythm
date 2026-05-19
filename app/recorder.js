@@ -2,7 +2,6 @@ if (!window.dash_clientside) {
     window.dash_clientside = {};
 }
 
-const METRONOME_TONE_DURATION_S = 0.04; // seconds
 // start recording this many ms before measure end to let audio startup settle
 const RECORDING_PRE_ROLL_MS = 200;
 
@@ -14,10 +13,6 @@ let metronomeScheduler = null; // Web Audio scheduler for precise timing
 let currentAudio = null;
 let lastPlayNClicks = null;  // null = not yet seen; sync to current n_clicks on first call
 let activeMetronomeNodes = [];
-let activeMetronomeAudios = [];
-let metronomeClickBuffers = null;
-let metronomeBufferContext = null;
-let metronomeAudioUrls = null;
 let metronomeAutoStartedByRecording = false;
 let lastToggleTimestamp = 0;
 let lastToggleWasStart = false;
@@ -48,12 +43,6 @@ let metronomeState = {
     hiToneOn: true,
     onlyLowTone: false
 };
-let toneFrequency = {
-    low: 294,
-    mid: 440,
-    high: 587
-};
-
 // Diagnostics: Track recording buffer health
 let recordingDiagnostics = {
     chunks: [],
@@ -97,14 +86,6 @@ function encodeWAV(samples, sampleRate) {
     return buffer;
 }
 
-function cleanupMetronomeNode(nodeRecord) {
-    activeMetronomeNodes = activeMetronomeNodes.filter(node => node !== nodeRecord);
-}
-
-function cleanupMetronomeAudio(audio) {
-    activeMetronomeAudios = activeMetronomeAudios.filter(item => item !== audio);
-}
-
 function clickHiddenButton(buttonId) {
     const button = document.getElementById(buttonId);
     if (!button) {
@@ -143,17 +124,39 @@ function setRecordingPhase(phase) {
 
 function setMetronomePlayingState(isPlaying) {
     setDashInputValue('metronome-state-sync', isPlaying ? 'playing' : '');
-    // Update button DOM directly to avoid Dash component update re-firing n_clicks
     const btn = document.getElementById('metronome-btn');
     if (btn) {
         btn.textContent = isPlaying ? 'Stop Metronome' : 'Start Metronome';
+        btn.disabled = false;
         btn.className = btn.className
             .replace(/\bbtn-primary\b/g, '')
             .replace(/\bbtn-secondary\b/g, '')
+            .replace(/\bbtn-warning\b/g, '')
             .trim() + (isPlaying ? ' btn-secondary' : ' btn-primary');
     }
     if (!isPlaying) {
         resetBeatIndicators();
+    }
+}
+
+function setMetronomeWarmingUpState(isWarmingUp) {
+    const btn = document.getElementById('metronome-btn');
+    if (!btn) return;
+    if (isWarmingUp) {
+        btn.textContent = 'Warming Up...';
+        btn.disabled = true;
+        btn.className = btn.className
+            .replace(/\bbtn-primary\b/g, '')
+            .replace(/\bbtn-secondary\b/g, '')
+            .replace(/\bbtn-warning\b/g, '')
+            .trim() + ' btn-warning';
+    } else if (!metronomeScheduler) {
+        btn.textContent = 'Start Metronome';
+        btn.disabled = false;
+        btn.className = btn.className
+            .replace(/\bbtn-warning\b/g, '')
+            .replace(/\bbtn-secondary\b/g, '')
+            .trim() + ' btn-primary';
     }
 }
 
@@ -290,6 +293,7 @@ function _decodeMetronomeTrack(dataUrl) {
     metronomeDecodePromise = audioContext.decodeAudioData(bytes.buffer.slice(0)).then(buffer => {
         if (dataUrl === pendingMetronomeTrackUrl) {
             metronomeTrackBuffer = buffer;
+            setMetronomeWarmingUpState(false);
             console.log(`Metronome track decoded: ${buffer.duration.toFixed(1)}s at ${buffer.sampleRate}Hz`);
         }
         return buffer;
@@ -314,121 +318,6 @@ function updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume
     metronomeState.volume = Number.isFinite(parsedVolume) ? parsedVolume : 0.5;
     metronomeState.hiToneOn = (hiToneOn !== false);
     metronomeState.onlyLowTone = !!onlyLowTone;
-}
-
-function getMetronomeBeatState() {
-    const positionInMeasure = metronomeState.beatCount % metronomeState.beatsPerMeasure;
-    const positionInPattern = metronomeState.measureCount % metronomeState.measuresPerPattern;
-
-    let toneKey = 'high';
-    let shouldPlay = true;
-
-    if (positionInMeasure === 0 && positionInPattern === 0) {
-        toneKey = 'low';
-    } else if (positionInMeasure === 0) {
-        toneKey = 'mid';
-        if (metronomeState.onlyLowTone) shouldPlay = false;
-    } else {
-        if (metronomeState.onlyLowTone || !metronomeState.hiToneOn) shouldPlay = false;
-    }
-
-    return {positionInMeasure, toneKey, shouldPlay};
-}
-
-function advanceMetronomePosition(positionInMeasure) {
-    const positionInPattern = metronomeState.measureCount % metronomeState.measuresPerPattern;
-    if (exerciseSchedule) {
-        highlightExercisePosition(0, positionInPattern, positionInMeasure * (exerciseSchedule.spb || 1));
-    } else {
-        highlightBeatIndicator(positionInPattern, positionInMeasure);
-    }
-    metronomeState.beatCount += 1;
-    if (metronomeState.beatCount % metronomeState.beatsPerMeasure === 0) {
-        metronomeState.measureCount += 1;
-    }
-}
-
-function playScheduledTone(scheduledTime = null) {
-    try {
-        const ctx = ensureAudioContext();
-        if (ctx.state === 'closed') {
-            console.error('AudioContext is closed, cannot play tone');
-            return;
-        }
-
-        ensureMetronomeClickBuffers(ctx);
-
-        const {positionInMeasure, toneKey, shouldPlay} = getMetronomeBeatState();
-        const toneTime = (Number.isFinite(scheduledTime) && scheduledTime >= ctx.currentTime)
-            ? scheduledTime
-            : ctx.currentTime;
-
-        if (shouldPlay) {
-            const source = ctx.createBufferSource();
-            const gain = ctx.createGain();
-
-            source.buffer = metronomeClickBuffers[toneKey];
-
-            const toneVolume = metronomeState.volume;
-
-            gain.gain.cancelScheduledValues(toneTime);
-            gain.gain.setValueAtTime(0.0001, toneTime);
-            gain.gain.linearRampToValueAtTime(toneVolume, toneTime + 0.005);
-            gain.gain.exponentialRampToValueAtTime(0.0001, toneTime + METRONOME_TONE_DURATION_S);
-
-            source.connect(gain);
-            gain.connect(ctx.destination);
-
-            const nodeRecord = {source, gain, onEnded: null};
-            const onEnded = () => {
-                try {
-                    source.disconnect();
-                    gain.disconnect();
-                } catch (disconnectErr) {
-                    console.warn('Metronome node disconnect warning:', disconnectErr);
-                }
-                cleanupMetronomeNode(nodeRecord);
-            };
-            nodeRecord.onEnded = onEnded;
-            activeMetronomeNodes.push(nodeRecord);
-            source.addEventListener('ended', onEnded);
-
-            source.start(toneTime);
-        }
-
-        advanceMetronomePosition(positionInMeasure);
-    } catch (err) {
-        console.error('Error playing tone:', err);
-    }
-}
-
-function playHtmlTone() {
-    try {
-        ensureMetronomeAudioUrls();
-        const {positionInMeasure, toneKey, shouldPlay} = getMetronomeBeatState();
-
-        if (shouldPlay) {
-            const audio = new Audio();
-            audio.src = /** @type {string} */ (metronomeAudioUrls[toneKey]);
-            audio.preload = 'auto';
-            audio.volume = metronomeState.volume;
-            // Add playsinline just in case, though it's for video
-            audio.setAttribute('playsinline', 'true');
-            activeMetronomeAudios.push(audio);
-            audio.addEventListener('ended', () => cleanupMetronomeAudio(audio), {once: true});
-            const playPromise = audio.play();
-            if (playPromise !== undefined) {
-                playPromise.catch(err => {
-                    console.error('HTMLAudio metronome playback error:', err);
-                    cleanupMetronomeAudio(audio);
-                });
-            }
-        }
-
-        advanceMetronomePosition(positionInMeasure);
-    } catch (err) {
-        console.error('Error playing HTMLAudio metronome tone:', err);
-    }
 }
 
 function stopMetronomePlayback() {
@@ -464,16 +353,6 @@ function stopMetronomePlayback() {
     });
     activeMetronomeNodes = [];
 
-    activeMetronomeAudios.forEach(audio => {
-        try {
-            audio.pause();
-            audio.currentTime = 0;
-        } catch (audioErr) {
-            console.warn('Metronome audio stop warning:', audioErr);
-        }
-    });
-    activeMetronomeAudios = [];
-
     preserveMetronomeStartOffset = false;
     setMetronomePlayingState(false);
     console.log('Stopped metronome');
@@ -488,15 +367,9 @@ function startMetronomePlayback(options = {}) {
     }
 
     const startScheduler = async () => {
-        console.log('startScheduler: entry, buffer=', !!metronomeTrackBuffer, 'pendingUrl=', !!pendingMetronomeTrackUrl);
-        // Decode on demand if buffer not ready — startTime is set after this resolves
-        if (!metronomeTrackBuffer && pendingMetronomeTrackUrl) {
-            console.log('startMetronomePlayback: decoding track on demand');
-            try {
-                await _decodeMetronomeTrack(pendingMetronomeTrackUrl);
-            } catch (e) {
-                console.error('startMetronomePlayback: track decode threw:', e);
-            }
+        if (!metronomeTrackBuffer) {
+            console.error('startMetronomePlayback: no track buffer');
+            return {firstBeatDelayMs: 0, secondsPerBeat: 60 / metronomeState.tempo, outputLatencyMs: 0};
         }
 
         const secondsPerBeat = 60.0 / metronomeState.tempo;
@@ -547,8 +420,7 @@ function startMetronomePlayback(options = {}) {
         preserveMetronomeStartOffset = false;
         resetBeatIndicators();
 
-        if (metronomeTrackBuffer) {
-            const source = ctx.createBufferSource();
+        const source = ctx.createBufferSource();
             const gainNode = ctx.createGain();
             source.buffer = metronomeTrackBuffer;
             source.loop = true;
@@ -602,49 +474,8 @@ function startMetronomePlayback(options = {}) {
             metronomeInterval = metronomeScheduler;
             setMetronomePlayingState(true);
             console.log(`startMetronomePlayback: buffer ${metronomeTrackBuffer.duration.toFixed(1)}s, offset=${bufferOffset.toFixed(3)}s`);
-        } else {
-            // Fallback: per-tone Web Audio scheduler
-            console.warn('startMetronomePlayback: no track buffer yet, using per-tone fallback');
-            const useHtmlAudioMetronome = shouldUseHtmlAudioMetronome();
 
-            if (useHtmlAudioMetronome) {
-                console.log('Using HTMLAudio metronome fallback');
-                playHtmlTone();
-                let nextScheduledTimeMs = performance.now() + (secondsPerBeat * 1000);
-                metronomeScheduler = setInterval(() => {
-                    try {
-                        const nowMs = performance.now();
-                        while (nextScheduledTimeMs <= nowMs + 30) {
-                            playHtmlTone();
-                            nextScheduledTimeMs += secondsPerBeat * 1000;
-                        }
-                    } catch (err) {
-                        console.error('Error in HTMLAudio metronome scheduler:', err);
-                    }
-                }, 20);
-                metronomeInterval = metronomeScheduler;
-                setMetronomePlayingState(true);
-                return {firstBeatDelayMs: 0, secondsPerBeat, outputLatencyMs: 0};
-            }
-
-            playScheduledTone(startTime);
-            let nextBeatIndex = 1;
-            metronomeScheduler = setInterval(() => {
-                try {
-                    const now = ctx.currentTime;
-                    while (startTime + nextBeatIndex * secondsPerBeat <= now + 0.100) {
-                        playScheduledTone(startTime + nextBeatIndex * secondsPerBeat);
-                        nextBeatIndex++;
-                    }
-                } catch (err) {
-                    console.error('Error in metronome scheduler:', err);
-                }
-            }, 25);
-            metronomeInterval = metronomeScheduler;
-            setMetronomePlayingState(true);
-        }
-
-        return {firstBeatDelayMs: firstToneDelaySeconds * 1000, secondsPerBeat, outputLatencyMs: outputLatencySeconds * 1000};
+            return {firstBeatDelayMs: firstToneDelaySeconds * 1000, secondsPerBeat, outputLatencyMs: outputLatencySeconds * 1000};
     };
 
     if (ctx.state === 'suspended') {
@@ -958,95 +789,11 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
         });
 }
 
-function isSafariBrowser() {
-    const ua = navigator.userAgent || "";
-    return /Safari/i.test(ua) && !/Chrome|Chromium|CriOS|GSA|Firefox|FxiOS|Edg\//i.test(ua);
-}
-
-function shouldUseHtmlAudioMetronome() {
-    const host = (window.location && window.location.hostname) ? window.location.hostname : "";
-    const ua = navigator.userAgent || "";
-    const isFirefox = /Firefox|FxiOS/i.test(ua);
-    const safariLike = isSafariBrowser();
-    const isPlotlyCloud = /(?:^|\.)(?:plotly\.app|dash\.app|plotly\.host)$/i.test(host);
-    // Safari needs HTMLAudio because its WebAudio support is limited for certain patterns.
-    // Chrome (including on Plotly cloud) handles WebAudio fine; force it through the
-    // per-tone WebAudio fallback rather than HTMLAudio so AudioContext resume is used.
-    // Per-tone Web Audio scheduling works on all browsers once AudioContext is resumed.
-    // HTMLAudio fallback is not used: audio.play() from setInterval fails in Safari
-    // (no user gesture context), causing silent count-in and decode-latency inconsistency
-    // that corrupts calibration on cold first use.
-    const useHtmlFallback = false;
-
-    console.log(`shouldUseHtmlAudioMetronome: host=${host}, safariLike=${safariLike}, isPlotlyCloud=${isPlotlyCloud}, isFirefox=${isFirefox}, useHtmlFallback=${useHtmlFallback}`);
-
-    return useHtmlFallback;
-}
-
-function createClickSamples(frequency, duration = METRONOME_TONE_DURATION_S, sampleRate = 44100) {
-    const frameCount = Math.floor(sampleRate * duration);
-    const samples = new Float32Array(frameCount);
-
-    for (let i = 0; i < frameCount; i++) {
-        const t = i / sampleRate;
-        const env = Math.exp(-40 * t);
-        samples[i] = Math.sin(2 * Math.PI * frequency * t) * env;
-    }
-
-    return samples;
-}
-
-function ensureMetronomeAudioUrls() {
-    if (metronomeAudioUrls) {
-        return;
-    }
-
-    const buildUrl = (frequency) => {
-        const wavBuffer = encodeWAV(createClickSamples(frequency), 44100);
-        const blob = new Blob([wavBuffer], {type: 'audio/wav'});
-        return URL.createObjectURL(blob);
-    };
-
-    metronomeAudioUrls = {
-        low: buildUrl(toneFrequency.low),
-        mid: buildUrl(toneFrequency.mid),
-        high: buildUrl(toneFrequency.high)
-    };
-}
-
-function createClickBuffer(ctx, frequency, duration = METRONOME_TONE_DURATION_S) {
-    const sampleRate = ctx.sampleRate;
-    const frameCount = Math.floor(sampleRate * duration);
-    const buffer = ctx.createBuffer(1, frameCount, sampleRate);
-    const data = buffer.getChannelData(0);
-
-    for (let i = 0; i < frameCount; i++) {
-        const t = i / sampleRate;
-        // Fast attack, exponential-like decay for a short click.
-        const env = Math.exp(-40 * t);
-        data[i] = Math.sin(2 * Math.PI * frequency * t) * env;
-    }
-
-    return buffer;
-}
-
-function ensureMetronomeClickBuffers(ctx) {
-    if (metronomeClickBuffers && metronomeBufferContext === ctx) {
-        return;
-    }
-
-    metronomeClickBuffers = {
-        low: createClickBuffer(ctx, toneFrequency.low),
-        mid: createClickBuffer(ctx, toneFrequency.mid),
-        high: createClickBuffer(ctx, toneFrequency.high)
-    };
-    metronomeBufferContext = ctx;
-}
-
 function loadMetronomeTrack(dataUrl) {
     pendingMetronomeTrackUrl = dataUrl;
     metronomeTrackBuffer = null;
-    metronomeDecodePromise = null;  // invalidate any in-flight decode for the old URL
+    metronomeDecodePromise = null;
+    setMetronomeWarmingUpState(true);
     // Create an AudioContext eagerly (it will be suspended until a user gesture resumes
     // it, but decodeAudioData works regardless of playback state).  This lets the
     // 30-second buffer decode in the background so the first metronome click is instant.
@@ -1276,12 +1023,13 @@ try {
                 metronomeTrackBuffer = null;
                 metronomeDecodePromise = null;
                 pendingMetronomeTrackUrl = null;
-                console.log('reconfigureMetronome: track params changed, cleared buffer to avoid stale-track mismatch');
+                setMetronomeWarmingUpState(true);
+                console.log('reconfigureMetronome: track params changed, waiting for new track');
+            } else {
+                startMetronomePlayback({preserveOffset: false}).catch(err => {
+                    console.error('reconfigureMetronome: startMetronomePlayback rejected:', err);
+                });
             }
-
-            startMetronomePlayback({preserveOffset: false}).catch(err => {
-                console.error('reconfigureMetronome: startMetronomePlayback rejected:', err);
-            });
         },
 
         triggerPermissionDialog: function () {

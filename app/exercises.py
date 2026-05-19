@@ -8,14 +8,14 @@
 from pprint import pprint
 
 voicing_code = {  # voicing characters are the keys
-    'x': 'any',
-    'B': 'base',
-    'l': 'low',
-    'h': 'high',
-    's': 'slap',
-    't': 'tone',
-    'F': 'flam',
-    '.': 'none (ghost note)'
+    'x': dict(name='any',             tone='high'),
+    'B': dict(name='base',            tone='high'),
+    'l': dict(name='low',             tone='high'),
+    'h': dict(name='high',            tone='high'),
+    's': dict(name='slap',            tone='high'),
+    't': dict(name='tone',            tone='high'),
+    'F': dict(name='flam',            tone='high'),
+    '.': dict(name='none (ghost note)', tone='high'),
 }
 voicing_characters = ''.join(list(voicing_code.keys()))
 

@@ -32,9 +32,12 @@ _custom_exercises: dict = {}
 _custom_exercises_text: str = ""
 
 from audio_utils import (
+    METRONOME_MAX_LOOP_SECONDS,
+    METRONOME_TONES,
     WAVEFORM_DISPLAY_SHIFT_SECONDS,
     build_spectrum_figure,
     build_waveform_figure,
+    compute_metronome_track,
     compute_spectrum,
     detect_onsets_rms,
     load_audio_from_bytes,
@@ -62,20 +65,6 @@ DEVIATION_ALERT_MS = 20  # orange below this, red at or above
 SPECTRUM_GRAPH_HEIGHT_PX = 160  # px
 SPECTRUM_GRAPH_WIDTH_PX = 500  # px
 
-METRONOME_SAMPLE_RATE = 22050
-METRONOME_TICK_DURATION = 0.04   # seconds — beat ticks
-METRONOME_SUB_TICK_DURATION = 0.010  # seconds — subdivision ticks (brief)
-METRONOME_TARGET_LOOP_SECONDS = 30.0
-METRONOME_MAX_LOOP_SECONDS = 300.0
-_METRONOME_TONE_FREQS = {'low': 294, 'mid': 440, 'high': 587, 'sub': 1200}
-_METRONOME_TICK_DURATIONS = {
-    'low': METRONOME_TICK_DURATION,
-    'mid': METRONOME_TICK_DURATION,
-    'high': METRONOME_TICK_DURATION,
-    'sub': METRONOME_SUB_TICK_DURATION,
-}
-
-
 def is_debug_mode(store_val=None) -> bool:
     """True if any debug source is active: Flask debug flag, DEBUG_MODE env var, or YAML setting."""
     if app.server.debug:
@@ -86,96 +75,6 @@ def is_debug_mode(store_val=None) -> bool:
         return bool(store_val)
     return False
 
-
-def _make_metronome_tick(sr, tone_type):
-    duration = _METRONOME_TICK_DURATIONS[tone_type]
-    n = int(sr * duration)
-    t = np.arange(n) / sr
-    return np.sin(2 * np.pi * _METRONOME_TONE_FREQS[tone_type] * t) * np.exp(-40 * t)
-
-
-def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi,
-                             play_only_low, exercise_patterns=None, play_subdivisions=False):
-    sr = METRONOME_SAMPLE_RATE
-    seconds_per_beat = 60.0 / tempo
-
-    if exercise_patterns:
-        pat_durations = [
-            seconds_per_beat * pat['beats_per_measure'] * len(pat['measures'])
-            for pat in exercise_patterns
-        ]
-        cycle_duration = sum(pat_durations)
-        n_cycles = max(1, round(METRONOME_TARGET_LOOP_SECONDS / cycle_duration))
-        while n_cycles > 1 and n_cycles * cycle_duration > METRONOME_MAX_LOOP_SECONDS:
-            n_cycles -= 1
-        track_samples = round(n_cycles * cycle_duration * sr)
-        track = np.zeros(track_samples)
-
-        for c in range(n_cycles):
-            pat_offset = c * cycle_duration
-            for pi, pat in enumerate(exercise_patterns):
-                bpm_p = pat['beats_per_measure']
-                mpp_p = len(pat['measures'])
-                spb_p = pat['subdivisions_per_beat']
-                seconds_per_sub_p = seconds_per_beat / spb_p
-                for m in range(mpp_p):
-                    for b in range(bpm_p):
-                        if b == 0 and m == 0:
-                            tone_type, should_play = 'low', True
-                        elif b == 0:
-                            tone_type, should_play = 'mid', not bool(play_only_low)
-                        else:
-                            tone_type = 'high'
-                            should_play = bool(play_hi) and not bool(play_only_low)
-                        if should_play:
-                            beat_time = pat_offset + (m * bpm_p + b) * seconds_per_beat
-                            start = round(beat_time * sr)
-                            tick = _make_metronome_tick(sr, tone_type)
-                            end = min(start + len(tick), track_samples)
-                            track[start:end] += tick[:end - start]
-                        if play_subdivisions:
-                            beat_time = pat_offset + (m * bpm_p + b) * seconds_per_beat
-                            for s in range(1, spb_p):
-                                if pat['measures'][m][b * spb_p + s] == '.':
-                                    continue
-                                sub_time = beat_time + s * seconds_per_sub_p
-                                sub_start = round(sub_time * sr)
-                                sub_tick = _make_metronome_tick(sr, 'sub')
-                                sub_end = min(sub_start + len(sub_tick), track_samples)
-                                track[sub_start:sub_end] += sub_tick[:sub_end - sub_start]
-                pat_offset += pat_durations[pi]
-    else:
-        pattern_duration = seconds_per_beat * beats_per_measure * measures_per_pattern
-        n_patterns = max(1, round(METRONOME_TARGET_LOOP_SECONDS / pattern_duration))
-        while n_patterns > 1 and n_patterns * pattern_duration > METRONOME_MAX_LOOP_SECONDS:
-            n_patterns -= 1
-        track_samples = round(n_patterns * pattern_duration * sr)
-        track = np.zeros(track_samples)
-
-        for p in range(n_patterns):
-            for m in range(measures_per_pattern):
-                for b in range(beats_per_measure):
-                    if b == 0 and m == 0:
-                        tone_type, should_play = 'low', True
-                    elif b == 0:
-                        tone_type, should_play = 'mid', not bool(play_only_low)
-                    else:
-                        tone_type = 'high'
-                        should_play = bool(play_hi) and not bool(play_only_low)
-                    if should_play:
-                        beat_time = ((p * measures_per_pattern + m) * beats_per_measure + b) * seconds_per_beat
-                        start = round(beat_time * sr)
-                        tick = _make_metronome_tick(sr, tone_type)
-                        end = min(start + len(tick), track_samples)
-                        track[start:end] += tick[:end - start]
-
-    peak = np.max(np.abs(track))
-    if peak > 0:
-        track *= 0.9 / peak
-    buf = io.BytesIO()
-    sf.write(buf, track, sr, format='WAV', subtype='PCM_16')
-    buf.seek(0)
-    return 'data:audio/wav;base64,' + base64.b64encode(buf.read()).decode()
 
 
 def compute_exercise_schedule(exercise_patterns, tempo):
@@ -1166,7 +1065,7 @@ def build_exercise_voicing_key(exercise_name: str) -> str:
     for pat in ex["patterns"]:
         for measure in pat["measures"]:
             chars_used.update(measure)
-    items = [f"{ch} = {voicing_code[ch]}" for ch in voicing_code if ch in chars_used]
+    items = [f"{ch} = {voicing_code[ch]['name']}" for ch in voicing_code if ch in chars_used]
     return "Voicing key: " + ", ".join(items)
 
 
