@@ -9,13 +9,13 @@ from pprint import pprint
 
 voicing_code = {  # voicing characters are the keys
     'x': dict(name='any', tone='high'),
-    'B': dict(name='base', tone='high'),
-    'l': dict(name='low', tone='high'),
+    'B': dict(name='base', tone='low'),
+    'l': dict(name='low', tone='mid'),
     'h': dict(name='high', tone='high'),
-    's': dict(name='slap', tone='high'),
+    's': dict(name='slap', tone='sub'),
     't': dict(name='tone', tone='high'),
     'F': dict(name='flam', tone='high'),
-    '.': dict(name='none (ghost note)', tone='high'),
+    '.': dict(name='none (ghost note)', tone='none'),
 }
 voicing_characters = ''.join(list(voicing_code.keys()))
 

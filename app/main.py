@@ -432,6 +432,24 @@ app.layout = dbc.Container([
                             ),
                         ], width="auto"),
                         dbc.Col([
+                            html.Div(
+                                dbc.Switch(
+                                    id="play-tones",
+                                    label="Play Exercise Tones",
+                                    value=False,
+                                ),
+                                id="play-tones-col",
+                                style={"display": "none"},
+                            ),
+                            html.Div(
+                                dbc.Switch(
+                                    id="play-only-tones",
+                                    label="Play Only Exercise Tones",
+                                    value=False,
+                                ),
+                                id="play-only-tones-col",
+                                style={"display": "none"},
+                            ),
                             dbc.Switch(
                                 id="play-hi-tone",
                                 label="Play High Tone",
@@ -719,10 +737,12 @@ def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pat
     Input("play-only-low-tone", "value"),
     Input("exercise-select", "value"),
     Input("play-subdivisions", "value"),
+    Input("play-tones", "value"),
+    Input("play-only-tones", "value"),
     prevent_initial_call="initial_duplicate",
 )
 def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi, play_only_low,
-                           exercise_name, play_subdivisions):
+                           exercise_name, play_subdivisions, play_tones, play_only_tones):
     try:
         t = tempo or 120
         exercise_patterns = None
@@ -738,6 +758,7 @@ def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_
                     )
                 exercise_patterns = ex["patterns"]
 
+        char_tone_map = {ch: v['tone'] for ch, v in voicing_code.items()}
         data_url = compute_metronome_track(
             t,
             beats_per_measure or 4,
@@ -746,6 +767,9 @@ def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_
             bool(play_only_low),
             exercise_patterns=exercise_patterns,
             play_subdivisions=bool(play_subdivisions),
+            play_tones=bool(play_tones),
+            char_tone_map=char_tone_map,
+            play_only_tones=bool(play_only_tones),
         )
         print(f"update_metronome_track: {beats_per_measure}/{measures_per_pattern} at {t} BPM, exercise={exercise_name!r}")
         return data_url, no_update
@@ -1086,6 +1110,8 @@ def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern, exercis
 
 @app.callback(
     Output("beats-measures-controls", "style"),
+    Output("play-tones-col", "style"),
+    Output("play-only-tones-col", "style"),
     Output("play-subdivisions-col", "style"),
     Output("exercise-length-alert", "children"),
     Output("beats-per-measure", "value", allow_duplicate=True),
@@ -1096,12 +1122,13 @@ def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern, exercis
     prevent_initial_call=True,
 )
 def update_exercise_ui(exercise_name, tempo):
+    hidden = {"display": "none"}
     if not exercise_name:
-        return {"display": "block"}, {"display": "none"}, None, no_update, no_update, no_update
+        return {"display": "block"}, hidden, hidden, hidden, None, no_update, no_update, no_update
 
     all_ex = get_all_exercises()
     if exercise_name not in all_ex:
-        return {"display": "block"}, {"display": "none"}, None, no_update, no_update, no_update
+        return {"display": "block"}, hidden, hidden, hidden, None, no_update, no_update, no_update
     ex = all_ex[exercise_name]
 
     alert = None
@@ -1113,11 +1140,34 @@ def update_exercise_ui(exercise_name, tempo):
                 color="warning", dismissable=True, className="mb-0 py-1 small",
             )
 
+    show = {"display": "block"}
     if ctx.triggered_id == "exercise-select":
         pat = ex["patterns"][0]
-        return ({"display": "none"}, {"display": "block"}, alert,
+        return (hidden, show, show, show, alert,
                 pat["beats_per_measure"], len(pat["measures"]), pat["subdivisions_per_beat"])
-    return {"display": "none"}, {"display": "block"}, alert, no_update, no_update, no_update
+    return hidden, show, show, show, alert, no_update, no_update, no_update
+
+
+@app.callback(
+    Output("play-tones", "value"),
+    Input("play-only-tones", "value"),
+    prevent_initial_call=True,
+)
+def turn_off_play_tones_when_only(play_only_tones):
+    if play_only_tones:
+        return False
+    return no_update
+
+
+@app.callback(
+    Output("play-only-tones", "value"),
+    Input("play-tones", "value"),
+    prevent_initial_call=True,
+)
+def turn_off_play_only_tones_when_play_tones(play_tones):
+    if play_tones:
+        return False
+    return no_update
 
 
 @app.callback(

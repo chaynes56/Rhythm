@@ -519,7 +519,8 @@ def _make_metronome_tick(sr: int, tone_type: str) -> np.ndarray:
 
 
 def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi,
-                             play_only_low, exercise_patterns=None, play_subdivisions=False):
+                             play_only_low, exercise_patterns=None, play_subdivisions=False,
+                             play_tones=False, char_tone_map=None, play_only_tones=False):
     sr = METRONOME_SAMPLE_RATE
     seconds_per_beat = 60.0 / tempo
 
@@ -544,29 +545,33 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
                 seconds_per_sub_p = seconds_per_beat / spb_p
                 for m in range(mpp_p):
                     for b in range(bpm_p):
+                        beat_time = pat_offset + (m * bpm_p + b) * seconds_per_beat
                         if b == 0 and m == 0:
-                            tone_type, should_play = 'low', True
+                            metro_tone, metro_play = 'low', True
                         elif b == 0:
-                            tone_type, should_play = 'mid', not bool(play_only_low)
+                            metro_tone, metro_play = 'mid', not bool(play_only_low)
                         else:
-                            tone_type = 'high'
-                            should_play = bool(play_hi) and not bool(play_only_low)
-                        if should_play:
-                            beat_time = pat_offset + (m * bpm_p + b) * seconds_per_beat
-                            start = round(beat_time * sr)
+                            metro_tone = 'high'
+                            metro_play = bool(play_hi) and not bool(play_only_low)
+                        for s in range(spb_p):
+                            t_sub = beat_time + s * seconds_per_sub_p
+                            char = pat['measures'][m][b * spb_p + s]
+                            if play_only_tones:
+                                if char == '.':
+                                    continue
+                                tone_type = char_tone_map.get(char, 'high') if char_tone_map else 'high'
+                            elif play_tones and char_tone_map and char != '.':
+                                tone_type = char_tone_map.get(char, 'high')
+                            elif s == 0 and metro_play:
+                                tone_type = metro_tone
+                            elif s > 0 and play_subdivisions:
+                                tone_type = 'sub'
+                            else:
+                                continue
+                            start = round(t_sub * sr)
                             tick = _make_metronome_tick(sr, tone_type)
                             end = min(start + len(tick), track_samples)
                             track[start:end] += tick[:end - start]
-                        if play_subdivisions:
-                            beat_time = pat_offset + (m * bpm_p + b) * seconds_per_beat
-                            for s in range(1, spb_p):
-                                if pat['measures'][m][b * spb_p + s] == '.':
-                                    continue
-                                sub_time = beat_time + s * seconds_per_sub_p
-                                sub_start = round(sub_time * sr)
-                                sub_tick = _make_metronome_tick(sr, 'sub')
-                                sub_end = min(sub_start + len(sub_tick), track_samples)
-                                track[sub_start:sub_end] += sub_tick[:sub_end - sub_start]
                 pat_offset += pat_durations[pi]
     else:
         pattern_duration = seconds_per_beat * beats_per_measure * measures_per_pattern

@@ -22,6 +22,7 @@ let metronomeDecodePromise = null;  // shared Promise to avoid concurrent duplic
 let metronomeSourceNode = null;
 let metronomeGainNode = null;
 let pendingMetronomeTrackUrl = null;
+let pendingStart = false;
 let recordingDelayTimeout = null;
 let recordingTimeout = null;
 let recordingWarningTimeout = null;
@@ -144,7 +145,7 @@ function setMetronomeWarmingUpState(isWarmingUp) {
     if (!btn) return;
     if (isWarmingUp) {
         btn.textContent = 'Warming Up...';
-        btn.disabled = true;
+        btn.disabled = false;
         btn.className = btn.className
             .replace(/\bbtn-primary\b/g, '')
             .replace(/\bbtn-secondary\b/g, '')
@@ -293,8 +294,16 @@ function _decodeMetronomeTrack(dataUrl) {
     metronomeDecodePromise = audioContext.decodeAudioData(bytes.buffer.slice(0)).then(buffer => {
         if (dataUrl === pendingMetronomeTrackUrl) {
             metronomeTrackBuffer = buffer;
-            setMetronomeWarmingUpState(false);
             console.log(`Metronome track decoded: ${buffer.duration.toFixed(1)}s at ${buffer.sampleRate}Hz`);
+            if (pendingStart) {
+                pendingStart = false;
+                startMetronomePlayback({preserveOffset: false}).catch(err => {
+                    console.error('pendingStart auto-start failed:', err);
+                    setMetronomePlayingState(false);
+                });
+            } else {
+                setMetronomeWarmingUpState(false);
+            }
         }
         return buffer;
     }).catch(err => {
@@ -353,6 +362,7 @@ function stopMetronomePlayback() {
     });
     activeMetronomeNodes = [];
 
+    pendingStart = false;
     preserveMetronomeStartOffset = false;
     setMetronomePlayingState(false);
     console.log('Stopped metronome');
@@ -793,7 +803,6 @@ function loadMetronomeTrack(dataUrl) {
     pendingMetronomeTrackUrl = dataUrl;
     metronomeTrackBuffer = null;
     metronomeDecodePromise = null;
-    setMetronomeWarmingUpState(true);
     // Create an AudioContext eagerly (it will be suspended until a user gesture resumes
     // it, but decodeAudioData works regardless of playback state).  This lets the
     // 30-second buffer decode in the background so the first metronome click is instant.
@@ -905,6 +914,12 @@ try {
             updateMetronomeState(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
 
             if (!is_playing) {
+                if (pendingStart) {
+                    // User clicked "Warming Up..." to cancel the pending start
+                    pendingStart = false;
+                    setMetronomePlayingState(false);
+                    return false;
+                }
                 // Create and resume AudioContext synchronously while still in the
                 // user-gesture handler, before any async operations that could lose
                 // the gesture context (important for autoplay policy on Plotly cloud).
@@ -914,6 +929,11 @@ try {
                 }
                 metronomeAutoStartedByRecording = false;
                 stopMetronomePlayback();
+                if (!metronomeTrackBuffer) {
+                    pendingStart = true;
+                    setMetronomeWarmingUpState(true);
+                    return false;
+                }
                 startMetronomePlayback({preserveOffset: false}).catch(err => {
                     console.error('startMetronomePlayback rejected:', err);
                 });
@@ -1023,7 +1043,6 @@ try {
                 metronomeTrackBuffer = null;
                 metronomeDecodePromise = null;
                 pendingMetronomeTrackUrl = null;
-                setMetronomeWarmingUpState(true);
                 console.log('reconfigureMetronome: track params changed, waiting for new track');
             } else {
                 startMetronomePlayback({preserveOffset: false}).catch(err => {
