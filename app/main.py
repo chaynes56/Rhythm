@@ -34,7 +34,6 @@ _custom_exercises_text: str = ""
 from audio_utils import (
     CALIBRATION_BPM,
     CALIBRATION_BEATS,
-    CALIBRATION_WARMUP_MS,
     METRONOME_MAX_LOOP_SECONDS,
     WAVEFORM_DISPLAY_SHIFT_SECONDS,
     build_spectrum_figure,

@@ -2,13 +2,9 @@ if (!window.dash_clientside) {
     window.dash_clientside = {};
 }
 
-// Timing and calibration constants (keep CALIBRATION_* in sync with audio_utils.py)
+// Timing constants
 const INITIAL_WARMUP_SECONDS = 4;      // silent warmup duration on page load (Stage 2)
 const FIRST_TONE_DELAY_SECONDS = 0.15; // scheduling buffer before first audio tone
-const CALIBRATION_BPM = 200;
-const CALIBRATION_BEATS = 20;
-const CALIBRATION_WARMUP_MS = 200;     // silence prefix in calibration track (ms)
-const CALIBRATION_VOLUME = 1.0;
 
 // start recording this many ms before measure end to let audio startup settle
 const RECORDING_PRE_ROLL_MS = 200;
@@ -29,6 +25,7 @@ let metronomeTrackBuffer = null;
 let metronomeDecodePromise = null;  // shared Promise to avoid concurrent duplicate decodes
 let calibrationTrackBuffer = null;
 let calibrationDecodePromise = null;
+let calibrationFirstBeatMs = 0;
 let metronomeSourceNode = null;
 let metronomeGainNode = null;
 let pendingMetronomeTrackUrl = null;
@@ -809,8 +806,8 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
         });
 }
 
-function loadCalibrationTrack(dataUrl) {
-    if (!dataUrl) return;
+function loadCalibrationTrack(payload) {
+    if (!payload || !payload.data_url) return;
     if (calibrationDecodePromise) return;
     if (!audioContext || audioContext.state === 'closed') {
         try {
@@ -820,13 +817,14 @@ function loadCalibrationTrack(dataUrl) {
             return;
         }
     }
-    const base64 = dataUrl.split(',')[1];
+    calibrationFirstBeatMs = payload.first_beat_ms || 0;
+    const base64 = payload.data_url.split(',')[1];
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
     calibrationDecodePromise = audioContext.decodeAudioData(bytes.buffer.slice(0)).then(buffer => {
         calibrationTrackBuffer = buffer;
-        console.log(`Calibration track decoded: ${buffer.duration.toFixed(2)}s at ${buffer.sampleRate}Hz`);
+        console.log(`Calibration track decoded: ${buffer.duration.toFixed(2)}s, first beat at ${calibrationFirstBeatMs}ms`);
     }).catch(err => {
         console.error('Calibration track decode error:', err);
     }).finally(() => {
@@ -1031,8 +1029,6 @@ try {
             if (currentRecordingPhase !== 'idle') {
                 cancelPendingRecording();
             }
-            console.log(`startCalibration: BPM=${CALIBRATION_BPM} beats=${CALIBRATION_BEATS}`);
-
             if (!calibrationTrackBuffer) {
                 console.error('startCalibration: calibration track not decoded yet');
                 return;
@@ -1073,7 +1069,7 @@ try {
 
                 // Play calibration track (one-shot, no loop)
                 const gainNode = ctx.createGain();
-                gainNode.gain.setValueAtTime(CALIBRATION_VOLUME, ctx.currentTime);
+                gainNode.gain.setValueAtTime(1.0, ctx.currentTime);
                 const source = ctx.createBufferSource();
                 source.buffer = calibrationTrackBuffer;
                 source.connect(gainNode);
@@ -1083,9 +1079,8 @@ try {
                 metronomeGainNode = gainNode;
 
                 // Delay recording so that after PRE_ROLL trim, beat 1 aligns with t=0
-                // recordDelayMs = FIRST_TONE_DELAY + CALIBRATION_WARMUP - PRE_ROLL
                 const recordDelayMs = Math.max(0,
-                    FIRST_TONE_DELAY_SECONDS * 1000 + CALIBRATION_WARMUP_MS - RECORDING_PRE_ROLL_MS
+                    FIRST_TONE_DELAY_SECONDS * 1000 + calibrationFirstBeatMs - RECORDING_PRE_ROLL_MS
                 );
                 recordingDelayTimeout = setTimeout(() => {
                     if (requestId !== pendingRecordingRequestId) return;
@@ -1093,7 +1088,7 @@ try {
                     mediaRecorder.start(100);
                     setRecordingPhase('recording');
 
-                    const calDurationMs = CALIBRATION_WARMUP_MS + CALIBRATION_BEATS * 60000 / CALIBRATION_BPM + 500;
+                    const calDurationMs = calibrationTrackBuffer.duration * 1000 + 500;
                     recordingTimeout = setTimeout(() => {
                         if (mediaRecorder && mediaRecorder.state === 'recording') {
                             calibrationRecordingEnded = true;

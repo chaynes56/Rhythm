@@ -25,7 +25,6 @@ warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 CALIBRATION_BPM = 200        # fixed BPM used for all calibration recordings
 CALIBRATION_BEATS = 20       # number of beats in the calibration track
 CALIBRATION_TONE = 'high'    # tone type for calibration ticks
-CALIBRATION_VOLUME = 1.0     # playback gain (normalised; JS gain node scales this)
 CALIBRATION_WARMUP_MS = 200  # silence prefix in the calibration track (ms)
 
 # ---------------------------------------------------------------------------
@@ -528,13 +527,12 @@ def _make_metronome_tick(sr: int, tone_type: str) -> np.ndarray:
     return np.sin(2 * np.pi * freq * t) * np.exp(-40 * t)
 
 
-def compute_calibration_track() -> str:
+def compute_calibration_track() -> dict:
     """Precomputed one-shot calibration track: silent warmup prefix + fixed beats.
 
-    Returns a data URL (WAV/base64).  Duration:
-        CALIBRATION_WARMUP_MS / 1000 + CALIBRATION_BEATS * 60 / CALIBRATION_BPM seconds.
-    Beat times in the recording after PRE_ROLL trim align to t=0 in the zero-latency case,
-    so process_calibration computes cal_s correctly without any adjustment.
+    Returns {"data_url": "<WAV base64 data URL>", "first_beat_ms": <int>}.
+    first_beat_ms is the offset within the track where beat 1 starts; JS uses it
+    to time recording start without needing to know CALIBRATION_WARMUP_MS directly.
     """
     sr = METRONOME_SAMPLE_RATE
     seconds_per_beat = 60.0 / CALIBRATION_BPM
@@ -553,7 +551,8 @@ def compute_calibration_track() -> str:
     buf = io.BytesIO()
     sf.write(buf, track, sr, format='WAV', subtype='PCM_16')
     buf.seek(0)
-    return 'data:audio/wav;base64,' + base64.b64encode(buf.read()).decode()
+    data_url = 'data:audio/wav;base64,' + base64.b64encode(buf.read()).decode()
+    return {"data_url": data_url, "first_beat_ms": CALIBRATION_WARMUP_MS}
 
 
 def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi,
