@@ -206,7 +206,7 @@ def build_exercise_table(exercise_name: str) -> list:
             rows.append(html.Tr(cells))
 
         result.append(html.Table(
-            rows, style={"borderCollapse": "collapse", "marginBottom": "4px"}
+            html.Tbody(rows), style={"borderCollapse": "collapse", "marginBottom": "4px"}
         ))
     return result
 
@@ -1581,7 +1581,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
                     rows.append(html.Tr(row_cells))
 
                 tables.append(html.Table(
-                    rows,
+                    html.Tbody(rows),
                     style={"borderCollapse": "collapse", "border": "1px solid #aaa",
                            "marginBottom": "8px"},
                 ))
@@ -1679,7 +1679,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
             rows.append(html.Tr(row_cells))
 
         table = html.Table(
-            rows,
+            html.Tbody(rows),
             style={"borderCollapse": "collapse", "border": "1px solid #aaa"},
         )
         return html.Div(table, style={"overflowX": "auto"})
