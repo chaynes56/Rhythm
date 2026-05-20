@@ -22,6 +22,7 @@ if (!window.dash_clientside) {
 // Timing constants
 const INITIAL_WARMUP_SECONDS = 4;      // silent warmup duration on page load (Stage 2)
 const FIRST_TONE_DELAY_SECONDS = 0.15; // scheduling buffer before first audio tone
+const MIN_COUNT_IN_PERIOD_SEC = 3;     // minimum count-in duration before recording starts
 
 // start recording this many ms before measure end to let audio startup settle
 const RECORDING_PRE_ROLL_MS = 200;
@@ -798,7 +799,10 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
                     return;
                 }
 
-                const countInMeasures = calibrationMode ? calibrationWarmupMeasures : 1;
+                const measureDurationSec = metronomeState.beatsPerMeasure * secondsPerBeat;
+                const countInMeasures = calibrationMode
+                    ? calibrationWarmupMeasures
+                    : Math.max(1, Math.ceil(MIN_COUNT_IN_PERIOD_SEC / measureDurationSec));
                 // outputLatencyMs intentionally excluded: cold-start AudioContext measures
                 // near-zero latency while warm recordings measure the true ~50ms value,
                 // causing a systematic offset in cal_s. By anchoring both calibration and
