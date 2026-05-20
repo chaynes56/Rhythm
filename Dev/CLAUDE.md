@@ -66,34 +66,29 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-19
+## Last session -- 2026-05-20
 
-**Warming Up UX + per-tone fallback removal (e30c768):**
-- `recorder.js`: removed per-tone WebAudio/HTMLAudio fallback (~200 lines). Previously,
-  starting the metronome before the precomputed track decoded caused audible glitches.
-  Now `loadMetronomeTrack` sets a "Warming Up..." disabled button state;
-  `_decodeMetronomeTrack` re-enables it when the buffer is ready.
-  `reconfigureMetronome` on track-param change stops the metronome and shows warming-up
-  instead of restarting on the stale/absent buffer. Volume-only changes still restart
-  immediately.
-- Removed: `toneFrequency`, `playScheduledTone`, `playHtmlTone`,
-  `shouldUseHtmlAudioMetronome`, `isSafariBrowser`, all click-buffer/audio-url helpers,
-  `getMetronomeBeatState`, `advanceMetronomePosition`, `cleanupMetronomeNode`.
+**Play Exercise Tones + Play Only Exercise Tones + bug fixes (eaea291):**
 
-**METRONOME_TONES refactor (e30c768):**
-- `_METRONOME_TONE_FREQS` + `_METRONOME_TICK_DURATIONS` + two duration constants
-  replaced by `METRONOME_TONES: dict[str, tuple[int, float]]` (name -> (freq, duration)).
-- `_make_metronome_tick` and `compute_metronome_track` moved from `main.py` to
-  `audio_utils.py`. Constants in a new `# Metronome constants` section at file top (56d780c).
-
-**voicing_code refactor (e30c768):**
-- Values changed from `str` to `dict(name=..., tone='high')`. Tone field reserved for
-  future audio clip routing per voice.
-
-**Project tooling (5dab1d8, 6a0e873):**
-- `CLAUDE.md` guidance sections added: Debugging Approach, Audio/Rhythm App Conventions,
-  Session Wrap-Up Behavior, Tooling Preferences.
-- `.claude/settings.json`: ruff PostToolUse hook added. `ruff` added as dev dependency.
+- `exercises.py`: voicing_code tones now meaningful (B=low, l=mid, s=sub, .=none,
+  h/t/F/x=high). Used by exercise tone playback routing.
+- `audio_utils.py`: `compute_metronome_track` gains `play_tones`, `char_tone_map`,
+  and `play_only_tones` params.
+  - `play_tones=True`: plays voiced chars using char_tone_map; metro tones play on same
+    beat only if no exercise char there.
+  - `play_only_tones=True`: plays only voiced non-'.' chars; all metro/sub tones silent.
+  - Bug 1 fix: sub ticks now play at ghost-note ('.') positions when play_subdivisions=True
+    (removed erroneous `and char != '.'` guard).
+- `main.py`: added "Play Exercise Tones" and "Play Only Exercise Tones" toggles (shown
+  only when exercise is selected). Mutual exclusion: turning on either toggle turns off
+  the other. Both wired into `update_metronome_track`.
+- `recorder.js`: Bug 3 fix -- pendingStart redesign. `loadMetronomeTrack` and
+  `reconfigureMetronome` no longer call `setMetronomeWarmingUpState(true)`.
+  `toggleMetronome` start branch: if no buffer, sets `pendingStart=true` and shows
+  enabled "Warming Up..." (clickable to cancel). `_decodeMetronomeTrack` success: if
+  `pendingStart`, auto-starts instead of restoring button. `stopMetronomePlayback`
+  clears `pendingStart`. Result: metronome can always be stopped; param changes while
+  playing stop immediately without locking the button.
 
 **Open:** (none)
 
