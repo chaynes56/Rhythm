@@ -32,10 +32,14 @@ _custom_exercises: dict = {}
 _custom_exercises_text: str = ""
 
 from audio_utils import (
+    CALIBRATION_BPM,
+    CALIBRATION_BEATS,
+    CALIBRATION_WARMUP_MS,
     METRONOME_MAX_LOOP_SECONDS,
     WAVEFORM_DISPLAY_SHIFT_SECONDS,
     build_spectrum_figure,
     build_waveform_figure,
+    compute_calibration_track,
     compute_metronome_track,
     compute_spectrum,
     detect_onsets_rms,
@@ -355,7 +359,19 @@ app.layout = dbc.Container([
                             dbc.Button("Load Settings", id="load-settings-btn",
                                        color="secondary", className="me-2"),
                             dbc.Button("Calibrate", id="calibrate-btn",
-                                       color="warning"),
+                                       color="warning", className="me-1"),
+                            dcc.Input(
+                                id="calibration-value",
+                                type="number", min=-999, max=999, step=1,
+                                debounce=True, placeholder="ms",
+                                style={"width": "65px", "display": "inline-block",
+                                       "verticalAlign": "middle"},
+                            ),
+                            html.Span(
+                                id="calibration-confidence",
+                                style={"marginLeft": "6px", "fontSize": "0.82em",
+                                       "color": "#6c757d", "verticalAlign": "middle"},
+                            ),
                         ], width=12),
                     ], className="mb-2"),
                     dcc.Checklist(id="is-recording", options=[
@@ -528,6 +544,7 @@ app.layout = dbc.Container([
     dcc.Store(id="metronome-track-store"),
     dcc.Store(id="calibration-audio-data-store"),
     dcc.Store(id="calibration-offset-store"),
+    dcc.Store(id="calibration-track-store", data=compute_calibration_track()),
     dcc.Store(id="calibration-command-store"),
     dcc.Store(id="calibration-auto-retry-done", data=False),
     dcc.Store(id="debug-mode-store", data=False),
@@ -538,51 +555,47 @@ app.layout = dbc.Container([
 ], fluid=True)
 
 # Calibration clientside callbacks
+
 clientside_callback(
     """
-    function(n_clicks, tempo, beats, measures, volume, hiTone, onlyLow) {
-        if (n_clicks && window.recorderControls && window.recorderControls.startCalibration) {
-            window.recorderControls.startCalibration(
-                tempo, beats, measures, volume, !!hiTone, !!onlyLow, 1);
-            return [window.dash_clientside.no_update, 'Calibrating...'];
+    function(trackData) {
+        if (trackData && window.recorderControls && window.recorderControls.loadCalibrationTrack) {
+            window.recorderControls.loadCalibrationTrack(trackData);
         }
-        return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+        return window.dash_clientside.no_update;
     }
     """,
     Output("calibration-command-store", "data"),
-    Output("status-msg", "children", allow_duplicate=True),
+    Input("calibration-track-store", "data"),
+)
+
+clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks && window.recorderControls && window.recorderControls.startCalibration) {
+            window.recorderControls.startCalibration();
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("calibration-command-store", "data", allow_duplicate=True),
     Input("calibrate-btn", "n_clicks"),
-    State("tempo-slider", "value"),
-    State("beats-per-measure", "value"),
-    State("measures-per-pattern", "value"),
-    State("metronome-vol", "value"),
-    State("play-hi-tone", "value"),
-    State("play-only-low-tone", "value"),
     prevent_initial_call=True,
 )
 
 clientside_callback(
     """
-    function(n_intervals, tempo, beats, measures, volume, hiTone, onlyLow, existing) {
+    function(n_intervals, existing) {
         if (n_intervals > 0 && (existing === null || existing === undefined)) {
             if (window.recorderControls && window.recorderControls.startCalibration) {
-                window.recorderControls.startCalibration(
-                    tempo, beats, measures, volume, !!hiTone, !!onlyLow, 3);
-                return [window.dash_clientside.no_update, 'Calibrating...'];
+                window.recorderControls.startCalibration();
             }
         }
-        return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+        return window.dash_clientside.no_update;
     }
     """,
     Output("calibration-command-store", "data", allow_duplicate=True),
-    Output("status-msg", "children", allow_duplicate=True),
     Input("auto-calibrate-interval", "n_intervals"),
-    State("tempo-slider", "value"),
-    State("beats-per-measure", "value"),
-    State("measures-per-pattern", "value"),
-    State("metronome-vol", "value"),
-    State("play-hi-tone", "value"),
-    State("play-only-low-tone", "value"),
     State("calibration-offset-store", "data"),
     prevent_initial_call=True,
 )
@@ -590,6 +603,13 @@ clientside_callback(
 clientside_callback(
     """
     function(n_clicks) {
+        // Restore calibrate button when audio is ready to process
+        const btn = document.getElementById('calibrate-btn');
+        if (btn && btn.textContent === 'Calibrating...') {
+            btn.textContent = 'Calibrate';
+            btn.disabled = false;
+            btn.className = btn.className.replace(/\bbtn-secondary\b/g, '').trim() + ' btn-warning';
+        }
         if (window.calibrationRecordedAudio) {
             const result = window.calibrationRecordedAudio;
             window.calibrationRecordedAudio = null;
@@ -602,22 +622,18 @@ clientside_callback(
     Input("calibration-process-btn", "n_clicks"),
 )
 
-# Auto-retry calibration once if the result looks like a cold-start Safari artifact.
-# On first page load, Safari reports ~0ms outputLatency while the actual hardware
-# latency is ~450ms. This gives cal_s ~ -50ms (at 120 BPM). After the first
-# calibration, the device is warm and a second pass gives the correct result.
+# Auto-retry calibration once if the result looks like a cold-start artifact.
 clientside_callback(
     """
-    function(offset_ms, retryDone, tempo, beats, measures, volume, hiTone, onlyLow) {
+    function(offset_ms, retryDone) {
         if (offset_ms === null || offset_ms === undefined) {
             return [window.dash_clientside.no_update, window.dash_clientside.no_update];
         }
         if (!retryDone && offset_ms < -20) {
             if (window.recorderControls && window.recorderControls.startCalibration) {
-                setTimeout(() => window.recorderControls.startCalibration(
-                    tempo, beats, measures, volume, !!hiTone, !!onlyLow, 1), 200);
+                setTimeout(() => window.recorderControls.startCalibration(), 200);
             }
-            return [true, 'Calibrating...'];
+            return [true, window.dash_clientside.no_update];
         }
         return [window.dash_clientside.no_update, window.dash_clientside.no_update];
     }
@@ -626,12 +642,6 @@ clientside_callback(
     Output("status-msg", "children", allow_duplicate=True),
     Input("calibration-offset-store", "data"),
     State("calibration-auto-retry-done", "data"),
-    State("tempo-slider", "value"),
-    State("beats-per-measure", "value"),
-    State("measures-per-pattern", "value"),
-    State("metronome-vol", "value"),
-    State("play-hi-tone", "value"),
-    State("play-only-low-tone", "value"),
     prevent_initial_call=True,
 )
 
@@ -642,18 +652,16 @@ clientside_callback(
     Output("audio-store", "data", allow_duplicate=True),
     Output("waveform-visible-store", "data", allow_duplicate=True),
     Output("waveform-graph", "figure", allow_duplicate=True),
+    Output("calibration-value", "value"),
+    Output("calibration-confidence", "children"),
     Input("calibration-audio-data-store", "data"),
-    State("tempo-slider", "value"),
-    State("beats-per-measure", "value"),
-    State("measures-per-pattern", "value"),
-    State("subdivisions-per-beat", "value"),
     State("debug-mode-store", "data"),
     prevent_initial_call=True,
 )
-def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pattern,
-                        subdivisions_per_beat, debug_mode_store):
+def process_calibration(base64_audio, debug_mode_store):
     if not base64_audio:
         raise PreventUpdate
+    nu7 = (no_update,) * 7
     try:
         if ',' in base64_audio:
             _, data = base64_audio.split(',', 1)
@@ -667,7 +675,7 @@ def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pat
         except (sf.SoundFileError, OSError, ValueError):
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
-                return no_update, "Calibration failed: could not load audio", no_update, no_update, no_update
+                return no_update, "Calibration failed: could not load audio", *nu7[2:]
             y, sr = result
 
         if len(y.shape) > 1:
@@ -679,27 +687,27 @@ def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pat
         beat_times = beat_times - WAVEFORM_DISPLAY_SHIFT_SECONDS
 
         if len(beat_times) < 2:
-            return no_update, "Calibration failed: too few beats detected", no_update, no_update, no_update
+            return no_update, "Calibration failed: too few beats detected", *nu7[2:]
 
-        seconds_per_beat = 60.0 / (tempo or 120)
-        phase_offset_s = float(np.median(beat_times % seconds_per_beat))
-        # Normalize to (-spb/2, spb/2]: 477ms at 120 BPM → -23ms
-        if phase_offset_s > seconds_per_beat / 2:
-            phase_offset_s -= seconds_per_beat
+        seconds_per_beat = 60.0 / CALIBRATION_BPM
+        residuals = beat_times % seconds_per_beat
+        residuals = np.where(residuals > seconds_per_beat / 2, residuals - seconds_per_beat, residuals)
+        phase_offset_s = float(np.median(residuals))
         offset_ms = round(phase_offset_s * 1000, 1)
-        print(f"process_calibration: offset={offset_ms}ms from {len(beat_times)} beats")
+        std_ms = round(float(np.std(residuals)) * 1000, 1)
+        confidence_str = f"±{std_ms} ms"
+        print(f"process_calibration: offset={offset_ms}ms std={std_ms}ms from {len(beat_times)} beats")
         debug = is_debug_mode(debug_mode_store)
-        msg = f"Calibrated: {offset_ms} ms offset" if debug else ""
+        msg = f"Calibrated: {offset_ms} ms (std {std_ms} ms)" if debug else ""
 
         if not debug:
-            return offset_ms, msg, no_update, no_update, no_update
+            return offset_ms, msg, no_update, no_update, no_update, offset_ms, confidence_str
 
-        # Debug: build full analysis of the calibration recording so the waveform and
-        # all analytics panels update, making timing problems easy to diagnose.
+        # Debug: show calibration waveform with beat markers
         duration = len(y) / sr
-        bpm = beats_per_measure or 4
-        mpp = measures_per_pattern or 1
-        spb = subdivisions_per_beat or 4
+        bpm = 4
+        mpp = CALIBRATION_BEATS // bpm
+        spb = 1
         cal_s = phase_offset_s
         metro_display = np.arange(cal_s % seconds_per_beat,
                                   duration - METRONOME_END_MARGIN_SECONDS,
@@ -711,7 +719,7 @@ def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pat
         fig.update_layout(uirevision=str(time_now()))
         save_data = {
             "audio": base64_audio,
-            "tempo": tempo,
+            "tempo": CALIBRATION_BPM,
             "beats_per_measure": bpm,
             "measures_per_pattern": mpp,
             "calibration_offset_ms": offset_ms,
@@ -721,10 +729,21 @@ def process_calibration(base64_audio, tempo, beats_per_measure, measures_per_pat
             "spectrum_psd": [],
             "duration": duration,
         }
-        return offset_ms, msg, json.dumps(save_data), True, fig
+        return offset_ms, msg, json.dumps(save_data), True, fig, offset_ms, confidence_str
     except Exception as e:
         print(f"process_calibration error: {e}")
-        return no_update, f"Calibration failed: {e}", no_update, no_update, no_update
+        return no_update, f"Calibration failed: {e}", *nu7[2:]
+
+
+@app.callback(
+    Output("calibration-offset-store", "data", allow_duplicate=True),
+    Input("calibration-value", "value"),
+    prevent_initial_call=True,
+)
+def calibration_value_edited(value):
+    if value is None:
+        raise PreventUpdate
+    return float(value)
 
 
 @app.callback(

@@ -2,6 +2,14 @@ if (!window.dash_clientside) {
     window.dash_clientside = {};
 }
 
+// Timing and calibration constants (keep CALIBRATION_* in sync with audio_utils.py)
+const INITIAL_WARMUP_SECONDS = 4;      // silent warmup duration on page load (Stage 2)
+const FIRST_TONE_DELAY_SECONDS = 0.15; // scheduling buffer before first audio tone
+const CALIBRATION_BPM = 200;
+const CALIBRATION_BEATS = 20;
+const CALIBRATION_WARMUP_MS = 200;     // silence prefix in calibration track (ms)
+const CALIBRATION_VOLUME = 1.0;
+
 // start recording this many ms before measure end to let audio startup settle
 const RECORDING_PRE_ROLL_MS = 200;
 
@@ -19,6 +27,8 @@ let lastToggleWasStart = false;
 let preserveMetronomeStartOffset = false;
 let metronomeTrackBuffer = null;
 let metronomeDecodePromise = null;  // shared Promise to avoid concurrent duplicate decodes
+let calibrationTrackBuffer = null;
+let calibrationDecodePromise = null;
 let metronomeSourceNode = null;
 let metronomeGainNode = null;
 let pendingMetronomeTrackUrl = null;
@@ -799,6 +809,31 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
         });
 }
 
+function loadCalibrationTrack(dataUrl) {
+    if (!dataUrl) return;
+    if (calibrationDecodePromise) return;
+    if (!audioContext || audioContext.state === 'closed') {
+        try {
+            audioContext = new (window.AudioContext || window['webkitAudioContext'])();
+        } catch (e) {
+            console.warn('loadCalibrationTrack: could not create AudioContext:', e);
+            return;
+        }
+    }
+    const base64 = dataUrl.split(',')[1];
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    calibrationDecodePromise = audioContext.decodeAudioData(bytes.buffer.slice(0)).then(buffer => {
+        calibrationTrackBuffer = buffer;
+        console.log(`Calibration track decoded: ${buffer.duration.toFixed(2)}s at ${buffer.sampleRate}Hz`);
+    }).catch(err => {
+        console.error('Calibration track decode error:', err);
+    }).finally(() => {
+        calibrationDecodePromise = null;
+    });
+}
+
 function loadMetronomeTrack(dataUrl) {
     pendingMetronomeTrackUrl = dataUrl;
     metronomeTrackBuffer = null;
@@ -992,23 +1027,108 @@ try {
             loadMetronomeTrack(dataUrl);
         },
 
-        startCalibration: function(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone, warmupMeasures) {
-            calibrationWarmupMeasures = (warmupMeasures !== undefined) ? warmupMeasures : 3;
-            console.log(`startCalibration: warmupMeasures=${calibrationWarmupMeasures}`);
+        startCalibration: function() {
+            if (currentRecordingPhase !== 'idle') {
+                cancelPendingRecording();
+            }
+            console.log(`startCalibration: BPM=${CALIBRATION_BPM} beats=${CALIBRATION_BEATS}`);
+
+            if (!calibrationTrackBuffer) {
+                console.error('startCalibration: calibration track not decoded yet');
+                return;
+            }
+
             calibrationMode = true;
-            startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone);
-            // Safety-net stop: fires only if beginActiveRecording's duration timer fails.
-            // Normal completion is handled by recordingTimeout inside beginActiveRecording.
-            const secondsPerBeat = 60.0 / (tempo || 120);
-            const bpm = beatsPerMeasure || 4;
-            const autoStopMs = 30000 + (calibrationWarmupMeasures + 2) * bpm * secondsPerBeat * 1000;
-            console.log(`startCalibration: safety-net auto-stop in ${autoStopMs.toFixed(0)}ms`);
+            calibrationRecordingEnded = false;
+            pendingRecordingRequestId += 1;
+            const requestId = pendingRecordingRequestId;
+            setRecordingPhase('delay');
+
+            const calibBtn = document.getElementById('calibrate-btn');
+            if (calibBtn) {
+                calibBtn.textContent = 'Calibrating...';
+                calibBtn.disabled = true;
+                calibBtn.className = calibBtn.className
+                    .replace(/\bbtn-warning\b|\bbtn-primary\b/g, '')
+                    .trim() + ' btn-secondary';
+            }
+
+            const ctx = ensureAudioContext();
+            if (ctx.state === 'suspended') {
+                ctx.resume().catch(err => console.warn('startCalibration: resume failed:', err));
+            }
+
+            navigator.mediaDevices.getUserMedia({
+                audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: {ideal: 48000}}
+            }).then(stream => {
+                if (requestId !== pendingRecordingRequestId) {
+                    stream.getTracks().forEach(t => t.stop());
+                    return;
+                }
+                recordingStream = stream;
+                configureMediaRecorder(stream);
+
+                stopMetronomePlayback();
+                metronomeAutoStartedByRecording = true;
+
+                // Play calibration track (one-shot, no loop)
+                const gainNode = ctx.createGain();
+                gainNode.gain.setValueAtTime(CALIBRATION_VOLUME, ctx.currentTime);
+                const source = ctx.createBufferSource();
+                source.buffer = calibrationTrackBuffer;
+                source.connect(gainNode);
+                gainNode.connect(ctx.destination);
+                source.start(ctx.currentTime + FIRST_TONE_DELAY_SECONDS);
+                metronomeSourceNode = source;
+                metronomeGainNode = gainNode;
+
+                // Delay recording so that after PRE_ROLL trim, beat 1 aligns with t=0
+                // recordDelayMs = FIRST_TONE_DELAY + CALIBRATION_WARMUP - PRE_ROLL
+                const recordDelayMs = Math.max(0,
+                    FIRST_TONE_DELAY_SECONDS * 1000 + CALIBRATION_WARMUP_MS - RECORDING_PRE_ROLL_MS
+                );
+                recordingDelayTimeout = setTimeout(() => {
+                    if (requestId !== pendingRecordingRequestId) return;
+                    recordingDiagnostics.lastChunkTime = Date.now();
+                    mediaRecorder.start(100);
+                    setRecordingPhase('recording');
+
+                    const calDurationMs = CALIBRATION_WARMUP_MS + CALIBRATION_BEATS * 60000 / CALIBRATION_BPM + 500;
+                    recordingTimeout = setTimeout(() => {
+                        if (mediaRecorder && mediaRecorder.state === 'recording') {
+                            calibrationRecordingEnded = true;
+                            calibrationMode = false;
+                            mediaRecorder.stop();
+                            cleanupRecordingStream();
+                            stopMetronomePlayback();
+                            metronomeAutoStartedByRecording = false;
+                            setRecordingPhase('idle');
+                        }
+                    }, calDurationMs);
+                }, recordDelayMs);
+
+            }).catch(err => {
+                console.error('startCalibration: getUserMedia failed:', err);
+                calibrationMode = false;
+                calibrationRecordingEnded = false;
+                setRecordingPhase('idle');
+                const btn = document.getElementById('calibrate-btn');
+                if (btn) {
+                    btn.textContent = 'Calibrate';
+                    btn.disabled = false;
+                    btn.className = btn.className.replace(/\bbtn-secondary\b/g, '').trim() + ' btn-warning';
+                }
+            });
+
+            // Safety net
             setTimeout(() => {
                 if (calibrationMode || currentRecordingPhase !== 'idle') {
-                    console.log('startCalibration: safety-net auto-stop fired (unexpected)');
+                    console.log('startCalibration: safety-net stop');
+                    calibrationMode = false;
+                    calibrationRecordingEnded = false;
                     stopActiveRecording();
                 }
-            }, autoStopMs);
+            }, 20000);
         },
 
         reconfigureMetronome: function (isPlaying, tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
@@ -1073,11 +1193,14 @@ try {
         },
 
         setExerciseSchedule: function(data) { setExerciseSchedule(data); },
+
+        loadCalibrationTrack: function(dataUrl) { loadCalibrationTrack(dataUrl); },
     };
 
     // These properties are called from Dash clientside_callbacks embedded in main.py
     void window.recorderControls.reconfigureMetronome;
     void window.recorderControls.loadMetronomeTrack;
+    void window.recorderControls.loadCalibrationTrack;
     void window.recorderControls.startCalibration;
     void window.recorderControls.setExerciseSchedule;
     window.dash_clientside = window.dash_clientside || {};
@@ -1091,7 +1214,15 @@ try {
                 if (window.recorderControls && window.recorderControls.triggerPermissionDialog) {
                     window.recorderControls.triggerPermissionDialog();
                 }
-            }, 1000); // Short delay to ensure browser context is ready
+                // Clear confidence indicator when user edits the calibration value box
+                const calInput = document.getElementById('calibration-value');
+                if (calInput) {
+                    calInput.addEventListener('change', () => {
+                        const conf = document.getElementById('calibration-confidence');
+                        if (conf) conf.textContent = '';
+                    });
+                }
+            }, 1000);
         });
     }
 } catch (initErr) {

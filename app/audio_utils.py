@@ -19,6 +19,16 @@ from scipy.signal import find_peaks, resample as scipy_resample, welch as scipy_
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
 # ---------------------------------------------------------------------------
+# Timing and calibration constants
+# ---------------------------------------------------------------------------
+
+CALIBRATION_BPM = 200        # fixed BPM used for all calibration recordings
+CALIBRATION_BEATS = 20       # number of beats in the calibration track
+CALIBRATION_TONE = 'high'    # tone type for calibration ticks
+CALIBRATION_VOLUME = 1.0     # playback gain (normalised; JS gain node scales this)
+CALIBRATION_WARMUP_MS = 200  # silence prefix in the calibration track (ms)
+
+# ---------------------------------------------------------------------------
 # Waveform display constants
 # ---------------------------------------------------------------------------
 
@@ -516,6 +526,34 @@ def _make_metronome_tick(sr: int, tone_type: str) -> np.ndarray:
     n = int(sr * duration)
     t = np.arange(n) / sr
     return np.sin(2 * np.pi * freq * t) * np.exp(-40 * t)
+
+
+def compute_calibration_track() -> str:
+    """Precomputed one-shot calibration track: silent warmup prefix + fixed beats.
+
+    Returns a data URL (WAV/base64).  Duration:
+        CALIBRATION_WARMUP_MS / 1000 + CALIBRATION_BEATS * 60 / CALIBRATION_BPM seconds.
+    Beat times in the recording after PRE_ROLL trim align to t=0 in the zero-latency case,
+    so process_calibration computes cal_s correctly without any adjustment.
+    """
+    sr = METRONOME_SAMPLE_RATE
+    seconds_per_beat = 60.0 / CALIBRATION_BPM
+    warmup_samples = round(CALIBRATION_WARMUP_MS / 1000 * sr)
+    beat_samples = round(seconds_per_beat * sr)
+    total_samples = warmup_samples + CALIBRATION_BEATS * beat_samples
+    track = np.zeros(total_samples)
+    for i in range(CALIBRATION_BEATS):
+        start = warmup_samples + i * beat_samples
+        tick = _make_metronome_tick(sr, CALIBRATION_TONE)
+        end = min(start + len(tick), total_samples)
+        track[start:end] += tick[:end - start]
+    peak = np.max(np.abs(track))
+    if peak > 0:
+        track *= 0.9 / peak
+    buf = io.BytesIO()
+    sf.write(buf, track, sr, format='WAV', subtype='PCM_16')
+    buf.seek(0)
+    return 'data:audio/wav;base64,' + base64.b64encode(buf.read()).decode()
 
 
 def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi,
