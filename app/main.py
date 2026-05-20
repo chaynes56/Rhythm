@@ -551,7 +551,8 @@ app.layout = dbc.Container([
     dcc.Store(id="exercise-schedule-store"),
     dcc.Store(id="error-beep-sink"),
     dcc.Store(id="user-context", storage_type="local"),
-    dcc.Input(id="warmup-info-store", type="hidden", value=""),
+    dcc.Input(id="warmup-info-store", type="text", value="",
+              style={"display": "none"}),
 ], fluid=True)
 
 # Calibration clientside callbacks

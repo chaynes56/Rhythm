@@ -2,6 +2,23 @@ if (!window.dash_clientside) {
     window.dash_clientside = {};
 }
 
+// Suppress noisy Plotly/React internal warnings that are not actionable.
+(function() {
+    var SUPPRESS = [
+        'Support for defaultProps will be removed from function components',
+        "Can't perform a React state update on a component that hasn't mounted yet",
+    ];
+    var _warn = console.warn.bind(console);
+    var _error = console.error.bind(console);
+    function shouldSuppress(args) {
+        var msg = args[0];
+        if (typeof msg !== 'string') return false;
+        return SUPPRESS.some(function(s) { return msg.indexOf(s) !== -1; });
+    }
+    console.warn  = function() { if (!shouldSuppress(arguments)) _warn.apply(console, arguments); };
+    console.error = function() { if (!shouldSuppress(arguments)) _error.apply(console, arguments); };
+}());
+
 // Timing constants
 const INITIAL_WARMUP_SECONDS = 4;      // silent warmup duration on page load (Stage 2)
 const FIRST_TONE_DELAY_SECONDS = 0.15; // scheduling buffer before first audio tone
