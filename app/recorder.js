@@ -1203,12 +1203,28 @@ try {
                         micSource.disconnect();
                         muteNode.disconnect();
                         warmupCompleted = true;
+
+                        const outMs = Math.round((ctx.outputLatency || 0) * 1000);
+                        const inMs  = Math.round((ctx.inputLatency  || 0) * 1000);
+                        const baseMs = Math.round((ctx.baseLatency  || 0) * 1000);
+                        const sr = ctx.sampleRate;
                         console.log(
-                            `Warmup complete: sampleRate=${ctx.sampleRate}Hz` +
-                            `, outputLatency=${((ctx.outputLatency || 0) * 1000).toFixed(1)}ms` +
-                            `, inputLatency=${((ctx.inputLatency || 0) * 1000).toFixed(1)}ms` +
-                            `, baseLatency=${((ctx.baseLatency || 0) * 1000).toFixed(1)}ms`
+                            `Warmup complete: sampleRate=${sr}Hz` +
+                            `, outputLatency=${outMs}ms` +
+                            `, inputLatency=${inMs}ms` +
+                            `, baseLatency=${baseMs}ms`
                         );
+
+                        // Signal warmup completion with platform info for Stage 3 context store
+                        const platformKey = [navigator.userAgent, sr, outMs, inMs].join('|');
+                        const platformInfo = JSON.stringify({
+                            platform_key: platformKey,
+                            sample_rate: sr,
+                            output_latency_ms: outMs,
+                            input_latency_ms: inMs,
+                            base_latency_ms: baseMs,
+                        });
+                        setDashInputValue('warmup-info-store', platformInfo);
                     }, INITIAL_WARMUP_SECONDS * 1000);
                 })
                 .catch(err => {

@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 from time import time as time_now
 
 import dash_bootstrap_components as dbc
@@ -549,8 +550,8 @@ app.layout = dbc.Container([
     dcc.Store(id="debug-mode-store", data=False),
     dcc.Store(id="exercise-schedule-store"),
     dcc.Store(id="error-beep-sink"),
-    dcc.Interval(id="auto-calibrate-interval", interval=3000, n_intervals=0,
-                 max_intervals=1),
+    dcc.Store(id="user-context", storage_type="local"),
+    dcc.Input(id="warmup-info-store", type="hidden", value=""),
 ], fluid=True)
 
 # Calibration clientside callbacks
@@ -584,18 +585,32 @@ clientside_callback(
 
 clientside_callback(
     """
-    function(n_intervals, existing) {
-        if (n_intervals > 0 && (existing === null || existing === undefined)) {
-            if (window.recorderControls && window.recorderControls.startCalibration) {
-                window.recorderControls.startCalibration();
-            }
+    function(warmupInfo, userContext) {
+        var nu = window.dash_clientside.no_update;
+        if (!warmupInfo) return [nu, nu, nu];
+        var info;
+        try { info = JSON.parse(warmupInfo); } catch(e) { return [nu, nu, nu]; }
+
+        if (userContext && userContext.platform_key === info.platform_key
+                && userContext.calibration_offset_ms != null) {
+            // Silently restore calibration for this platform
+            var conf = (userContext.confidence_ms != null)
+                ? ('±' + userContext.confidence_ms + ' ms') : '';
+            return [userContext.calibration_offset_ms, userContext.calibration_offset_ms, conf];
         }
-        return window.dash_clientside.no_update;
+
+        // No stored calibration for this platform -- run auto-calibration after warmup
+        if (window.recorderControls && window.recorderControls.startCalibration) {
+            window.recorderControls.startCalibration();
+        }
+        return [nu, nu, nu];
     }
     """,
-    Output("calibration-command-store", "data", allow_duplicate=True),
-    Input("auto-calibrate-interval", "n_intervals"),
-    State("calibration-offset-store", "data"),
+    Output("calibration-offset-store", "data", allow_duplicate=True),
+    Output("calibration-value", "value", allow_duplicate=True),
+    Output("calibration-confidence", "children", allow_duplicate=True),
+    Input("warmup-info-store", "value"),
+    State("user-context", "data"),
     prevent_initial_call=True,
 )
 
@@ -653,14 +668,16 @@ clientside_callback(
     Output("waveform-graph", "figure", allow_duplicate=True),
     Output("calibration-value", "value"),
     Output("calibration-confidence", "children"),
+    Output("user-context", "data", allow_duplicate=True),
     Input("calibration-audio-data-store", "data"),
     State("debug-mode-store", "data"),
+    State("warmup-info-store", "value"),
     prevent_initial_call=True,
 )
-def process_calibration(base64_audio, debug_mode_store):
+def process_calibration(base64_audio, debug_mode_store, warmup_info_str):
     if not base64_audio:
         raise PreventUpdate
-    nu7 = (no_update,) * 7
+    nu8 = (no_update,) * 8
     try:
         if ',' in base64_audio:
             _, data = base64_audio.split(',', 1)
@@ -674,7 +691,7 @@ def process_calibration(base64_audio, debug_mode_store):
         except (sf.SoundFileError, OSError, ValueError):
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
-                return no_update, "Calibration failed: could not load audio", *nu7[2:]
+                return no_update, "Calibration failed: could not load audio", *nu8[2:]
             y, sr = result
 
         if len(y.shape) > 1:
@@ -686,7 +703,7 @@ def process_calibration(base64_audio, debug_mode_store):
         beat_times = beat_times - WAVEFORM_DISPLAY_SHIFT_SECONDS
 
         if len(beat_times) < 2:
-            return no_update, "Calibration failed: too few beats detected", *nu7[2:]
+            return no_update, "Calibration failed: too few beats detected", *nu8[2:]
 
         seconds_per_beat = 60.0 / CALIBRATION_BPM
         residuals = beat_times % seconds_per_beat
@@ -699,8 +716,22 @@ def process_calibration(base64_audio, debug_mode_store):
         debug = is_debug_mode(debug_mode_store)
         msg = f"Calibrated: {offset_ms} ms (std {std_ms} ms)" if debug else ""
 
+        # Build user-context update to persist calibration for this platform
+        new_context = no_update
+        try:
+            if warmup_info_str:
+                info = json.loads(warmup_info_str)
+                new_context = {
+                    "platform_key": info.get("platform_key", ""),
+                    "calibration_offset_ms": offset_ms,
+                    "confidence_ms": std_ms,
+                    "timestamp": datetime.now(timezone.utc).isoformat(),
+                }
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
         if not debug:
-            return offset_ms, msg, no_update, no_update, no_update, offset_ms, confidence_str
+            return offset_ms, msg, no_update, no_update, no_update, offset_ms, confidence_str, new_context
 
         # Debug: show calibration waveform with beat markers
         duration = len(y) / sr
@@ -728,10 +759,10 @@ def process_calibration(base64_audio, debug_mode_store):
             "spectrum_psd": [],
             "duration": duration,
         }
-        return offset_ms, msg, json.dumps(save_data), True, fig, offset_ms, confidence_str
+        return offset_ms, msg, json.dumps(save_data), True, fig, offset_ms, confidence_str, new_context
     except Exception as e:
         print(f"process_calibration error: {e}")
-        return no_update, f"Calibration failed: {e}", *nu7[2:]
+        return no_update, f"Calibration failed: {e}", *nu8[2:]
 
 
 @app.callback(
@@ -1727,7 +1758,6 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
         spb = int(subdivisions_per_beat or 1)
         warn_ms, alert_ms = TRAINING_LEVEL.get(training_level, TRAINING_LEVEL["Novice"])
         dt = 60.0 / tempo / spb  # seconds per subdivision
-        dt_ms = dt * 1000  # ms per subdivision
         cal_s = data.get("calibration_offset_ms", 0) / 1000.0
         seconds_per_beat = 60.0 / tempo
         display_offset = cal_s % seconds_per_beat
