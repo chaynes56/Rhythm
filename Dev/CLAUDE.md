@@ -68,27 +68,51 @@ The app measures output latency to synchronise recording start with metronome be
 
 ## Last session -- 2026-05-20
 
-**Play Exercise Tones + Play Only Exercise Tones + bug fixes (eaea291):**
+**Calibration/warmup redesign -- Stages 1-3 (49d1505..e6e6a13):**
 
-- `exercises.py`: voicing_code tones now meaningful (B=low, l=mid, s=sub, .=none,
-  h/t/F/x=high). Used by exercise tone playback routing.
-- `audio_utils.py`: `compute_metronome_track` gains `play_tones`, `char_tone_map`,
-  and `play_only_tones` params.
-  - `play_tones=True`: plays voiced chars using char_tone_map; metro tones play on same
-    beat only if no exercise char there.
-  - `play_only_tones=True`: plays only voiced non-'.' chars; all metro/sub tones silent.
-  - Bug 1 fix: sub ticks now play at ghost-note ('.') positions when play_subdivisions=True
-    (removed erroneous `and char != '.'` guard).
-- `main.py`: added "Play Exercise Tones" and "Play Only Exercise Tones" toggles (shown
-  only when exercise is selected). Mutual exclusion: turning on either toggle turns off
-  the other. Both wired into `update_metronome_track`.
-- `recorder.js`: Bug 3 fix -- pendingStart redesign. `loadMetronomeTrack` and
-  `reconfigureMetronome` no longer call `setMetronomeWarmingUpState(true)`.
-  `toggleMetronome` start branch: if no buffer, sets `pendingStart=true` and shows
-  enabled "Warming Up..." (clickable to cancel). `_decodeMetronomeTrack` success: if
-  `pendingStart`, auto-starts instead of restoring button. `stopMetronomePlayback`
-  clears `pendingStart`. Result: metronome can always be stopped; param changes while
-  playing stop immediately without locking the button.
+Stage 1 -- dedicated calibration track + button UX:
+- `audio_utils.py`: calibration constants block at top; `compute_calibration_track()`
+  returns `{"data_url": ..., "first_beat_ms": CALIBRATION_WARMUP_MS}` -- volume baked
+  in, warmup offset passed as metadata so JS needs no calibration constants.
+  `CALIBRATION_VOLUME` removed (unused). `CALIBRATION_BEATS` reduced 20 -> 10.
+- `recorder.js`: `loadCalibrationTrack(payload)` decodes track + stores
+  `calibrationFirstBeatMs`; `startCalibration` plays track directly (no metronome
+  path), computes `recordDelayMs` from `calibrationFirstBeatMs`, `calDurationMs` from
+  `buffer.duration`. Calibrate button shows "Calibrating..." disabled while running.
+- `main.py`: `calibration-track-store` precomputed at startup; editable
+  `calibration-value` textbox + `calibration-confidence` span added to right of button;
+  `process_calibration` uses `CALIBRATION_BPM`, outputs `offset_ms` + confidence str;
+  `calibration_value_edited` syncs textbox edits to `calibration-offset-store`.
+- Bug fix: two mutual-exclusion callbacks (play-tones <-> play-only-tones) merged into
+  one to eliminate Dash dependency cycle.
+
+Stage 2 -- page-load warmup:
+- `recorder.js`: `triggerPermissionDialog` now holds mic stream through muted gain node
+  + plays `INITIAL_WARMUP_SECONDS=4` silent output buffer, then releases and logs
+  `sampleRate/outputLatency/inputLatency/baseLatency`. Replaces per-start silence primer
+  in `startScheduler` (local `firstToneDelaySeconds` duplicate removed; uses global
+  `FIRST_TONE_DELAY_SECONDS` for scheduling headroom only).
+
+Stage 3 -- persistent platform calibration:
+- `recorder.js`: after warmup, builds `platformKey` (userAgent|sampleRate|outMs|inMs)
+  and sends platform info JSON to `warmup-info-store` via `setDashInputValue`.
+- `main.py`: `dcc.Store(id='user-context', storage_type='local')` + hidden text input
+  `warmup-info-store`; clientside callback on warmup fires: if `user-context` has
+  matching `platform_key` -> load calibration silently; else -> `startCalibration()`.
+  Replaces `auto-calibrate-interval` (which fired at 3s, before warmup). After cal,
+  `process_calibration` saves `{platform_key, offset, confidence, timestamp}` to
+  `user-context`.
+
+Bug fixes this session:
+- Manual calibration ~100ms error: `ctx.resume()` was not awaited before
+  `source.start()`; if Chrome auto-suspended the context, frozen `ctx.currentTime`
+  caused beats to fire late vs the wall-clock recording setTimeout. Fixed by chaining
+  `ctx.resume()` inside the getUserMedia promise before scheduling.
+- Deviation graph y-axis: now +/- max(max_abs_value_in_data, 10) instead of fixed
+  +/- dt_ms/2.
+- Console noise: Plotly/React `defaultProps` and `state update on unmounted component`
+  warnings suppressed via `console.warn/error` patch at startup.
+- `<tr>` DOM nesting: all three `html.Table` callsites now wrap rows in `html.Tbody`.
 
 **Open:** (none)
 
