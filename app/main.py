@@ -1168,24 +1168,18 @@ def update_exercise_ui(exercise_name, tempo):
 
 @app.callback(
     Output("play-tones", "value"),
-    Input("play-only-tones", "value"),
-    prevent_initial_call=True,
-)
-def turn_off_play_tones_when_only(play_only_tones):
-    if play_only_tones:
-        return False
-    return no_update
-
-
-@app.callback(
     Output("play-only-tones", "value"),
+    Input("play-only-tones", "value"),
     Input("play-tones", "value"),
     prevent_initial_call=True,
 )
-def turn_off_play_only_tones_when_play_tones(play_tones):
-    if play_tones:
-        return False
-    return no_update
+def enforce_tone_toggle_exclusion(play_only_tones, play_tones):
+    triggered = ctx.triggered_id
+    if triggered == "play-only-tones" and play_only_tones:
+        return False, no_update
+    if triggered == "play-tones" and play_tones:
+        return no_update, False
+    return no_update, no_update
 
 
 @app.callback(

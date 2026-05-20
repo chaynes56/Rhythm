@@ -213,4 +213,4 @@ better performance.
 
 Thanks to Julian Douglas of [RhythmArise](https://rhythmarise.com/) for the [patterns](https://rhythmarise.com/rhythm-vocabulary/). 
 
-Please report any issues or suggestions to the [issue tracker](https://github.com/chaynes56/Rhythm/issues).
+Please report any issues or suggestions using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
