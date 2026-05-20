@@ -26,6 +26,7 @@ let metronomeDecodePromise = null;  // shared Promise to avoid concurrent duplic
 let calibrationTrackBuffer = null;
 let calibrationDecodePromise = null;
 let calibrationFirstBeatMs = 0;
+let warmupCompleted = false;
 let metronomeSourceNode = null;
 let metronomeGainNode = null;
 let pendingMetronomeTrackUrl = null;
@@ -393,18 +394,10 @@ function startMetronomePlayback(options = {}) {
         const beatsPerMeasure = metronomeState.beatsPerMeasure;
         const measuresPerPattern = metronomeState.measuresPerPattern;
         const measureDuration = secondsPerBeat * beatsPerMeasure;
-        const firstToneDelaySeconds = 0.15;
 
-        // Silence buffer spanning the full delay forces the audio device open
-        // so the pipeline is stable before the first real tone fires.
-        {
-            const primeBuf = ctx.createBuffer(1, Math.ceil(ctx.sampleRate * firstToneDelaySeconds), ctx.sampleRate);
-            const primeSrc = ctx.createBufferSource();
-            primeSrc.buffer = primeBuf;
-            primeSrc.connect(ctx.destination);
-            primeSrc.start(ctx.currentTime);
-        }
-        const startTime = ctx.currentTime + firstToneDelaySeconds;
+        // Page-load warmup (Stage 2) has already opened the audio pipeline,
+        // so no silence primer is needed here -- just scheduling headroom.
+        const startTime = ctx.currentTime + FIRST_TONE_DELAY_SECONDS;
 
         // Measure output latency so the visual indicator fires when the user hears the tone,
         // not when it is scheduled. Audio reaches the speaker at startTime + outputLatency;
@@ -492,7 +485,7 @@ function startMetronomePlayback(options = {}) {
             setMetronomePlayingState(true);
             console.log(`startMetronomePlayback: buffer ${metronomeTrackBuffer.duration.toFixed(1)}s, offset=${bufferOffset.toFixed(3)}s`);
 
-            return {firstBeatDelayMs: firstToneDelaySeconds * 1000, secondsPerBeat, outputLatencyMs: outputLatencySeconds * 1000};
+            return {firstBeatDelayMs: FIRST_TONE_DELAY_SECONDS * 1000, secondsPerBeat, outputLatencyMs: outputLatencySeconds * 1000};
     };
 
     if (ctx.state === 'suspended') {
@@ -1167,7 +1160,7 @@ try {
         },
 
         triggerPermissionDialog: function () {
-            console.log("Triggering permission dialog silently...");
+            console.log("Triggering permission dialog and starting warmup...");
             const audioConstraints = {
                 audio: {
                     echoCancellation: false,
@@ -1179,11 +1172,42 @@ try {
 
             navigator.mediaDevices.getUserMedia(audioConstraints)
                 .then(stream => {
-                    console.log("Permission granted or already present (silent trigger)");
-                    stream.getTracks().forEach(track => track.stop());
+                    console.log("Permission granted; running warmup...");
+                    const ctx = ensureAudioContext();
+                    if (ctx.state === 'suspended') {
+                        ctx.resume().catch(err => console.warn('warmup: resume failed:', err));
+                    }
+
+                    // Route mic through a muted node to keep the input pipeline active
+                    const micSource = ctx.createMediaStreamSource(stream);
+                    const muteNode = ctx.createGain();
+                    muteNode.gain.value = 0;
+                    micSource.connect(muteNode);
+                    muteNode.connect(ctx.destination);
+
+                    // Play a silent buffer to open the output pipeline
+                    const warmupSamples = Math.ceil(ctx.sampleRate * INITIAL_WARMUP_SECONDS);
+                    const warmupBuf = ctx.createBuffer(1, warmupSamples, ctx.sampleRate);
+                    const warmupSrc = ctx.createBufferSource();
+                    warmupSrc.buffer = warmupBuf;
+                    warmupSrc.connect(ctx.destination);
+                    warmupSrc.start(ctx.currentTime);
+
+                    setTimeout(() => {
+                        stream.getTracks().forEach(t => t.stop());
+                        micSource.disconnect();
+                        muteNode.disconnect();
+                        warmupCompleted = true;
+                        console.log(
+                            `Warmup complete: sampleRate=${ctx.sampleRate}Hz` +
+                            `, outputLatency=${((ctx.outputLatency || 0) * 1000).toFixed(1)}ms` +
+                            `, inputLatency=${((ctx.inputLatency || 0) * 1000).toFixed(1)}ms` +
+                            `, baseLatency=${((ctx.baseLatency || 0) * 1000).toFixed(1)}ms`
+                        );
+                    }, INITIAL_WARMUP_SECONDS * 1000);
                 })
                 .catch(err => {
-                    console.warn("Silent permission trigger failed (user may have denied):", err);
+                    console.warn("Permission trigger failed (user may have denied):", err);
                 });
         },
 
