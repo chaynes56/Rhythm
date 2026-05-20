@@ -1043,22 +1043,27 @@ try {
             }
 
             const ctx = ensureAudioContext();
-            if (ctx.state === 'suspended') {
-                ctx.resume().catch(err => console.warn('startCalibration: resume failed:', err));
-            }
 
             navigator.mediaDevices.getUserMedia({
                 audio: {echoCancellation: false, noiseSuppression: false, autoGainControl: false, sampleRate: {ideal: 48000}}
             }).then(stream => {
                 if (requestId !== pendingRecordingRequestId) {
                     stream.getTracks().forEach(t => t.stop());
-                    return;
+                    return Promise.resolve();
                 }
                 recordingStream = stream;
                 configureMediaRecorder(stream);
 
                 stopMetronomePlayback();
                 metronomeAutoStartedByRecording = true;
+
+                // Await resume so ctx.currentTime is live before scheduling audio.
+                // If ctx was auto-suspended by the browser, source.start() with a
+                // stale frozen ctx.currentTime causes the track to fire late relative
+                // to the wall-clock recording setTimeout, producing a ~100ms cal_s error.
+                return ctx.resume();
+            }).then(() => {
+                if (requestId !== pendingRecordingRequestId) return;
 
                 // Play calibration track (one-shot, no loop)
                 const gainNode = ctx.createGain();
@@ -1096,7 +1101,7 @@ try {
                 }, recordDelayMs);
 
             }).catch(err => {
-                console.error('startCalibration: getUserMedia failed:', err);
+                console.error('startCalibration failed:', err);
                 calibrationMode = false;
                 calibrationRecordingEnded = false;
                 setRecordingPhase('idle');

@@ -1862,11 +1862,15 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
             elif "xaxis.range" in relayout_data:
                 x_range = relayout_data["xaxis.range"]
 
+        all_abs = np.concatenate([np.abs(deviations),
+                                   np.abs(ipi_dev_ms) if len(ipi_dev_ms) else np.array([])])
+        y_bound = max(float(np.max(all_abs)) if len(all_abs) else 0.0, 10.0)
+
         fig.add_hline(y=0, line_width=1, line_color="gray", line_dash="dot")
         fig.update_layout(
             xaxis_title="Time (s)",
             yaxis_title="Early \u2014 milliseconds \u2014 Late",
-            yaxis_range=[-dt_ms / 2, dt_ms / 2],
+            yaxis_range=[-y_bound, y_bound],
             yaxis_fixedrange=True,
             dragmode=False,
             template="plotly_white",
