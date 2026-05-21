@@ -248,36 +248,25 @@ app.layout = dbc.Container([
         dbc.Col(html.H1("Rhythm Analysis"), className="text-center mb-4"),
     ], className="position-relative"),
 
-    # Waveform first, full width
-    dbc.Row([
-        dbc.Col([
-            dcc.Graph(
-                id="waveform-graph",
-                style={"height": "260px", "visibility": "hidden"},
-                # ~6:1+ on typical desktop widths
-                config=dict(scrollZoom=False, displayModeBar=True, doubleClick='reset',  # type: ignore[arg-type]
-                            modeBarButtonsToRemove=["pan2d", "select2d", "lasso2d",
-                                                    "autoScale2d"], displaylogo=False),
-            ),
-        ], width=12)
-    ], className="mb-0"),
-
-    # Deviation graph — aligned under waveform
-    dbc.Row([
-        dbc.Col([
-            dcc.Graph(
-                id="deviation-graph",
-                style={"height": "260px", "visibility": "hidden"},
-                config={"staticPlot": True},  # type: ignore[arg-type]
-            ),
-        ], width=12)
-    ], className="mb-4"),
-
     dbc.Row([
         dbc.Col([
             dbc.Card([
                 dbc.CardHeader("Analysis"),
                 dbc.CardBody([
+                    dcc.Graph(
+                        id="waveform-graph",
+                        style={"height": "260px", "visibility": "hidden"},
+                        config=dict(scrollZoom=False, displayModeBar=True, doubleClick='reset',  # type: ignore[arg-type]
+                                    modeBarButtonsToRemove=["pan2d", "select2d", "lasso2d",
+                                                            "autoScale2d"], displaylogo=False),
+                        className="mb-0",
+                    ),
+                    dcc.Graph(
+                        id="deviation-graph",
+                        style={"height": "260px", "visibility": "hidden"},
+                        config={"staticPlot": True},  # type: ignore[arg-type]
+                        className="mb-3",
+                    ),
                     dbc.Row([
                         dbc.Col([
                             html.Label("Training Level", className="small"),
