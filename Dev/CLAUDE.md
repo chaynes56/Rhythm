@@ -114,10 +114,12 @@ Bug fixes this session:
   warnings suppressed via `console.warn/error` patch at startup.
 - `<tr>` DOM nesting: all three `html.Table` callsites now wrap rows in `html.Tbody`.
 
-**Also this session (3b01360):**
+**Also this session (3b01360..08dbc72):**
 - `recorder.js`: `MIN_COUNT_IN_PERIOD_SEC = 3`; count-in now plays
   `ceil(MIN_COUNT_IN_PERIOD_SEC / measure_duration)` measures (min 1) instead of
   fixed 1 measure. At 120 BPM 4/4 -> 2 measures; at 200 BPM 4/4 -> 3 measures.
+- `main.py`: waveform and deviation graphs moved from standalone rows above the
+  Analysis card into the top of the Analysis CardBody.
 
 **Open:** (none)
 
