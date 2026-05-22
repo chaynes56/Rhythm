@@ -395,7 +395,7 @@ function stopMetronomePlayback() {
 }
 
 function startMetronomePlayback(options = {}) {
-    const {preserveOffset = false} = options;
+    const {preserveOffset = false, bufferOffsetOverride = null} = options;
     const ctx = ensureAudioContext();
 
     if (ctx.state === 'suspended') {
@@ -439,9 +439,9 @@ function startMetronomePlayback(options = {}) {
         const indicatorStartTime = startTime + outputLatencySeconds;
         console.log(`startMetronomePlayback: outputLatency=${(outputLatencySeconds * 1000).toFixed(1)}ms, indicatorStartTime offset by latency`);
 
-        // For recording count-in: start buffer at the last measure of the pattern
+        // For recording count-in: start buffer at the measure that is countInMeasures before beat 0
         const countInMeasure = preserveOffset ? (measuresPerPattern - 1) : 0;
-        const bufferOffset = countInMeasure * measureDuration;
+        const bufferOffset = bufferOffsetOverride !== null ? bufferOffsetOverride : countInMeasure * measureDuration;
 
         metronomeState.beatCount = 0;
         metronomeState.measureCount = 0;
@@ -779,18 +779,30 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
             metronomeAutoStartedByRecording = true;
 
             const patternMeasures = metronomeState.measuresPerPattern || 1;
-            if (patternMeasures > 1) {
-                metronomeState.beatCount = (patternMeasures - 1) * metronomeState.beatsPerMeasure;
-                metronomeState.measureCount = patternMeasures - 1;
-                preserveMetronomeStartOffset = true;
-                console.log('Pattern offset: starting at measure', metronomeState.measureCount + 1, 'of pattern');
-            } else {
-                metronomeState.beatCount = 0;
-                metronomeState.measureCount = 0;
-                preserveMetronomeStartOffset = false;
-            }
 
-            startMetronomePlayback({preserveOffset: patternMeasures > 1}).then(({
+            // Compute count-in and buffer offset before starting the metronome,
+            // so the buffer always starts at the measure that is countInMeasures
+            // before beat 0, guaranteeing the recording starts at the beginning of the pattern.
+            const _spb = 60.0 / metronomeState.tempo;
+            const _measureDuration = metronomeState.beatsPerMeasure * _spb;
+            let countInMeasures;
+            if (calibrationMode) {
+                countInMeasures = calibrationWarmupMeasures;
+            } else {
+                countInMeasures = Math.max(1, Math.ceil(MIN_COUNT_IN_PERIOD_SEC / _measureDuration));
+            }
+            // Buffer starts countInMeasures before beat 0, wrapping within the pattern.
+            const bufferStartMeasure = patternMeasures > 1
+                ? ((patternMeasures - (countInMeasures % patternMeasures)) % patternMeasures)
+                : 0;
+            const recordingBufferOffset = bufferStartMeasure * _measureDuration;
+
+            metronomeState.beatCount = bufferStartMeasure * metronomeState.beatsPerMeasure;
+            metronomeState.measureCount = bufferStartMeasure;
+            preserveMetronomeStartOffset = false;
+            console.log(`Count-in: ${countInMeasures} measures, buffer starts at measure ${bufferStartMeasure + 1} of ${patternMeasures}`);
+
+            startMetronomePlayback({bufferOffsetOverride: recordingBufferOffset}).then(({
                                                                                     firstBeatDelayMs,
                                                                                     secondsPerBeat,
                                                                                     outputLatencyMs = 0
@@ -799,10 +811,6 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
                     return;
                 }
 
-                const measureDurationSec = metronomeState.beatsPerMeasure * secondsPerBeat;
-                const countInMeasures = calibrationMode
-                    ? calibrationWarmupMeasures
-                    : Math.max(1, Math.ceil(MIN_COUNT_IN_PERIOD_SEC / measureDurationSec));
                 // outputLatencyMs intentionally excluded: cold-start AudioContext measures
                 // near-zero latency while warm recordings measure the true ~50ms value,
                 // causing a systematic offset in cal_s. By anchoring both calibration and

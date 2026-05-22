@@ -453,16 +453,19 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
     pattern_len = beats_per_measure * mpp
     pattern_x, measure_x, beat_x = [], [], []
     for i, t in enumerate(mt):
-        if i % pattern_len == 0:
+        pos = i % pattern_len
+        if pos == 0:
             pattern_x.append(t)
-        elif i % beats_per_measure == 0:
+        elif pos % beats_per_measure == 0:
             measure_x.append(t)
         else:
             beat_x.append(t)
+    pattern_name = 'Pattern' if mpp > 1 else 'Measure'
+    pattern_color = 'red' if mpp > 1 else 'orange'
     fig.add_trace(go.Scatter(
         x=pattern_x, y=[y_max * 1.1] * len(pattern_x),
-        mode='markers', name='Pattern',
-        marker=dict(color='red', symbol='diamond'),
+        mode='markers', name=pattern_name,
+        marker=dict(color=pattern_color, symbol='diamond'),
     ))
     fig.add_trace(go.Scatter(
         x=measure_x, y=[y_max * 1.1] * len(measure_x),

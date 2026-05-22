@@ -137,6 +137,7 @@ custom-exercises: |-
 settings = yaml.safe_load(DEFAULT_SETTINGS_YAML)
 
 
+
 def build_beat_indicator_boxes(beats_per_measure: int, measures_per_pattern: int = 1) -> \
         list[html.Div]:
     beats = max(1, int(beats_per_measure or 1))
@@ -278,9 +279,7 @@ app.layout = dbc.Container([
                                 clearable=False,
                                 style={"width": "140px"},
                             ),
-                        ], width="auto"),
-                        dbc.Col([
-                            html.Label("Subdivisions / Beat", className="small"),
+                            html.Label("Subdivisions / Beat", className="small mt-2"),
                             dcc.Dropdown(
                                 id="subdivisions-per-beat",
                                 options=[{"label": str(i), "value": i} for i in
@@ -1315,7 +1314,7 @@ clientside_callback(
 )
 def update_record_button(recording_phase):
     if recording_phase == "delay":
-        return "Measure Delay", "warning"
+        return "Counting in...", "warning"
     if recording_phase == "recording":
         return "Stop Recording", "secondary"
     return "Start Recording", "danger"
