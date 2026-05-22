@@ -12,7 +12,7 @@ import os
 import plotly.graph_objects as go
 import soundfile as sf
 import tempfile
-import threading
+from concurrent.futures import ThreadPoolExecutor
 import warnings
 from scipy.signal import find_peaks, resample as scipy_resample, welch as scipy_welch
 
@@ -77,88 +77,49 @@ METRONOME_MAX_LOOP_SECONDS = 300.0
 # ---------------------------------------------------------------------------
 
 def load_audio_from_bytes(audio_bytes, max_duration=600, timeout_seconds=120):
-    """
-    Load audio from bytes with timeout and size limits.
+    """Load audio from bytes with timeout and size limits. Returns (y, sr) or None."""
+    def _detect_suffix(data):
+        if data.startswith(b'RIFF') and b'WAVE' in data[:12]:
+            print("Detected WAV format from magic bytes")
+            return '.wav'
+        if data.startswith(b'\xff\xfb') or data.startswith(b'\xff\xfa'):
+            print("Detected MP3 format from magic bytes")
+            return '.mp3'
+        print(f"Unknown format, magic bytes: {data[:4].hex()}")
+        return '.webm'
 
-    Args:
-        audio_bytes: Raw audio bytes from recording
-        max_duration: Maximum allowed audio duration in seconds (default 10 min)
-        timeout_seconds: Timeout for librosa.load (default 120 sec)
-
-    Returns:
-        tuple: (y, sr) audio array and sample rate, or None if fails
-    """
-    result: dict = {"y": None, "sr": None, "error": ""}
-
-    def load_with_librosa():
+    def _load():
+        suffix = _detect_suffix(audio_bytes)
+        print(f"load_audio_from_bytes: Loading (size: {len(audio_bytes)} bytes,"
+              f" format: {suffix}, timeout: {timeout_seconds}s)...")
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+            tmp.write(audio_bytes)
+            tmp_path = tmp.name
         try:
-            suffix = '.webm'  # default
-            if audio_bytes.startswith(b'RIFF') and b'WAVE' in audio_bytes[:12]:
-                suffix = '.wav'
-                print("Detected WAV format from magic bytes")
-            elif audio_bytes.startswith(b'\xff\xfb') or audio_bytes.startswith(b'\xff\xfa'):
-                suffix = '.mp3'
-                print("Detected MP3 format from magic bytes")
-            else:
-                print(f"Unknown format, magic bytes: {audio_bytes[:4].hex()}")
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                tmp.write(audio_bytes)
-                tmp_path = tmp.name
             try:
-                print(
-                    f"load_audio_from_bytes: Loading with librosa (audio size: {len(audio_bytes)} bytes,"
-                    f" format: {suffix}, timeout: {timeout_seconds}s)...")
-                try:
-                    y, sr = librosa.load(tmp_path, sr=None)
-                except Exception as e1:
-                    print(f"load_audio_from_bytes: First attempt failed: {type(e1).__name__}: {e1}")
-                    try:
-                        y, sr = librosa.load(tmp_path, sr=None, mono=True)
-                    except Exception as e2:
-                        print(f"load_audio_from_bytes: Second attempt failed: {type(e2).__name__}: {e2}")
-                        result["error"] = f"Could not load audio: {type(e2).__name__}: {e2}"
-                        return
+                y, sr = librosa.load(tmp_path, sr=None)
+            except Exception as e1:
+                print(f"load_audio_from_bytes: First attempt failed: {type(e1).__name__}: {e1}")
+                y, sr = librosa.load(tmp_path, sr=None, mono=True)
+            duration = len(y) / sr
+            if duration > max_duration:
+                raise ValueError(f"Recording too long ({duration:.1f}s > {max_duration}s max)")
+            print(f"load_audio_from_bytes: Loaded successfully, duration={duration:.1f}s, sr={sr}")
+            return y, sr
+        finally:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
-                if y is None or sr is None:
-                    result["error"] = "Audio data is corrupted or in unsupported format"
-                    print(f"load_audio_from_bytes: {result['error']}")
-                    return
-
-                duration = len(y) / sr
-                if duration > max_duration:
-                    result["error"] = f"Recording too long ({duration:.1f}s > {max_duration}s max)"
-                    print(f"load_audio_from_bytes: {result['error']}")
-                else:
-                    result["y"] = y
-                    result["sr"] = sr
-                    print(f"load_audio_from_bytes: Loaded successfully, duration={duration:.1f}s, sr={sr}")
-            finally:
-                if os.path.exists(tmp_path):
-                    os.unlink(tmp_path)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(_load)
+        try:
+            return future.result(timeout=timeout_seconds)
+        except TimeoutError:
+            print(f"load_audio_from_bytes: TIMEOUT after {timeout_seconds} seconds")
+            return None
         except Exception as e:
-            result["error"] = str(e)
             print(f"load_audio_from_bytes: Error: {e}")
-
-    thread = threading.Thread(target=load_with_librosa)
-    thread.daemon = True
-    thread.start()
-    thread.join(timeout=timeout_seconds)
-
-    if thread.is_alive():
-        result["error"] = f"Audio loading timeout (>{timeout_seconds}s)"
-        print(f"load_audio_from_bytes: TIMEOUT after {timeout_seconds} seconds")
-        return None
-
-    if result["error"]:
-        print(f"load_audio_from_bytes: Final error: {result['error']}")
-        return None
-
-    if result["y"] is None or result["sr"] is None:
-        print(f"load_audio_from_bytes: Result is missing y or sr")
-        return None
-
-    return result["y"], result["sr"]
+            return None
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +409,11 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
             line=dict(color='magenta', width=1),
             opacity=0.7,
         ))
+        fig.add_hline(
+            y=BEAT_MIN_AMPLITUDE_FRACTION * y_max,
+            line=dict(color='magenta', width=1, dash='dot'),
+            opacity=0.5,
+        )
 
     mpp = max(1, int(measures_per_pattern or 1))
     pattern_len = beats_per_measure * mpp
@@ -479,14 +445,9 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
     ))
 
     if subdivisions_per_beat > 1 and len(mt) > 1:
-        sub_times = []
-        for i in range(len(mt) - 1):
-            beat_dur = mt[i + 1] - mt[i]
-            for s in range(1, subdivisions_per_beat):
-                sub_times.append(mt[i] + s * beat_dur / subdivisions_per_beat)
-        last_beat_dur = mt[-1] - mt[-2]
-        for s in range(1, subdivisions_per_beat):
-            sub_times.append(mt[-1] + s * last_beat_dur / subdivisions_per_beat)
+        durs = np.append(np.diff(mt), mt[-1] - mt[-2])
+        fracs = np.arange(1, subdivisions_per_beat) / subdivisions_per_beat
+        sub_times = (mt[:, None] + durs[:, None] * fracs).ravel().tolist()
         fig.add_trace(go.Scatter(
             x=sub_times,
             y=[y_max * 1.05] * len(sub_times),
@@ -558,6 +519,15 @@ def compute_calibration_track() -> dict:
     return {"data_url": data_url, "first_beat_ms": CALIBRATION_WARMUP_MS}
 
 
+def _metro_tone(b: int, m: int, play_hi: bool, play_only_low: bool) -> tuple[str, bool]:
+    """Return (tone_type, should_play) for beat b of measure m in a pattern."""
+    if b == 0 and m == 0:
+        return 'low', True
+    if b == 0:
+        return 'mid', not play_only_low
+    return 'high', play_hi and not play_only_low
+
+
 def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi,
                              play_only_low, exercise_patterns=None, play_subdivisions=False,
                              play_tones=False, char_tone_map=None, play_only_tones=False):
@@ -586,13 +556,7 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
                 for m in range(mpp_p):
                     for b in range(bpm_p):
                         beat_time = pat_offset + (m * bpm_p + b) * seconds_per_beat
-                        if b == 0 and m == 0:
-                            metro_tone, metro_play = 'low', True
-                        elif b == 0:
-                            metro_tone, metro_play = 'mid', not bool(play_only_low)
-                        else:
-                            metro_tone = 'high'
-                            metro_play = bool(play_hi) and not bool(play_only_low)
+                        metro_tone, metro_play = _metro_tone(b, m, play_hi, play_only_low)
                         for s in range(spb_p):
                             t_sub = beat_time + s * seconds_per_sub_p
                             char = pat['measures'][m][b * spb_p + s]
@@ -624,13 +588,7 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
         for p in range(n_patterns):
             for m in range(measures_per_pattern):
                 for b in range(beats_per_measure):
-                    if b == 0 and m == 0:
-                        tone_type, should_play = 'low', True
-                    elif b == 0:
-                        tone_type, should_play = 'mid', not bool(play_only_low)
-                    else:
-                        tone_type = 'high'
-                        should_play = bool(play_hi) and not bool(play_only_low)
+                    tone_type, should_play = _metro_tone(b, m, play_hi, play_only_low)
                     if should_play:
                         beat_time = ((p * measures_per_pattern + m) * beats_per_measure + b) * seconds_per_beat
                         start = round(beat_time * sr)

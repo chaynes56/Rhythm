@@ -93,7 +93,8 @@ in the
 waveform selects a portion of time for display, and statistics are recomputed for that
 segment of time. To return to the full recording, double-click the display or tap the
 home button in the zoom toolbar above the legend to the right of the waveform.
-
+Along with the waveform a pink onset envelope is displayed. Beat detection occurs when 
+the onset envelope exceeds the threshold indicated by the horizontal pink line. 
 Deviations from metronome timing of each detected pulse are indicated in the bar graph
 below the waveform. Note especially trends that indicate timing drift. A sudden flip
 from a large positive to a large negative values, or vice versa, is characteristic of a
