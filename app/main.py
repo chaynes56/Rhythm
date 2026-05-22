@@ -399,10 +399,30 @@ app.layout = dbc.Container([
                                     style={"width": "175px"},
                                 ),
                             ]),
+                            html.Div([
+                                html.Label("Exercise Voicing", className="small mt-2"),
+                                dcc.Dropdown(
+                                    id="exercise-voicing",
+                                    options=[{"label": "Synthesized", "value": "synthesized"}],
+                                    value="synthesized",
+                                    clearable=False,
+                                    style={"width": "175px"},
+                                ),
+                            ], id="exercise-voicing-col", style={"display": "none"}),
+                            html.Div([
+                                html.Label("Metronome Voicing", className="small mt-2"),
+                                dcc.Dropdown(
+                                    id="metronome-voicing",
+                                    options=[{"label": "Synthesized", "value": "synthesized"}],
+                                    value="synthesized",
+                                    clearable=False,
+                                    style={"width": "175px"},
+                                ),
+                            ]),
                             html.Div(
                                 dbc.Button("Start Metronome", id="metronome-btn",
                                            color="primary"),
-                                className="d-grid",
+                                className="d-grid mt-3",
                             ),
                         ], width="auto",
                            className="align-self-stretch d-flex flex-column justify-content-between"),
@@ -1151,6 +1171,7 @@ def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern, exercis
     Output("play-tones-col", "style"),
     Output("play-only-tones-col", "style"),
     Output("play-subdivisions-col", "style"),
+    Output("exercise-voicing-col", "style"),
     Output("exercise-length-alert", "children"),
     Output("beats-per-measure", "value", allow_duplicate=True),
     Output("measures-per-pattern", "value", allow_duplicate=True),
@@ -1162,11 +1183,11 @@ def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern, exercis
 def update_exercise_ui(exercise_name, tempo):
     hidden = {"display": "none"}
     if not exercise_name:
-        return {"display": "block"}, hidden, hidden, hidden, None, no_update, no_update, no_update
+        return {"display": "block"}, hidden, hidden, hidden, hidden, None, no_update, no_update, no_update
 
     all_ex = get_all_exercises()
     if exercise_name not in all_ex:
-        return {"display": "block"}, hidden, hidden, hidden, None, no_update, no_update, no_update
+        return {"display": "block"}, hidden, hidden, hidden, hidden, None, no_update, no_update, no_update
     ex = all_ex[exercise_name]
 
     alert = None
@@ -1181,9 +1202,9 @@ def update_exercise_ui(exercise_name, tempo):
     show = {"display": "block"}
     if ctx.triggered_id == "exercise-select":
         pat = ex["patterns"][0]
-        return (hidden, show, show, show, alert,
+        return (hidden, show, show, show, show, alert,
                 pat["beats_per_measure"], len(pat["measures"]), pat["subdivisions_per_beat"])
-    return hidden, show, show, show, alert, no_update, no_update, no_update
+    return hidden, show, show, show, show, alert, no_update, no_update, no_update
 
 
 @app.callback(

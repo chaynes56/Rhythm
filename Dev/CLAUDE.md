@@ -66,62 +66,17 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-20
+## Last session -- 2026-05-22
 
-**Calibration/warmup redesign -- Stages 1-3 (49d1505..e6e6a13):**
+**Voicing dropdowns (main.py):**
 
-Stage 1 -- dedicated calibration track + button UX:
-- `audio_utils.py`: calibration constants block at top; `compute_calibration_track()`
-  returns `{"data_url": ..., "first_beat_ms": CALIBRATION_WARMUP_MS}` -- volume baked
-  in, warmup offset passed as metadata so JS needs no calibration constants.
-  `CALIBRATION_VOLUME` removed (unused). `CALIBRATION_BEATS` reduced 20 -> 10.
-- `recorder.js`: `loadCalibrationTrack(payload)` decodes track + stores
-  `calibrationFirstBeatMs`; `startCalibration` plays track directly (no metronome
-  path), computes `recordDelayMs` from `calibrationFirstBeatMs`, `calDurationMs` from
-  `buffer.duration`. Calibrate button shows "Calibrating..." disabled while running.
-- `main.py`: `calibration-track-store` precomputed at startup; editable
-  `calibration-value` textbox + `calibration-confidence` span added to right of button;
-  `process_calibration` uses `CALIBRATION_BPM`, outputs `offset_ms` + confidence str;
-  `calibration_value_edited` syncs textbox edits to `calibration-offset-store`.
-- Bug fix: two mutual-exclusion callbacks (play-tones <-> play-only-tones) merged into
-  one to eliminate Dash dependency cycle.
+- Added `metronome-voicing` dropdown just above Start Metronome button (with `mt-3`
+  spacing). Added `exercise-voicing` dropdown between Exercise selector and Metronome
+  Voicing. Both default to "Synthesized" (only option for now).
+- Exercise Voicing is hidden by default (`display:none`); shown/hidden by
+  `update_exercise_ui` callback alongside the other exercise-only controls.
 
-Stage 2 -- page-load warmup:
-- `recorder.js`: `triggerPermissionDialog` now holds mic stream through muted gain node
-  + plays `INITIAL_WARMUP_SECONDS=4` silent output buffer, then releases and logs
-  `sampleRate/outputLatency/inputLatency/baseLatency`. Replaces per-start silence primer
-  in `startScheduler` (local `firstToneDelaySeconds` duplicate removed; uses global
-  `FIRST_TONE_DELAY_SECONDS` for scheduling headroom only).
-
-Stage 3 -- persistent platform calibration:
-- `recorder.js`: after warmup, builds `platformKey` (userAgent|sampleRate|outMs|inMs)
-  and sends platform info JSON to `warmup-info-store` via `setDashInputValue`.
-- `main.py`: `dcc.Store(id='user-context', storage_type='local')` + hidden text input
-  `warmup-info-store`; clientside callback on warmup fires: if `user-context` has
-  matching `platform_key` -> load calibration silently; else -> `startCalibration()`.
-  Replaces `auto-calibrate-interval` (which fired at 3s, before warmup). After cal,
-  `process_calibration` saves `{platform_key, offset, confidence, timestamp}` to
-  `user-context`.
-
-Bug fixes this session:
-- Manual calibration ~100ms error: `ctx.resume()` was not awaited before
-  `source.start()`; if Chrome auto-suspended the context, frozen `ctx.currentTime`
-  caused beats to fire late vs the wall-clock recording setTimeout. Fixed by chaining
-  `ctx.resume()` inside the getUserMedia promise before scheduling.
-- Deviation graph y-axis: now +/- max(max_abs_value_in_data, 10) instead of fixed
-  +/- dt_ms/2.
-- Console noise: Plotly/React `defaultProps` and `state update on unmounted component`
-  warnings suppressed via `console.warn/error` patch at startup.
-- `<tr>` DOM nesting: all three `html.Table` callsites now wrap rows in `html.Tbody`.
-
-**Also this session (3b01360..08dbc72):**
-- `recorder.js`: `MIN_COUNT_IN_PERIOD_SEC = 3`; count-in now plays
-  `ceil(MIN_COUNT_IN_PERIOD_SEC / measure_duration)` measures (min 1) instead of
-  fixed 1 measure. At 120 BPM 4/4 -> 2 measures; at 200 BPM 4/4 -> 3 measures.
-- `main.py`: waveform and deviation graphs moved from standalone rows above the
-  Analysis card into the top of the Analysis CardBody.
-
-**Open:** (none)
+**Open:** voicing options and associated actions not yet wired up.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 

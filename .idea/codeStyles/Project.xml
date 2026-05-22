@@ -1,0 +1,10 @@
+<component name="ProjectCodeStyleConfiguration">
+  <code_scheme name="Project" version="173">
+    <Markdown>
+      <option name="KEEP_LINE_BREAKS_INSIDE_TEXT_BLOCKS" value="false" />
+    </Markdown>
+    <codeStyleSettings language="Markdown">
+      <option name="RIGHT_MARGIN" value="88" />
+    </codeStyleSettings>
+  </code_scheme>
+</component>
