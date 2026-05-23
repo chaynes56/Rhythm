@@ -68,15 +68,24 @@ The app measures output latency to synchronise recording start with metronome be
 
 ## Last session -- 2026-05-22
 
-**Voicing dropdowns (main.py):**
+**audio_utils.py refactor:**
 
-- Added `metronome-voicing` dropdown just above Start Metronome button (with `mt-3`
-  spacing). Added `exercise-voicing` dropdown between Exercise selector and Metronome
-  Voicing. Both default to "Synthesized" (only option for now).
-- Exercise Voicing is hidden by default (`display:none`); shown/hidden by
-  `update_exercise_ui` callback alongside the other exercise-only controls.
+- Replaced `threading.Thread` + shared-dict pattern in `load_audio_from_bytes`
+  with `concurrent.futures.ThreadPoolExecutor`.
+- Extracted `_metro_tone(b, m, play_hi, play_only_low)` helper; removed duplicated
+  tone-selection blocks and redundant `bool()` casts in `compute_metronome_track`.
+- Simplified subdivision time generation with numpy broadcasting.
+- Added dotted magenta `add_hline` at `BEAT_MIN_AMPLITUDE_FRACTION * y_max` in
+  `build_waveform_figure` (shown alongside onset envelope).
+- Updated README with onset envelope / threshold description.
 
-**Open:** voicing options and associated actions not yet wired up.
+**Tooling:**
+
+- Installed `uv` via brew (replaced standalone `~/.local/bin/uv`); `uvx` now available.
+- Added `bump-my-version` config to `pyproject.toml` (`commit=true`, `tag=true`,
+  tag pattern `v{new_version}`). Dry-run verified. Usage: `uvx bump-my-version bump patch/minor/major`.
+
+**Open:** voicing options and associated actions not yet wired up (from prior session).
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 
