@@ -246,7 +246,7 @@ app.layout = dbc.Container([
         style={"position": "absolute", "top": "10px", "right": "20px", "zIndex": "1000"}
     ),
     dbc.Row([
-        dbc.Col(html.H1("Rhythm Analysis"), className="text-center mb-4"),
+        dbc.Col(html.H1("Rhythm Analyzer"), className="text-center mb-4"),
     ], className="position-relative"),
 
     dbc.Row([

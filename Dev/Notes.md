@@ -1,7 +1,14 @@
 # Development notes
 
+## Versioning
+
+- uvx bump-my-version [documentation](https://pypi.org/project/bump-my-version/)
+  -  It correctly finds and updates both the [project] version and [tool.bumpversion] 
+     current_version, stages the file, commits, and tags.
+
+
 # TODO
--
+- 
 # Pattern display
 ```aiignore
 import plotly.graph_objects as go
