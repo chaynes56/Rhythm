@@ -4,9 +4,6 @@ This app provides solo percussion analysis to improve the precision of performan
 is running and available for public use via the Plotly/Dash cloud server
 at [this page](https://2e7b9ba9-3380-4afa-b92e-f1ff3eee1007.plotly.app/#).
 
-See `docs/` for documentation of the app's features and capabilities, and 
-`Dev/Notes.md` for development notes. 
-
 Most common modern browsers may be used, though performance in Safari may be
 unsatisfactory. Mobile devices are much less capable of accurate timing than most laptop
 and desktop computers, but some are usable. The app performance section below provides
