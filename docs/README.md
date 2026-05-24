@@ -17,7 +17,9 @@ Then it is time to explore this documentation with some care to understand the a
 capabilities and limitations.
 
 You may return to this page at any time via the
-[Help](https://github.com/chaynes56/Rhythm) link at upper right of the app page.
+[Help](https://chaynes56.github.io/Rhythm/#/) link at upper right of the app page.
+
+This is an open source project with [Github repo](https://github.com/chaynes56/Rhythm).
 
 ## Practical considerations
 
@@ -244,10 +246,8 @@ The technically proficient may download the app from its
 computer) instead of relying on the `plotly.app` server. This might result in better
 performance.
 
-## Credits and comments
+## Credits, issues and suggestions
 
-Thanks to Julian Douglas of [RhythmArise](https://rhythmarise.com/) for
-the [patterns](https://rhythmarise.com/rhythm-vocabulary/).
+Thanks to Julian Douglas of [RhythmArise](https://rhythmarise.com/) for consultation and the [patterns](https://rhythmarise.com/rhythm-vocabulary/).
 
-Please report any issues or suggestions
-using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
+Please report any issues or suggestions using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).

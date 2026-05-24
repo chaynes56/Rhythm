@@ -1,6 +1,8 @@
 #!python3
 # Copyright 2026 Christopher T. Haynes. See the project LICENSE file.
 
+VERSION = "0.1.1"
+
 import base64
 import io
 import json

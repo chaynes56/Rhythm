@@ -1,3 +1,5 @@
+const VERSION = "0.1.1";
+
 if (!window.dash_clientside) {
     window.dash_clientside = {};
 }
