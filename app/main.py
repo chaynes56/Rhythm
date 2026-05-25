@@ -2366,4 +2366,5 @@ def load_settings(data):
 
 
 if __name__ == '__main__':
+    print(f"Rhythm Analyzer version {VERSION} starting up...")
     app.run(debug=True, port=8006)

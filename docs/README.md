@@ -1,7 +1,7 @@
 # Rhythm Analyzer
 
-This app provides solo percussion analysis to improve the precision of performance. It
-is running and available for public use via the Plotly/Dash cloud server
+This app provides solo percussion analysis to improve the precision of performance. 
+Version 0.1.1 is running and available for public use via the Plotly/Dash cloud server
 at [this page](https://2e7b9ba9-3380-4afa-b92e-f1ff3eee1007.plotly.app/#).
 
 Most common modern browsers may be used, though performance in Safari may be
@@ -42,9 +42,8 @@ the `plotly.app` page, click Allow or Allow always or forever.
 Recording length is limited to 10 minutes, at which point it stops automatically with an
 alerting tone.
 
-Starting a recording starts the metronome as well, with a few seconds of metronome 
-beats before the recording begins. This is similar to a conductor counting in the 
-orchestra.
+Starting a recording starts the metronome as well, with a few seconds of metronome beats
+before the recording begins. This is similar to a conductor counting in the orchestra.
 
 ## Analysis interpretation
 
@@ -63,8 +62,8 @@ level, while deviations less than 15 ms are green at the beginner level and the 
 threshold for intermediate is 10 ms. Deviations up to twice the green cutoff are orange
 and over that are red.
 
-Since analysis is with respect to subdivision timing, and the metronome does not 
-play subdivisions, the `Subdivisions per beat` selection is in the analysis section. 
+Since analysis is with respect to subdivision timing, and the metronome does not play
+subdivisions, the `Subdivisions per beat` selection is in the analysis section.
 
 The app's analysis section provides a variety of perspectives on timing deviations,
 which are detailed later in this section. However, it is first important to be aware of
@@ -87,22 +86,20 @@ sources of timing errors.
    subjective perception plays a role.
 
 The waveform at the top of the analysis section can be useful for investigating problems
-such as those mentioned in point 3 above. Little diamond and tick marks
-above indicate metronome beat and subdivision timing, respectively, with beat color 
-significance indicated by the diamond color in accordance with the key at right. 
-The green diamonds below indicate detected pulse times. A mouse or touch drag 
-in the
-waveform selects a portion of time for display, and statistics are recomputed for that
-segment of time. To return to the full recording, double-click the display or tap the
-home button in the zoom toolbar above the legend to the right of the waveform.
-Along with the waveform a pink onset envelope is displayed. Beat detection occurs when 
-the onset envelope exceeds the threshold indicated by the horizontal pink line. 
-Deviations from metronome timing of each detected pulse are indicated in the bar graph
-below the waveform. Note especially trends that indicate timing drift. A sudden flip
-from a large positive to a large negative values, or vice versa, is characteristic of a
-drift from one subdivision to another. The bar graph also includes blue dots that
-indicate the timing relative to the previous pulse, with the x-axis representing the
-perfect subdivision interval.
+such as those mentioned in point 3 above. Little diamond and tick marks above indicate
+metronome beat and subdivision timing, respectively, with beat color significance
+indicated by the diamond color in accordance with the key at right. The green diamonds
+below indicate detected pulse times. A mouse or touch drag in the waveform selects a
+portion of time for display, and statistics are recomputed for that segment of time. To
+return to the full recording, double-click the display or tap the home button in the
+zoom toolbar above the legend to the right of the waveform. Along with the waveform a
+pink onset envelope is displayed. Beat detection occurs when the onset envelope exceeds
+the threshold indicated by the horizontal pink line. Deviations from metronome timing of
+each detected pulse are indicated in the bar graph below the waveform. Note especially
+trends that indicate timing drift. A sudden flip from a large positive to a large
+negative values, or vice versa, is characteristic of a drift from one subdivision to
+another. The bar graph also includes blue dots that indicate the timing relative to the
+previous pulse, with the x-axis representing the perfect subdivision interval.
 
 The first statistics presented in the text area are the number of pulses and beats in
 the selected interval. When recording just the metronome, these should be the same. When
@@ -246,8 +243,17 @@ The technically proficient may download the app from its
 computer) instead of relying on the `plotly.app` server. This might result in better
 performance.
 
-## Credits, issues and suggestions
+## Issues, suggestions and collaboration
 
-Thanks to Julian Douglas of [RhythmArise](https://rhythmarise.com/) for consultation and the [patterns](https://rhythmarise.com/rhythm-vocabulary/).
+Please report performance issues (bugs) and improvement suggestions using 
+[this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
 
-Please report any issues or suggestions using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
+This form may also be used to inquire about making contributions to this open 
+source project. 
+
+## Credits
+
+Thanks to Julian Douglas of [RhythmArise](https://rhythmarise.com/) for consultation,
+inspiration, voicing tones, and the 
+[patterns](https://rhythmarise.com/rhythm-vocabulary/).
+

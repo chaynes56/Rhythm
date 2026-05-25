@@ -32,7 +32,8 @@ current_version = "0.1.1"
 commit = true
 tag = true
 tag_name = "v{new_version}"
-message = "Bump version: {current_version} -> {new_version}"
+tag_message = "{new_version} — {now:%Y-%m-%d}"
+commit_message = "Bump version: {current_version} -> {new_version}"
 
 [[tool.bumpversion.files]]
 filename = "pyproject.toml"
@@ -48,3 +49,8 @@ replace = 'VERSION = "{new_version}"'
 filename = "app/recorder.js"
 search = 'VERSION = "{current_version}"'
 replace = 'VERSION = "{new_version}"'
+
+[[tool.bumpversion.files]]
+filename = "docs/README.md"
+search = 'Version {current_version}'
+replace = 'Version {new_version}'

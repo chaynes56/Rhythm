@@ -5,16 +5,43 @@ using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359Zcoi
 
 ## Versioning
 
-- `bump-my-version bump [--dry-run -verbose] [major | minor | patch]`
-    - [documentation](https://pypi.org/project/bump-my-version/)
-    - It correctly finds and updates both the [project] version and [tool.bumpversion]
-      current_version, stages the file, commits, and tags.
+1. `bump-my-version bump [--dry-run -verbose] [major | minor | patch]`
+   - [documentation](https://pypi.org/project/bump-my-version/)
+   - It correctly finds and updates both the [project] version and [tool.bumpversion]
+     current_version, stages the file, commits, and tags.
+2. `git push`
+   - ran `git config --global push.followTags true`, so don't need `--follow-tags` 
+     in push 
+3. Optionally: GitHub Releases → Draft a new release → choose your tag → 
+   write a short 
+   description → Publish release
+
+## Publishing
+
+All version changes are tagged and represent releases in the sense that they are to 
+be *published* (whether or not a corresponding GitHub Release note is created). 
+
+To publish:
+1. Login to Plotly Cloud
+2. In the `Rhythm` app line select Settings (gear widget)
+3. Actions > Update
+4. Click in Drag and Drop box
+5. In the pop-up file picker, select and upload all the `app/` folder contents
+6. Click Update
+7. In a few seconds at the top of the revision history list a new version will 
+   appear with Building state, which in several seconds more turns into Running and 
+   the previous version state turns to Stopped.
+
+Version 0.1.x versions may introduce new features. After version 0.2.0 significant 
+new features are to have new minor versions with corresponding release notes. Should
+start CHANGELOG.md then, if not earlier.
 
 ## Documentation
 
 All documentation is in `docs/`, published via `Github Pages` using `docsify`.
 
-- `npm i docsify-cli -g; npm install -g npm@11.15.0`
-- [More pages](https://docsify.js.org/#/more-pages) also for sidebars
-- `docsify serve docs` for preview on `http://localhost:3000`
+- Installation: `npm i docsify-cli -g; npm install -g npm@11.15.0`
+- Usage
+  - [More pages](https://docsify.js.org/#/more-pages) also for sidebars
+- Run local preview server: `docsify serve docs`
 - [Published view](https://chaynes56.github.io/Rhythm/#/)

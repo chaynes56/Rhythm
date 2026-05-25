@@ -1321,4 +1321,4 @@ try {
     window.dash_clientside.recorder = window.recorderControls;
 }
 
-console.log("recorder.js loaded successfully. recorderControls is ready.");
+console.log(`recorder.js version ${VERSION} loaded successfully. recorderControls is ready.`);
