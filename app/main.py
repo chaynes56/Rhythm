@@ -1736,7 +1736,7 @@ def update_interval_histogram(audio_json, relayout_data):
             marker=dict(color="steelblue"),
         ))
         fig.update_layout(
-            xaxis_title="Interval (ms)",
+            xaxis_title="Intervals between pulses (ms)",
             yaxis_title="Count",
             template="plotly_white",
             margin=dict(l=50, r=20, t=20, b=40),

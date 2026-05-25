@@ -5,43 +5,43 @@ using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359Zcoi
 
 ## Versioning
 
-1. `bump-my-version bump [--dry-run -verbose] [major | minor | patch]`
-   - [documentation](https://pypi.org/project/bump-my-version/)
-   - It correctly finds and updates both the [project] version and [tool.bumpversion]
-     current_version, stages the file, commits, and tags.
-2. `git push`
-   - ran `git config --global push.followTags true`, so don't need `--follow-tags` 
-     in push 
-3. Optionally: GitHub Releases → Draft a new release → choose your tag → 
-   write a short 
-   description → Publish release
+1. `./dev/bump-version [patch|minor|major]` bumps version number and pushes
+    - `bump-my-version bump [--dry-run -verbose] [major | minor | patch]`
+        - [documentation](https://pypi.org/project/bump-my-version/)
+        - It correctly finds and updates both the [project] version
+          and [tool.bumpversion] current_version, stages the file, commits, and tags.
+    - `git push`
+        - Rgit config --global push.followTags true`, so don't need `--follow-tags`
+          in push
+2. Optionally, in GitHub: Releases → Draft a new release → choose your tag → write a
+   short description → Publish release
+
+Just using `patch` in initial development: Version 0.1.x versions may introduce new
+features. After version 0.2.0 significant new features are to have new minor versions
+with corresponding release notes. Should start CHANGELOG.md then, if not earlier.
 
 ## Publishing
 
-All version changes are tagged and represent releases in the sense that they are to 
-be *published* (whether or not a corresponding GitHub Release note is created). 
+All version changes are tagged and represent releases in the sense that they are to be
+*published* (whether or not a corresponding GitHub Release note is created).
 
 To publish:
+
 1. Login to Plotly Cloud
 2. In the `Rhythm` app line select Settings (gear widget)
 3. Actions > Update
 4. Click in Drag and Drop box
 5. In the pop-up file picker, select and upload all the `app/` folder contents
 6. Click Update
-7. In a few seconds at the top of the revision history list a new version will 
-   appear with Building state, which in several seconds more turns into Running and 
-   the previous version state turns to Stopped.
-
-Version 0.1.x versions may introduce new features. After version 0.2.0 significant 
-new features are to have new minor versions with corresponding release notes. Should
-start CHANGELOG.md then, if not earlier.
+7. In a few seconds at the top of the revision history list a new version will appear
+   with Building state, which in several seconds more turns into Running and the
+   previous version state turns to Stopped.
 
 ## Documentation
 
 All documentation is in `docs/`, published via `Github Pages` using `docsify`.
 
 - Installation: `npm i docsify-cli -g; npm install -g npm@11.15.0`
-- Usage
-  - [More pages](https://docsify.js.org/#/more-pages) also for sidebars
 - Run local preview server: `docsify serve docs`
 - [Published view](https://chaynes56.github.io/Rhythm/#/)
+- [More pages](https://docsify.js.org/#/more-pages) also for sidebars

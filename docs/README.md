@@ -206,7 +206,7 @@ exercises, which appear at the start of the dropdown exercise list. Here is an e
 custom-exercises: |-
   My groove
   1e&a2e&a3e&a4e&a
-  B.x..Bh...l....h
+  B.s..Bh...l....h
   ----
   3/4 to 4/4
   1&a2&a3&a
@@ -233,8 +233,8 @@ of a name line followed by one or more patterns.
 - A *pattern line* is a sequence of voicing character that line up with the
   corresponding subdivision's letters or beat integer. Multiple pattern lines in a
   measure line group share the same subdivision line.
-- A *voicing character* is one of those used in the example and indicates the intonation
-  of the subdivision, or a period (`.`) to indicate a ghost note (rest).
+- A *voicing character* is one of those in the following key, which also indicates the
+  common name: `x: any, B: base, l: low, h: high, s: slap, t: tone, F: flam, .: ghost note`.
 
 ## Local server
 

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Usage: ./dev/bump-version [patch|minor|major]
+
+bump-my-version bump $1
+git push

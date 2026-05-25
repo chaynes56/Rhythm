@@ -7,7 +7,8 @@
 
 from pprint import pprint
 
-voicing_code = {  # voicing characters are the keys
+# NB: Update the documentation if these characters or their names change
+voicing_code = {  # the keys are voicing characters
     'x': dict(name='any', tone='high'),
     'B': dict(name='base', tone='low'),
     'l': dict(name='low', tone='mid'),
@@ -15,7 +16,7 @@ voicing_code = {  # voicing characters are the keys
     's': dict(name='slap', tone='sub'),
     't': dict(name='tone', tone='high'),
     'F': dict(name='flam', tone='high'),
-    '.': dict(name='none (ghost note)', tone='none'),
+    '.': dict(name='ghost note', tone='none'),
 }
 voicing_characters = ''.join(list(voicing_code.keys()))
 
@@ -281,5 +282,7 @@ def make_exercises(text):  # -> exercise_dict
 exercises = make_exercises(EXERCISES_TEXT)
 
 if __name__ == '__main__':
+    voicing_key = ', '.join([f"{k}: {voicing_code[k]['name']}" for k in voicing_code])
+    print(voicing_key)
     pprint(exercises)
     print('Done')
