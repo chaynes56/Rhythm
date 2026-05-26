@@ -1,4 +1,4 @@
-const VERSION = "0.1.2";
+const VERSION = "0.1.3";
 
 if (!window.dash_clientside) {
     window.dash_clientside = {};
