@@ -66,24 +66,36 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-23/25
+## Last session -- 2026-05-25 (2)
 
-**Housekeeping:**
+**Analysis section layout redesign (main.py):**
 
-- `Dev/` directory renamed to `dev/`; all memory files and CLAUDE.md header updated.
-- `mkdocs` moved from `[project] dependencies` to `[dependency-groups] dev`
-  (`uv remove mkdocs && uv add --group dev mkdocs`).
-- `bump-my-version` added as dev dependency (`uv add --group dev bump-my-version`);
-  now installed in venv and invocable as `bump-my-version bump --dry-run --verbose patch`.
-  Previously only available ephemerally via `uvx`.
+- Top row: Training Level | Subdivisions/Beat | Show Intervals + Show Spectrum toggles.
+- Analysis text below that row in the same left column.
+- Histogram and FFT in a right column; side by side when screen wide enough (`flex-wrap`
+  row), stacking otherwise.
+- `SHOW_SPECTRUM` server-side constant removed; both graphs always in layout,
+  visibility driven by toggles + `waveform-visible-store`.
+- Toggles persisted in settings YAML (`show-intervals`, `show-spectrum`).
 
-**Docs:**
+**FFT zoom recompute (main.py, audio_utils.py):**
 
-- Switched from mkdocs to docsify. Basic setup in `docs/` (`index.html`, `README.md`,
-  `.nojekyll`). Published via GitHub Pages: repo Settings > Pages > main branch /docs.
-  Site: https://chaynes56.github.io/Rhythm/
+- `update_spectrum` now takes `waveform-graph` relayoutData; slices audio to zoom window
+  and recomputes via `compute_spectrum`. Falls back to pre-computed on reset/autorange.
+- `compute_spectrum`: `nperseg` capped to available data length (was padding short slices
+  to 65536-sample Hann window, crushing PSD). Short zoom windows now give valid results.
+- Fixed base64 data-URL prefix (`data:audio/wav;base64,...`) stripping before decode.
+- Spectrum graph set to `staticPlot: True` (was `scrollZoom: True` -- caused axis corruption).
 
-**Open:** voicing options and associated behavior not yet implemented (from prior session).
+**Metronome button during recording (main.py, recorder.js):**
+
+- Button now shows "Stop Recording" and stops recording when clicked during delay/recording.
+- `setMetronomePlayingState` and `setMetronomeWarmingUpState` in recorder.js skip label
+  update when `currentRecordingPhase != 'idle'` (prevented Dash label being overwritten).
+- Metronome toggle clientside callback intercepts recording phase: calls `toggleRecording`
+  instead of `toggleMetronome` when phase is delay/recording.
+
+**Open:** voicing options and associated behavior not yet implemented.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 

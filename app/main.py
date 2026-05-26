@@ -55,15 +55,17 @@ RECORDING_PRE_ROLL_SECONDS = 0.200
 METRONOME_END_MARGIN_SECONDS = 0.1  # exclude metronome ticks within this many seconds of
 # the audio end (avoids counting a beat at the recording cutoff)
 
-# False to disable spectrum computation and hide the spectrum display area
-SHOW_SPECTRUM = False
+
 # False to hide the onset envelope overlay on the waveform
 SHOW_ONSET_ENVELOPE = True
 
 # dict: name -> (green cutoff, orange cutoff) red above orange cutoff in ms of
 # mean absolute deviation
 TRAINING_LEVEL = dict(Advanced=(7.5, 15), Intermediate=(10, 15), Novice=(15, 30))
+
 # Deviation graph color thresholds (millisecond absolute deviation)
+# FIXME these should not be needed, as their values should be drawn from
+#  TRAINING_LEVEL thresholds instead
 DEVIATION_WARN_MS = 10  # green below this, orange at or above
 DEVIATION_ALERT_MS = 20  # orange below this, red at or above
 
@@ -134,6 +136,8 @@ tempo-slider: 120
 metronome-vol: 0.5
 exercise-name: ~
 custom-exercises: |-
+show-intervals: false
+show-spectrum: false
 """
 
 settings = yaml.safe_load(DEFAULT_SETTINGS_YAML)
@@ -272,58 +276,69 @@ app.layout = dbc.Container([
                     ),
                     dbc.Row([
                         dbc.Col([
-                            html.Label("Training Level", className="small"),
-                            dcc.Dropdown(
-                                id="training-level",
-                                options=[{"label": k, "value": k} for k in
-                                         TRAINING_LEVEL],
-                                value=settings["training-level"],
-                                clearable=False,
-                                style={"width": "140px"},
-                            ),
-                            html.Label("Subdivisions / Beat", className="small mt-2"),
-                            dcc.Dropdown(
-                                id="subdivisions-per-beat",
-                                options=[{"label": str(i), "value": i} for i in
-                                         range(1, 7)],
-                                value=settings["subdivisions-per-beat"],
-                                clearable=False,
-                                style={"width": "110px"},
-                            ),
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Label("Training Level", className="small"),
+                                    dcc.Dropdown(
+                                        id="training-level",
+                                        options=[{"label": k, "value": k} for k in
+                                                 TRAINING_LEVEL],
+                                        value=settings["training-level"],
+                                        clearable=False,
+                                        style={"width": "140px"},
+                                    ),
+                                ], width="auto"),
+                                dbc.Col([
+                                    html.Label("Subdivisions / Beat", className="small"),
+                                    dcc.Dropdown(
+                                        id="subdivisions-per-beat",
+                                        options=[{"label": str(i), "value": i} for i in
+                                                 range(1, 7)],
+                                        value=settings["subdivisions-per-beat"],
+                                        clearable=False,
+                                        style={"width": "110px"},
+                                    ),
+                                ], width="auto"),
+                                dbc.Col([
+                                    dbc.Switch(id="show-intervals", label="Show Intervals", value=False, className="mb-1"),
+                                    dbc.Switch(id="show-spectrum", label="Show Spectrum", value=False),
+                                ], width="auto"),
+                            ], className="g-2 mb-2", align="center"),
+                            dcc.Markdown(id="analysis-data-block"),
                         ], width="auto"),
                         dbc.Col(
-                            dcc.Markdown(
-                                id="analysis-data-block",
-                                style={"width": "350px", "height": "200px"},
-                            ),
-                            width="auto"
-                        ),
-                        dbc.Col(
-                            dcc.Graph(
-                                id="interval-histogram",
-                                style={"height": "200px", "width": "525px",
-                                       "display": "none"},
-                                config={"staticPlot": True},  # type: ignore[arg-type]
-                            ),
+                            dbc.Row([
+                                dbc.Col(
+                                    dcc.Graph(
+                                        id="interval-histogram",
+                                        style={"height": "200px", "width": "525px",
+                                               "display": "none"},
+                                        config={"staticPlot": True},  # type: ignore[arg-type]
+                                    ),
+                                    width="auto",
+                                ),
+                                dbc.Col(
+                                    dcc.Graph(
+                                        id="spectrum-graph",
+                                        style={
+                                            "height": f"{SPECTRUM_GRAPH_HEIGHT_PX}px",
+                                            "width": f"{SPECTRUM_GRAPH_WIDTH_PX}px",
+                                            "display": "none",
+                                        },
+                                        config={"staticPlot": True},  # type: ignore[arg-type]
+                                    ),
+                                    width="auto",
+                                ),
+                            ], className="g-3 flex-wrap"),
                             width="auto",
                         ),
+                    ], align="start", className="g-3"),
+                    dbc.Row([
                         dbc.Col(
                             html.Div(id="subdivision-table-container"),
                             width="auto",
                         ),
-                        *([dbc.Col(
-                            dcc.Graph(
-                                id="spectrum-graph",
-                                style={
-                                    "height": f"{SPECTRUM_GRAPH_HEIGHT_PX}px",
-                                    "width": f"{SPECTRUM_GRAPH_WIDTH_PX}px",
-                                    "visibility": "hidden",
-                                },
-                                config={"scrollZoom": True, "displayModeBar": False},  # type: ignore[arg-type]
-                            ),
-                            width="auto",
-                        )] if SHOW_SPECTRUM else []),
-                    ], align="start", className="g-3"),
+                    ], className="mt-2"),
                 ]),
             ], className="mb-4"),
         ], width=12)
@@ -893,17 +908,24 @@ clientside_callback(
 
 clientside_callback(
     """
-    function(n_clicks, playing_status, tempo, beats, measures_per_pattern, volume, play_hi_tone, play_only_low_tone) {
+    function(n_clicks, playing_status, tempo, beats, measures_per_pattern, volume, play_hi_tone, play_only_low_tone, recording_phase) {
         if (!window.recorderControls) {
             console.error("recorder.js not loaded");
             return window.dash_clientside.no_update;
         }
-        const isPlaying = playing_status.length > 0;
         if (n_clicks) {
-            window.recorderControls.toggleMetronome(
-                n_clicks, isPlaying, tempo, beats, measures_per_pattern, volume,
-                !!play_hi_tone, !!play_only_low_tone
-            );
+            if (recording_phase === "recording" || recording_phase === "delay") {
+                window.recorderControls.toggleRecording(
+                    n_clicks, recording_phase, tempo, beats, measures_per_pattern,
+                    volume, !!play_hi_tone, !!play_only_low_tone
+                );
+            } else {
+                const isPlaying = playing_status.length > 0;
+                window.recorderControls.toggleMetronome(
+                    n_clicks, isPlaying, tempo, beats, measures_per_pattern, volume,
+                    !!play_hi_tone, !!play_only_low_tone
+                );
+            }
         }
         return window.dash_clientside.no_update;
     }
@@ -917,6 +939,7 @@ clientside_callback(
     State("metronome-vol", "value"),
     State("play-hi-tone", "value"),
     State("play-only-low-tone", "value"),
+    State("recording-phase-store", "data"),
     prevent_initial_call=True,
 )
 
@@ -1082,31 +1105,15 @@ clientside_callback(
     Input("waveform-visible-store", "data"),
 )
 
-if SHOW_SPECTRUM:
-    clientside_callback(
-        f"""
-        function(waveform_visible) {{
-            const v = waveform_visible ? 'visible' : 'hidden';
-            return [
-                {{ visibility: v }},
-                {{ height: '{SPECTRUM_GRAPH_HEIGHT_PX}px', width: '{SPECTRUM_GRAPH_WIDTH_PX}px', visibility: v }},
-            ];
-        }}
-        """,
-        Output("analysis-data-block", "style"),
-        Output("spectrum-graph", "style"),
-        Input("waveform-visible-store", "data"),
-    )
-else:
-    clientside_callback(
-        """
-        function(waveform_visible) {
-            return { width: '350px', visibility: waveform_visible ? 'visible' : 'hidden' };
-        }
-        """,
-        Output("analysis-data-block", "style"),
-        Input("waveform-visible-store", "data"),
-    )
+clientside_callback(
+    """
+    function(waveform_visible) {
+        return { visibility: waveform_visible ? 'visible' : 'hidden' };
+    }
+    """,
+    Output("analysis-data-block", "style"),
+    Input("waveform-visible-store", "data"),
+)
 
 clientside_callback(
     """
@@ -1130,12 +1137,26 @@ clientside_callback(
 
 clientside_callback(
     """
-    function(waveform_visible) {
-        return { height: '200px', width: '525px', display: waveform_visible ? 'block' : 'none' };
+    function(waveform_visible, show_intervals) {
+        const show = waveform_visible && show_intervals;
+        return { height: '200px', width: '525px', display: show ? 'block' : 'none' };
     }
     """,
     Output("interval-histogram", "style"),
     Input("waveform-visible-store", "data"),
+    Input("show-intervals", "value"),
+)
+
+clientside_callback(
+    f"""
+    function(waveform_visible, show_spectrum) {{
+        const show = waveform_visible && show_spectrum;
+        return {{ height: '{SPECTRUM_GRAPH_HEIGHT_PX}px', width: '{SPECTRUM_GRAPH_WIDTH_PX}px', display: show ? 'block' : 'none' }};
+    }}
+    """,
+    Output("spectrum-graph", "style"),
+    Input("waveform-visible-store", "data"),
+    Input("show-spectrum", "value"),
 )
 
 
@@ -1333,14 +1354,18 @@ clientside_callback(
 @app.callback(
     Output("record-btn", "children"),
     Output("record-btn", "color"),
-    Input("recording-phase-store", "data")
+    Output("metronome-btn", "children"),
+    Output("metronome-btn", "disabled"),
+    Input("recording-phase-store", "data"),
+    State("is-metronome-playing", "value"),
 )
-def update_record_button(recording_phase):
+def update_record_button(recording_phase, metro_playing):
     if recording_phase == "delay":
-        return "Counting in...", "warning"
+        return "Counting in...", "warning", "Stop Recording", False
     if recording_phase == "recording":
-        return "Stop Recording", "secondary"
-    return "Start Recording", "danger"
+        return "Stop Recording", "secondary", "Stop Recording", False
+    metro_label = "Stop Metronome" if metro_playing else "Start Metronome"
+    return "Start Recording", "danger", metro_label, False
 
 
 @app.callback(
@@ -1354,24 +1379,45 @@ def update_play_button(playing_value):
     return "Play Recording", "success"
 
 
-if SHOW_SPECTRUM:
-    @app.callback(
-        Output("spectrum-graph", "figure"),
-        Input("audio-store", "data"),
-    )
-    def update_spectrum(audio_json):
-        if not audio_json:
+@app.callback(
+    Output("spectrum-graph", "figure"),
+    Input("audio-store", "data"),
+    Input("waveform-graph", "relayoutData"),
+    prevent_initial_call=True,
+)
+def update_spectrum(audio_json, relayout_data):
+    if not audio_json:
+        return go.Figure()
+    try:
+        data = json.loads(audio_json)
+        if relayout_data and ctx.triggered_id != "audio-store":
+            t0, t1 = None, None
+            if "xaxis.range[0]" in relayout_data:
+                t0, t1 = float(relayout_data["xaxis.range[0]"]), float(relayout_data["xaxis.range[1]"])
+            elif "xaxis.range" in relayout_data:
+                t0, t1 = relayout_data["xaxis.range"]
+            if t0 is not None:
+                audio_b64 = data.get("audio", "")
+                if audio_b64:
+                    audio_data = audio_b64.split(",", 1)[-1] if "," in audio_b64 else audio_b64
+                    with io.BytesIO(base64.b64decode(audio_data)) as f:
+                        y, sr = sf.read(f)
+                    if len(y.shape) > 1:
+                        y = y.mean(axis=1)
+                    i0 = max(0, int(t0 * sr))
+                    i1 = min(len(y), int(t1 * sr))
+                    y_slice = y[i0:i1]
+                    freqs, psd = compute_spectrum(y_slice, sr)
+                    if len(freqs) > 0:
+                        return build_spectrum_figure(freqs, psd)
+        freqs = np.array(data.get("spectrum_freqs", []))
+        psd = np.array(data.get("spectrum_psd", []))
+        if len(freqs) == 0:
             return go.Figure()
-        try:
-            data = json.loads(audio_json)
-            freqs = np.array(data.get("spectrum_freqs", []))
-            psd = np.array(data.get("spectrum_psd", []))
-            if len(freqs) == 0:
-                return go.Figure()
-            return build_spectrum_figure(freqs, psd)
-        except Exception as e:
-            print(f"update_spectrum: {e}")
-            return go.Figure()
+        return build_spectrum_figure(freqs, psd)
+    except Exception as e:
+        print(f"update_spectrum: {e}")
+        return go.Figure()
 
 
 @app.callback(
@@ -1995,13 +2041,10 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
         if len(y.shape) > 1:
             y = y.mean(axis=1)
         y = trim_audio_tail(np.asarray(y, dtype=np.float32), sr)
-        if SHOW_SPECTRUM:
-            try:
-                spec_freqs, spec_psd = compute_spectrum(y, sr)
-            except Exception as spec_err:
-                print(f"process_audio: spectrum failed: {spec_err}")
-                spec_freqs, spec_psd = np.array([]), np.array([])
-        else:
+        try:
+            spec_freqs, spec_psd = compute_spectrum(y, sr)
+        except Exception as spec_err:
+            print(f"process_audio: spectrum failed: {spec_err}")
             spec_freqs, spec_psd = np.array([]), np.array([])
         trimmed_audio_base64 = serialize_audio_to_base64_wav(y, sr)
         y = normalize_waveform_for_display(y)
@@ -2146,13 +2189,12 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
 
         if len(y.shape) > 1:
             y = y.mean(axis=1)
-        if SHOW_SPECTRUM:
-            try:
-                spec_freqs, spec_psd = compute_spectrum(y, sr)
-                data["spectrum_freqs"] = spec_freqs.tolist()
-                data["spectrum_psd"] = spec_psd.tolist()
-            except Exception as spec_err:
-                print(f"load_recording: spectrum failed: {spec_err}")
+        try:
+            spec_freqs, spec_psd = compute_spectrum(y, sr)
+            data["spectrum_freqs"] = spec_freqs.tolist()
+            data["spectrum_psd"] = spec_psd.tolist()
+        except Exception as spec_err:
+            print(f"load_recording: spectrum failed: {spec_err}")
 
         _, _, onset_env_norm, hop_length = detect_onsets_rms(y, sr)
 
@@ -2245,11 +2287,13 @@ clientside_callback(
     State("tempo-slider", "value"),
     State("metronome-vol", "value"),
     State("exercise-select", "value"),
+    State("show-intervals", "value"),
+    State("show-spectrum", "value"),
     prevent_initial_call=True,
 )
 def save_settings(_n_clicks, training_level, subdivisions, rec_vol, play_vol,
                   measures, beats, play_hi, play_only_low, tempo, metro_vol,
-                  exercise_name):
+                  exercise_name, show_intervals, show_spectrum):
     current = {
         "training-level": training_level,
         "subdivisions-per-beat": subdivisions,
@@ -2264,6 +2308,8 @@ def save_settings(_n_clicks, training_level, subdivisions, rec_vol, play_vol,
         "debug-mode": False,  # always saved as false; enable via env var or Flask debug flag
         "exercise-name": exercise_name or None,
         "custom-exercises": _custom_exercises_text,
+        "show-intervals": bool(show_intervals),
+        "show-spectrum": bool(show_spectrum),
     }
     buf = io.StringIO()
     yaml.dump(current, buf, default_flow_style=False, sort_keys=False)
@@ -2285,13 +2331,15 @@ def save_settings(_n_clicks, training_level, subdivisions, rec_vol, play_vol,
     Output("debug-mode-store", "data", allow_duplicate=True),
     Output("exercise-select", "value"),
     Output("exercise-select", "options", allow_duplicate=True),
+    Output("show-intervals", "value", allow_duplicate=True),
+    Output("show-spectrum", "value", allow_duplicate=True),
     Input("settings-raw-store", "data"),
     prevent_initial_call=True,
 )
 def load_settings(data):
     if data is None:
         raise PreventUpdate
-    no_change = (no_update,) * 14  # 10 settings + status-msg + debug-mode-store + exercise-select + options
+    no_change = (no_update,) * 16  # 10 settings + status-msg + debug-mode-store + exercise-select + options + 2 toggles
     try:
         text = data["content"]
         try:
@@ -2301,7 +2349,7 @@ def load_settings(data):
             line_num = getattr(mark, "line", None)
             loc = f" at line {line_num}" if line_num is not None else ""
             prob = getattr(ye, "problem", str(ye))
-            err = [no_update] * 14
+            err = [no_update] * 16
             err[10] = f"Invalid YAML syntax{loc}: {prob}"
             return tuple(err)
         if not isinstance(loaded, dict):
@@ -2359,6 +2407,8 @@ def load_settings(data):
             bool(loaded.get("debug-mode", False)),
             loaded.get("exercise-name") or "",
             new_options,
+            bool(loaded.get("show-intervals", False)),
+            bool(loaded.get("show-spectrum", False)),
         )
     except Exception as e:
         print(f"load_settings error: {e}")

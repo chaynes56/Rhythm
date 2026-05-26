@@ -22,7 +22,8 @@ if (!window.dash_clientside) {
 }());
 
 // Timing constants
-const INITIAL_WARMUP_SECONDS = 4;      // silent warmup duration on page load (Stage 2)
+const INITIAL_WARMUP_SECONDS = 8;      // silent warmup duration on page load
+// (Stage 2)
 const FIRST_TONE_DELAY_SECONDS = 0.15; // scheduling buffer before first audio tone
 const MIN_COUNT_IN_PERIOD_SEC = 3;     // minimum count-in duration before recording starts
 
@@ -155,7 +156,9 @@ function setMetronomePlayingState(isPlaying) {
     setDashInputValue('metronome-state-sync', isPlaying ? 'playing' : '');
     const btn = document.getElementById('metronome-btn');
     if (btn) {
-        btn.textContent = isPlaying ? 'Stop Metronome' : 'Start Metronome';
+        if (currentRecordingPhase === 'idle') {
+            btn.textContent = isPlaying ? 'Stop Metronome' : 'Start Metronome';
+        }
         btn.disabled = false;
         btn.className = btn.className
             .replace(/\bbtn-primary\b/g, '')
@@ -179,7 +182,7 @@ function setMetronomeWarmingUpState(isWarmingUp) {
             .replace(/\bbtn-secondary\b/g, '')
             .replace(/\bbtn-warning\b/g, '')
             .trim() + ' btn-warning';
-    } else if (!metronomeScheduler) {
+    } else if (!metronomeScheduler && currentRecordingPhase === 'idle') {
         btn.textContent = 'Start Metronome';
         btn.disabled = false;
         btn.className = btn.className

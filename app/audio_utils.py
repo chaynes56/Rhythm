@@ -319,7 +319,8 @@ def compute_spectrum(y: np.ndarray, sr: int) -> tuple[np.ndarray, np.ndarray]:
         sr_ds = sr_int
 
     min_samples = int(FFT_MIN_WINDOW_SECONDS * sr_ds)
-    nperseg = int(2 ** np.ceil(np.log2(max(min_samples, 8))))
+    effective = max(min(min_samples, len(y_ds)), 8)
+    nperseg = int(2 ** np.ceil(np.log2(effective)))
 
     if len(y_ds) < nperseg:
         y_ds = np.pad(y_ds, (0, nperseg - len(y_ds)))
