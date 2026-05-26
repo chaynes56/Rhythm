@@ -6,7 +6,7 @@ using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359Zcoi
 ## Versioning
 
 1. First commit all staged files. Then run script 
-   `./dev/bump-version [patch|minor|major]` to bump version number and 
+   `./dev/bump [patch|minor|major]` to bump version number, default `patch` and 
    push the commit and tag to GitHub:
     - `bump-my-version bump [--dry-run -verbose] [major | minor | patch]`
         - [documentation](https://pypi.org/project/bump-my-version/)
@@ -15,6 +15,7 @@ using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359Zcoi
     - `git push`
         - Earlier ran `git config --global push.followTags true`, so don't need 
           `--follow-tags` in push
+        - Automatically updates documentation in GitHub Pages.
 2. Optionally, in GitHub: Releases → Draft a new release → choose your tag → write a
    short description → Publish release
 

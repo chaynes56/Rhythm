@@ -1,9 +1,6 @@
 #!/usr/bin/env bash
-# Usage: ./dev/bump-version [patch|minor|major]
-if [ -z "$1" ]; then
-  $1 = "patch"
-  exit 1
-fi
-bump-my-version bump $1
+# Usage: ./dev/bump [patch|minor|major]
+
+bump-my-version bump ${1:-patch}
 git push
 echo "Publish in Plotly cloud per dev/Notes.md"

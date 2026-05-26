@@ -23,11 +23,15 @@ This is an open source project with [Github repo](https://github.com/chaynes56/R
 
 ## Practical considerations
 
-It takes some time to start a `plotly.app` server, so app loading can take of up to a
+It takes some time to start the `plotly.app` server, so app loading can take of up to a
 minute when first visiting the page. After a fairly long period of inactivity
 (perhaps 15 minutes), the server may go to sleep. When that happens much of the app's
 functionality will be lost, and it is necessary to refresh or revisit the app's browser
 page.
+
+After the app is loaded, there are several additional seconds in which the Start 
+Recording and Calibration buttons say `Warming up...` and are unresponsive, allowing 
+time for the audio chains to stabilize before being used.
 
 App performance is satisfactory with most Wi-Fi connections but may be unsatisfactory
 with a cellular data connection. Recording and playback are done via the browser, with
@@ -165,7 +169,7 @@ system resources it is allocated. To compensate for this, the app performs a cal
 by playing several metronome beats when it starts. If headphones are used, it is
 important that they be placed very near the microphone during this calibration.
 
-Ambient noise during calibration or an exceptionally long browser audio chain warmup-up
+Ambient noise during calibration or an exceptionally long browser audio chain warmup
 period may cause this initial calibration to be inaccurate. If in doubt, run a test
 recording of just the metronome and check that the analysis indicates errors of at most
 a few ms. If necessary, calibration may be repeated by clicking the **Calibrate**
