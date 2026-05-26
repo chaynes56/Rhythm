@@ -66,34 +66,32 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-25 (2)
+## Last session -- 2026-05-26
 
-**Analysis section layout redesign (main.py):**
+**Warmup UX: Record and Calibrate buttons disabled during 8s warmup (main.py, recorder.js):**
 
-- Top row: Training Level | Subdivisions/Beat | Show Intervals + Show Spectrum toggles.
-- Analysis text below that row in the same left column.
-- Histogram and FFT in a right column; side by side when screen wide enough (`flex-wrap`
-  row), stacking otherwise.
-- `SHOW_SPECTRUM` server-side constant removed; both graphs always in layout,
-  visibility driven by toggles + `waveform-visible-store`.
-- Toggles persisted in settings YAML (`show-intervals`, `show-spectrum`).
+- Both buttons render as "Warming Up..." (disabled) from first paint via Python layout
+  initial state; re-enabled by a new Dash clientside callback keyed off `warmup-info-store`
+  completing. This makes `disabled` a proper Dash-managed prop so React never resets it.
+- Root cause of post-warmup inoperative buttons: `disabled=True` was only in the layout,
+  not in any callback Output. Any subsequent callback re-render reset it to True.
+- `recording-phase-sync -> recording-phase-store` callback gained `prevent_initial_call=True`
+  to stop it chaining into `update_record_button` at page load and overwriting the warmup label.
+- `update_record_button` gained `prevent_initial_call=True`; fires only on real phase changes.
+- `process_audio`: guard `tempo` against None with `(tempo or 120)`.
 
-**FFT zoom recompute (main.py, audio_utils.py):**
+**Code hygiene (main.py, recorder.js):**
 
-- `update_spectrum` now takes `waveform-graph` relayoutData; slices audio to zoom window
-  and recomputes via `compute_spectrum`. Falls back to pre-computed on reset/autorange.
-- `compute_spectrum`: `nperseg` capped to available data length (was padding short slices
-  to 65536-sample Hann window, crushing PSD). Short zoom windows now give valid results.
-- Fixed base64 data-URL prefix (`data:audio/wav;base64,...`) stripping before decode.
-- Spectrum graph set to `staticPlot: True` (was `scrollZoom: True` -- caused axis corruption).
+- Removed dead constants `DEVIATION_WARN_MS`, `DEVIATION_ALERT_MS`, `RECORDING_PRE_ROLL_SECONDS`
+  (values already drawn from `TRAINING_LEVEL` in callbacks; Python-side duplicate of JS constant).
+- `var` -> `const`/`let` in warning-suppressor IIFE; destructure `payload` in
+  `loadCalibrationTrack` to resolve `first_beat_ms` IDE warning.
 
-**Metronome button during recording (main.py, recorder.js):**
+**Tooling:**
 
-- Button now shows "Stop Recording" and stops recording when clicked during delay/recording.
-- `setMetronomePlayingState` and `setMetronomeWarmingUpState` in recorder.js skip label
-  update when `currentRecordingPhase != 'idle'` (prevented Dash label being overwritten).
-- Metronome toggle clientside callback intercepts recording phase: calls `toggleRecording`
-  instead of `toggleMetronome` when phase is delay/recording.
+- `dev/bump-version` renamed to `dev/bump`; default part is `patch`; added Plotly reminder.
+- `v0.1.4 -> v0.1.4` in git push output is standard git tag push notation (local -> remote),
+  not a bump-my-version error.
 
 **Open:** voicing options and associated behavior not yet implemented.
 

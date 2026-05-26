@@ -12,6 +12,8 @@ using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359Zcoi
         - [documentation](https://pypi.org/project/bump-my-version/)
         - It correctly finds and updates both the [project] version
           and [tool.bumpversion] current_version, stages the file, commits, and tags.
+        - It prints a `* [new tag]` line indicating the local -> remote tag push, 
+          not old -> new version tags. 
     - `git push`
         - Earlier ran `git config --global push.followTags true`, so don't need 
           `--follow-tags` in push
