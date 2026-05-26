@@ -351,8 +351,8 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
-                            dbc.Button("Start Recording", id="record-btn",
-                                       color="danger", className="me-2"),
+                            dbc.Button("Warming Up...", id="record-btn",
+                                       color="danger", className="me-2", disabled=True),
                             dbc.Button("Play Recording", id="play-btn", color="success",
                                        className="me-2"),
                             dbc.Button("Save Recording", id="save-btn", color="primary",
@@ -363,8 +363,8 @@ app.layout = dbc.Container([
                                        color="secondary", className="me-2"),
                             dbc.Button("Load Settings", id="load-settings-btn",
                                        color="secondary", className="me-2"),
-                            dbc.Button("Calibrate", id="calibrate-btn",
-                                       color="warning", className="me-1"),
+                            dbc.Button("Warming Up...", id="calibrate-btn",
+                                       color="warning", className="me-1", disabled=True),
                             dcc.Input(
                                 id="calibration-value",
                                 type="number", min=-999, max=999, step=1,
@@ -990,6 +990,7 @@ clientside_callback(
     """,
     Output("recording-phase-store", "data"),
     Input("recording-phase-sync", "value"),
+    prevent_initial_call=True,
 )
 
 clientside_callback(
@@ -1351,13 +1352,35 @@ clientside_callback(
 )
 
 
+clientside_callback(
+    """
+    function(warmupInfo) {
+        const done = warmupInfo && warmupInfo.length > 0;
+        return [
+            !done,
+            done ? 'Start Recording' : 'Warming Up...',
+            !done,
+            done ? 'Calibrate' : 'Warming Up...'
+        ];
+    }
+    """,
+    Output("record-btn", "disabled"),
+    Output("record-btn", "children", allow_duplicate=True),
+    Output("calibrate-btn", "disabled", allow_duplicate=True),
+    Output("calibrate-btn", "children", allow_duplicate=True),
+    Input("warmup-info-store", "value"),
+    prevent_initial_call='initial_duplicate',
+)
+
+
 @app.callback(
-    Output("record-btn", "children"),
+    Output("record-btn", "children", allow_duplicate=True),
     Output("record-btn", "color"),
     Output("metronome-btn", "children"),
     Output("metronome-btn", "disabled"),
     Input("recording-phase-store", "data"),
     State("is-metronome-playing", "value"),
+    prevent_initial_call=True,
 )
 def update_record_button(recording_phase, metro_playing):
     if recording_phase == "delay":
@@ -2059,7 +2082,7 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
 
         # Metronome points for analysis/saving (shifted by calibration offset)
         duration = len(y) / sr
-        seconds_per_beat = 60.0 / tempo
+        seconds_per_beat = 60.0 / (tempo or 120)
         cal_s = (calibration_offset_ms or 0) / 1000.0
         metronome_times = np.arange(cal_s, duration - METRONOME_END_MARGIN_SECONDS,
                                     seconds_per_beat)

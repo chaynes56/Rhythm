@@ -6,14 +6,14 @@ if (!window.dash_clientside) {
 
 // Suppress noisy Plotly/React internal warnings that are not actionable.
 (function() {
-    var SUPPRESS = [
+    const SUPPRESS = [
         'Support for defaultProps will be removed from function components',
         "Can't perform a React state update on a component that hasn't mounted yet",
     ];
-    var _warn = console.warn.bind(console);
-    var _error = console.error.bind(console);
+    const _warn = console.warn.bind(console);
+    const _error = console.error.bind(console);
     function shouldSuppress(args) {
-        var msg = args[0];
+        const msg = args[0];
         if (typeof msg !== 'string') return false;
         return SUPPRESS.some(function(s) { return msg.indexOf(s) !== -1; });
     }
@@ -844,8 +844,9 @@ function loadCalibrationTrack(payload) {
             return;
         }
     }
-    calibrationFirstBeatMs = payload.first_beat_ms || 0;
-    const base64 = payload.data_url.split(',')[1];
+    const { first_beat_ms, data_url } = payload;
+    calibrationFirstBeatMs = first_beat_ms || 0;
+    const base64 = data_url.split(',')[1];
     const binary = atob(base64);
     const bytes = new Uint8Array(binary.length);
     for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
