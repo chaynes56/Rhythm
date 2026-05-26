@@ -3,4 +3,4 @@
 
 bump-my-version bump ${1:-patch}
 git push
-echo "Publish in Plotly cloud per dev/Notes.md"
+echo ">>> Next: publish in Plotly cloud per dev/Notes.md"

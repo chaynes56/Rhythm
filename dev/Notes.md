@@ -8,7 +8,7 @@ using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359Zcoi
 1. First commit all staged files. Then run script 
    `./dev/bump [patch|minor|major]` to bump version number, default `patch` and 
    push the commit and tag to GitHub:
-    - `bump-my-version bump [--dry-run -verbose] [major | minor | patch]`
+    - `bump-my-version bump [--dry-run --verbose] [major | minor | patch]`
         - [documentation](https://pypi.org/project/bump-my-version/)
         - It correctly finds and updates both the [project] version
           and [tool.bumpversion] current_version, stages the file, commits, and tags.
@@ -31,13 +31,13 @@ All version changes are tagged and represent releases in the sense that they are
 To publish:
 
 1. Login to Plotly Cloud
-2. In the `Rhythm` app line select Settings (gear widget)
-3. Actions > Update
+2. In the `Rhythm` app line select settings (the gear widget)
+3. `Actions > Update`
 4. Click in Drag and Drop box
 5. In the pop-up file picker, select and upload all the `app/` folder contents
-6. Click Update
+6. Click `Update`
 7. In a few seconds at the top of the revision history list a new version will appear
-   with Building state, which in several seconds more turns into Running and the
+   with state `Building`, which in several seconds more turns into Running and the
    previous version state turns to Stopped.
 
 ## Documentation
@@ -45,6 +45,6 @@ To publish:
 All documentation is in `docs/`, published via `Github Pages` using `docsify`.
 
 - Installation: `npm i docsify-cli -g; npm install -g npm@11.15.0`
-- Run local preview server: `docsify serve docs`
+- To run local preview server: `docsify serve docs`
 - [Published view](https://chaynes56.github.io/Rhythm/#/)
-- [More pages](https://docsify.js.org/#/more-pages) also for sidebars
+- How to add [more pages](https://docsify.js.org/#/more-pages)
