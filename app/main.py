@@ -51,10 +51,8 @@ from audio_utils import (
     trim_audio_tail,
 )
 
-RECORDING_PRE_ROLL_SECONDS = 0.200
 METRONOME_END_MARGIN_SECONDS = 0.1  # exclude metronome ticks within this many seconds of
 # the audio end (avoids counting a beat at the recording cutoff)
-
 
 # False to hide the onset envelope overlay on the waveform
 SHOW_ONSET_ENVELOPE = True
@@ -62,12 +60,6 @@ SHOW_ONSET_ENVELOPE = True
 # dict: name -> (green cutoff, orange cutoff) red above orange cutoff in ms of
 # mean absolute deviation
 TRAINING_LEVEL = dict(Advanced=(7.5, 15), Intermediate=(10, 15), Novice=(15, 30))
-
-# Deviation graph color thresholds (millisecond absolute deviation)
-# FIXME these should not be needed, as their values should be drawn from
-#  TRAINING_LEVEL thresholds instead
-DEVIATION_WARN_MS = 10  # green below this, orange at or above
-DEVIATION_ALERT_MS = 20  # orange below this, red at or above
 
 SPECTRUM_GRAPH_HEIGHT_PX = 160  # px
 SPECTRUM_GRAPH_WIDTH_PX = 500  # px
