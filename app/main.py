@@ -355,6 +355,8 @@ app.layout = dbc.Container([
                                        color="secondary", className="me-2"),
                             dbc.Button("Load Settings", id="load-settings-btn",
                                        color="secondary", className="me-2"),
+                            dbc.Button("Default Settings", id="default-settings-btn",
+                                       color="secondary", className="me-2"),
                             dbc.Button("Warming Up...", id="calibrate-btn",
                                        color="warning", className="me-1", disabled=True),
                             dcc.Input(
@@ -558,6 +560,8 @@ app.layout = dbc.Container([
     dcc.Upload(id="upload-audio", style={"display": "none"}),
     dcc.Download(id="download-settings"),
     dcc.Store(id="settings-raw-store"),
+    dcc.Store(id="local-settings-store", storage_type="local"),
+    dcc.Store(id="startup-applied-store", storage_type="memory", data=False),
     dcc.Store(id="metronome-track-store"),
     dcc.Store(id="calibration-audio-data-store"),
     dcc.Store(id="calibration-offset-store"),
@@ -2428,6 +2432,88 @@ def load_settings(data):
     except Exception as e:
         print(f"load_settings error: {e}")
         return no_change
+
+
+# Auto-save every settings change to localStorage.
+clientside_callback(
+    """
+    function(trainingLevel, subdivisions, recVol, playVol, measures, beats,
+             playHi, playOnlyLow, tempo, metroVol, exerciseName,
+             showIntervals, showSpectrum) {
+        return {
+            'training-level': trainingLevel,
+            'subdivisions-per-beat': subdivisions,
+            'recording-vol': recVol,
+            'playback-vol': playVol,
+            'measures-per-pattern': measures,
+            'beats-per-measure': beats,
+            'play-hi-tone': playHi,
+            'play-only-low-tone': playOnlyLow,
+            'tempo-slider': tempo,
+            'metronome-vol': metroVol,
+            'exercise-name': exerciseName || null,
+            'show-intervals': showIntervals,
+            'show-spectrum': showSpectrum,
+        };
+    }
+    """,
+    Output("local-settings-store", "data"),
+    Input("training-level", "value"),
+    Input("subdivisions-per-beat", "value"),
+    Input("recording-vol", "value"),
+    Input("playback-vol", "value"),
+    Input("measures-per-pattern", "value"),
+    Input("beats-per-measure", "value"),
+    Input("play-hi-tone", "value"),
+    Input("play-only-low-tone", "value"),
+    Input("tempo-slider", "value"),
+    Input("metronome-vol", "value"),
+    Input("exercise-select", "value"),
+    Input("show-intervals", "value"),
+    Input("show-spectrum", "value"),
+    prevent_initial_call=True,
+)
+
+# On page load, restore last-saved settings from localStorage.
+# Uses set_props (same pattern as load-settings file picker) so settings-raw-store
+# has a single formal owner.  startup-applied-store (memory) breaks the loop:
+# after load_settings updates the components, auto-save re-writes local-settings-store
+# which re-triggers this callback -- but the flag is already True so it no-ops.
+clientside_callback(
+    """
+    function(localData, startupApplied) {
+        if (startupApplied || !localData) {
+            return window.dash_clientside.no_update;
+        }
+        function toYamlVal(v) {
+            if (v === null || v === undefined || v === '') return '~';
+            if (typeof v === 'boolean') return v ? 'true' : 'false';
+            if (typeof v === 'number') return String(v);
+            return JSON.stringify(String(v));
+        }
+        var lines = Object.entries(localData).map(function(kv) {
+            return kv[0] + ': ' + toYamlVal(kv[1]);
+        });
+        window.dash_clientside.set_props('settings-raw-store', {
+            data: {content: lines.join('\\n'), ts: Date.now()}
+        });
+        return true;
+    }
+    """,
+    Output("startup-applied-store", "data"),
+    Input("local-settings-store", "data"),
+    State("startup-applied-store", "data"),
+    prevent_initial_call=False,
+)
+
+
+@app.callback(
+    Output("settings-raw-store", "data"),
+    Input("default-settings-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def default_settings(_n_clicks):
+    return {"content": DEFAULT_SETTINGS_YAML, "ts": 0}
 
 
 if __name__ == '__main__':
