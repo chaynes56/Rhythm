@@ -94,7 +94,30 @@ The app measures output latency to synchronise recording start with metronome be
 - `update_play_button` callback: dropped `Output("play-btn", "color")` -- `DropdownMenuItem`
   has no `color` prop. Item label still toggles between "Play Recording" / "Stop Playback".
 
-**Open:** voicing options and associated behavior not yet implemented.
+**Calibration hang fix + browser startup auto-reload (recorder.js, 57fd8c2):**
+
+- Root cause of "Calibrating..." hang: each `startCalibration()` planted a 20-second safety-net
+  `setTimeout` whose ID was never saved. After 3-4 calibrations the safety net from call N fired
+  during call N+3/4, cleared `calibrationRecordingEnded`, routing audio to `audio-process-btn`
+  instead of `calibration-process-btn`. Button stayed disabled permanently.
+- Fix: added `calibrationSafetyNetTimeout` module variable; each new `startCalibration()` cancels
+  the previous safety net first; the normal completion path (inside `recordingTimeout`) also
+  cancels it; `cancelPendingRecording()` cancels it too.
+- Safety net now restores the calibrate button text/state when it legitimately fires.
+- `decodeAudioData` `.catch` now restores the calibrate button (handles audio pipeline failures).
+- Calibration hang when results are bad still under investigation (new clue: seems correlated
+  with first occurrence of really bad calibration results -- possibly auto-retry interaction).
+- Auto-reload on browser startup (Brave session restore race):
+  - Replaced `sessionStorage` (Brave restores it across restarts, defeating the guard) with
+    `performance.navigation.type === 'reload'` check.
+  - Added `unhandledrejection` handler for webpack async `ChunkLoadError` (chunk 157/746 etc.)
+    -- these are dynamic `import()` failures, invisible to the `<script>` error listener.
+  - Replaced fixed 1.5 s delay with `/_dash-dependencies` polling; only reloads when server
+    actually responds 200.
+  - All poll failures now logged (no silent swallowing).
+
+**Open:** voicing options and associated behavior not yet implemented. Calibration hang when
+results are very bad may have a remaining cause not yet identified (session ended mid-analysis).
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 
