@@ -339,24 +339,32 @@ app.layout = dbc.Container([
     dbc.Row([
         dbc.Col([
             dbc.Card([
-                dbc.CardHeader("Recording \u2014 Playback \u2014 Settings"),
+                dbc.CardHeader("Recordings \u2014 Settings \u2014 Calibration"),
                 dbc.CardBody([
                     dbc.Row([
                         dbc.Col([
                             dbc.Button("Warming Up...", id="record-btn",
                                        color="danger", className="me-2", disabled=True),
-                            dbc.Button("Play Recording", id="play-btn", color="success",
-                                       className="me-2"),
-                            dbc.Button("Save Recording", id="save-btn", color="primary",
-                                       className="me-2"),
-                            dbc.Button("Load Recording", id="load-btn", color="info",
-                                       className="me-2"),
-                            dbc.Button("Save Settings", id="save-settings-btn",
-                                       color="secondary", className="me-2"),
-                            dbc.Button("Load Settings", id="load-settings-btn",
-                                       color="secondary", className="me-2"),
-                            dbc.Button("Default Settings", id="default-settings-btn",
-                                       color="secondary", className="me-2"),
+                            dbc.DropdownMenu(
+                                label="Recordings",
+                                children=[
+                                    dbc.DropdownMenuItem("Play Recording", id="play-btn"),
+                                    dbc.DropdownMenuItem("Save Recording", id="save-btn"),
+                                    dbc.DropdownMenuItem("Load Recording", id="load-btn"),
+                                ],
+                                color="primary",
+                                className="me-2 d-inline-block",
+                            ),
+                            dbc.DropdownMenu(
+                                label="Settings",
+                                children=[
+                                    dbc.DropdownMenuItem("Save Settings", id="save-settings-btn"),
+                                    dbc.DropdownMenuItem("Load Settings", id="load-settings-btn"),
+                                    dbc.DropdownMenuItem("Default Settings", id="default-settings-btn"),
+                                ],
+                                color="secondary",
+                                className="me-2 d-inline-block",
+                            ),
                             dbc.Button("Warming Up...", id="calibrate-btn",
                                        color="warning", className="me-1", disabled=True),
                             dcc.Input(
@@ -1389,13 +1397,12 @@ def update_record_button(recording_phase, metro_playing):
 
 @app.callback(
     Output("play-btn", "children"),
-    Output("play-btn", "color"),
     Input("is-playing", "value")
 )
 def update_play_button(playing_value):
     if "playing" in playing_value:
-        return "Stop Playback", "secondary"
-    return "Play Recording", "success"
+        return "Stop Playback"
+    return "Play Recording"
 
 
 @app.callback(
