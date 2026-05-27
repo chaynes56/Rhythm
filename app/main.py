@@ -575,7 +575,6 @@ app.layout = dbc.Container([
     dcc.Store(id="calibration-offset-store"),
     dcc.Store(id="calibration-track-store", data=compute_calibration_track()),
     dcc.Store(id="calibration-command-store"),
-    dcc.Store(id="calibration-auto-retry-done", data=False),
     dcc.Store(id="debug-mode-store", data=False),
     dcc.Store(id="exercise-schedule-store"),
     dcc.Store(id="error-beep-sink"),
@@ -666,29 +665,6 @@ clientside_callback(
     Input("calibration-process-btn", "n_clicks"),
 )
 
-# Auto-retry calibration once if the result looks like a cold-start artifact.
-clientside_callback(
-    """
-    function(offset_ms, retryDone) {
-        if (offset_ms === null || offset_ms === undefined) {
-            return [window.dash_clientside.no_update, window.dash_clientside.no_update];
-        }
-        if (!retryDone && offset_ms < -20) {
-            if (window.recorderControls && window.recorderControls.startCalibration) {
-                setTimeout(() => window.recorderControls.startCalibration(), 200);
-            }
-            return [true, window.dash_clientside.no_update];
-        }
-        return [window.dash_clientside.no_update, window.dash_clientside.no_update];
-    }
-    """,
-    Output("calibration-auto-retry-done", "data"),
-    Output("status-msg", "children", allow_duplicate=True),
-    Input("calibration-offset-store", "data"),
-    State("calibration-auto-retry-done", "data"),
-    prevent_initial_call=True,
-)
-
 
 @app.callback(
     Output("calibration-offset-store", "data"),
@@ -739,8 +715,8 @@ def process_calibration(base64_audio, debug_mode_store, warmup_info_str):
         residuals = beat_times % seconds_per_beat
         residuals = np.where(residuals > seconds_per_beat / 2, residuals - seconds_per_beat, residuals)
         phase_offset_s = float(np.median(residuals))
-        offset_ms = round(phase_offset_s * 1000, 1)
-        std_ms = round(float(np.std(residuals)) * 1000, 1)
+        offset_ms = round(phase_offset_s * 1000)
+        std_ms = round(float(np.std(residuals)) * 1000)
         confidence_str = f"±{std_ms} ms"
         print(f"process_calibration: offset={offset_ms}ms std={std_ms}ms from {len(beat_times)} beats")
         debug = is_debug_mode(debug_mode_store)
@@ -2525,4 +2501,4 @@ def default_settings(_n_clicks):
 
 if __name__ == '__main__':
     print(f"Rhythm Analyzer version {VERSION} starting up...")
-    app.run(debug=True, port=8006)
+    app.run(debug=True, port=8006, use_reloader=False)

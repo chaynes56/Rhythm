@@ -889,7 +889,7 @@ wheels = [
 
 [[package]]
 name = "rhythm-analyzer"
-version = "0.1.2"
+version = "0.1.4"
 source = { virtual = "." }
 dependencies = [
     { name = "dash", extra = ["cloud"] },

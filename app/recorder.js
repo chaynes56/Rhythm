@@ -628,6 +628,7 @@ function buildRecorderOptions() {
 function configureMediaRecorder(stream) {
     mediaRecorder = new MediaRecorder(stream, buildRecorderOptions());
     audioChunks = [];
+    const wasCalibration = calibrationMode;  // captured so orphaned cal chains don't pollute audio-store
     recordingDiagnostics = {
         chunks: [],
         lastChunkTime: Date.now(),
@@ -703,6 +704,11 @@ function configureMediaRecorder(stream) {
                         calibrationRecordingEnded = false;
                         window.calibrationRecordedAudio = dataUrl;
                         clickHiddenButton('calibration-process-btn');
+                    } else if (wasCalibration) {
+                        // Orphaned calibration chain -- this recording was superseded by a new
+                        // calibration start before its async chain completed. Discard rather than
+                        // sending calibration audio through the normal recording processor.
+                        console.log('Discarding orphaned calibration audio');
                     } else {
                         window.lastRecordedAudio = dataUrl;
                         window.recordedAudioData = dataUrl;
@@ -1254,13 +1260,16 @@ try {
             // ones and corrupt the calibrationRecordingEnded flag (the primary hang bug).
             calibrationSafetyNetTimeout = setTimeout(() => {
                 calibrationSafetyNetTimeout = null;
+                const btn = document.getElementById('calibrate-btn');
+                const btnText = btn ? btn.textContent : '(no btn)';
+                console.log('[CAL-DIAG] safety-net fired: calibrationMode=' + calibrationMode
+                    + ' phase=' + currentRecordingPhase + ' btnText=' + btnText);
                 if (calibrationMode || currentRecordingPhase !== 'idle') {
-                    console.log('startCalibration: safety-net stop');
+                    console.log('[CAL-DIAG] safety-net stopping active recording');
                     calibrationMode = false;
                     calibrationRecordingEnded = false;
                     stopActiveRecording();
                     // Restore button -- normal completion path doesn't run in a genuine hang.
-                    const btn = document.getElementById('calibrate-btn');
                     if (btn && btn.textContent === 'Calibrating...') {
                         btn.textContent = 'Calibrate';
                         btn.disabled = false;

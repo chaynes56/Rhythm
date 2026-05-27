@@ -121,7 +121,9 @@ The max (maximum) is how far off your worst pulse was, unless that pulse was off
 than half the subdivision length, in which case it will be computed as deviation from
 the wrong subdivision.
 
-TABLE AND HISTOGRAM INTERPRETATION
+### Interval and Spectrum analysis
+
+TODO: TABLE AND HISTOGRAM INTERPRETATION
 
 ## Rhythm units and constraints
 
@@ -184,14 +186,28 @@ headphones may be satisfactory if buffering delay is stable.
 It is possible that a VPN may introduce additional latency or other issues. Reports of
 experience in this regard are welcome via the issue tracker mentioned below.
 
+## Saving, loading and listening to recordings
+
+TODO: finish this section
+
 ## Settings
 
-The Save Settings button stores the current settings in the browser's default download
-folder (typically `Downloads` or `My Documents`) in YAML format. The Load Settings
-button restores the settings from the selected `.yaml` file. The
-`debug-mode` and `custom-exercises` settings the user may wish to edit, as the graphic
-user interface does not support changing them. It is essential to edit the YAML file
-with a plain-text editor, or the file will be corrupted.
+The Settings dropdown provides options for saving and loading settings, and 
+restoring the default settings. The settings include all the user's selections in 
+the app. These are automatically saved in the browser's *local storage*, and restored 
+when the app is restarted in the same browser, so many users will not need to 
+routinely use these manual save and load options. Situations where manual 
+saving and loading of settings will be useful include:
+- Switching between different practice contexts that require multiple setting changes
+- Switching between browsers or devices, which never share local storage
+- As a way of loading custom exercises or enabling debug mode, which cannot be done 
+  via the graphic user interface
+
+When Save Settings is selected in the dropdown, a file named `rhythm-settings.yaml`
+is stored in the browser's default download folder (typically `Downloads` or `My 
+Documents`) in YAML format. The Load Settings button restores the settings from the 
+selected `.yaml` file. *It is essential that modification of a YAML file be done
+with a plain-text editor, or the file will be corrupted.*
 
 ### Debug mode
 

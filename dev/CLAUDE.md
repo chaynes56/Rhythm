@@ -2,18 +2,27 @@
 
 Guidance for Claude Code. Read this at session start. Full session history is in `dev/AI/Claude/MEMORY.md` (local only, not in git) — read it when older context matters.
 
+## Interaction style and limits
+
+If a task is taking many tool calls with no visible evidence of progress -- roughly
+15 minutes of work without a clear milestone -- stop and report status rather than
+continuing silently. Exceptions: the user has already approved a plan, or the task
+is a routine wrap-up/commit/summary sequence.
+
 ## Running the App
 
 ```bash
 python app/main.py          # runs on http://localhost:8006 in debug mode
 ```
 
-Dependencies are managed via `app/pyproject.toml` with a virtual env at `.venv/`. Python 3.14+ required.
+Dependencies are managed via `app/pyproject.toml` with a virtual env at `.venv/`. 
+Python 3.14+ required. 
 
 
 ## Architecture
 
-This is a **Plotly/Dash** web app (single file: `app/main.py`) for percussion/rhythm analysis. Deployed to Plotly cloud (URL in README.md).
+This is a **Plotly/Dash** web app (single file: `app/main.py`) for percussion/rhythm 
+analysis. Deployed to Plotly cloud (URL in README.md). 
 
 ### Two-layer design: Python server + JavaScript client
 
@@ -105,8 +114,6 @@ The app measures output latency to synchronise recording start with metronome be
   cancels it; `cancelPendingRecording()` cancels it too.
 - Safety net now restores the calibrate button text/state when it legitimately fires.
 - `decodeAudioData` `.catch` now restores the calibrate button (handles audio pipeline failures).
-- Calibration hang when results are bad still under investigation (new clue: seems correlated
-  with first occurrence of really bad calibration results -- possibly auto-retry interaction).
 - Auto-reload on browser startup (Brave session restore race):
   - Replaced `sessionStorage` (Brave restores it across restarts, defeating the guard) with
     `performance.navigation.type === 'reload'` check.
@@ -116,8 +123,28 @@ The app measures output latency to synchronise recording start with metronome be
     actually responds 200.
   - All poll failures now logged (no silent swallowing).
 
-**Open:** voicing options and associated behavior not yet implemented. Calibration hang when
-results are very bad may have a remaining cause not yet identified (session ended mid-analysis).
+**Calibration hang diagnosed + orphaned chain fix + cleanup (main.py + recorder.js, this session):**
+
+- Hang was caused by stale Werkzeug reloader child processes (Dash debug mode spawns parent +
+  child; PyCharm Stop only killed the parent; orphaned children held port 8006 across "restarts").
+  Browser always talked to the old server. Fix: `use_reloader=False` in `app.run()` -- single
+  process, PyCharm Stop kills it cleanly. Hard-reload browser (`Cmd+Shift+R`) after every restart.
+- Diagnostic logging added and removed: `[CAL-DIAG]` tags in stop event handler, wavReader.loadend
+  routing, safety net, and auto-retry callback. Confirmed the JS async chain is healthy.
+- Orphaned calibration chain fix (recorder.js): `wasCalibration = calibrationMode` captured at
+  `configureMediaRecorder()` call time. When quick-succession clicks cause the previous cycle's
+  async chain to complete after a new calibration has already started, `calibrationRecordingEnded`
+  is already false; the new `wasCalibration` branch discards the orphaned audio instead of routing
+  it to `audio-process-btn` (which was causing junk offset spikes of ~120ms in the display).
+- Auto-retry removed (main.py): `calibration-auto-retry-done` store and clientside callback that
+  fired `startCalibration()` when `offset_ms < -20` are gone. The retry added complexity and never
+  fired in practice (system offset is consistently +40ms). If a large negative offset appears, it
+  will be visible directly in the calibration value box.
+- Red calibration value fixed: `round(phase_offset_s * 1000, 1)` -> `round(phase_offset_s * 1000)`
+  (integer). Browser's `step=1` validation on the number input flagged non-integer values (44.5,
+  45.5 ms) as invalid and rendered them red. Same fix applied to `std_ms`.
+
+**Open:** None.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 
