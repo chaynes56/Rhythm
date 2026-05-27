@@ -1,5 +1,76 @@
 const VERSION = "0.1.4";
 
+// Auto-reload when Dash assets fail to load on browser startup.
+// Brave (and other Chromium browsers) restore session tabs immediately, which can
+// race with Flask debug-mode's reloader restarting its worker -- the HTML is served
+// but _dash-component-suites/... requests return 500, breaking React/Plotly.
+//
+// Two failure modes are handled:
+//   1. Static <script> tag failures  -> capture-phase 'error' event on window
+//   2. Webpack async chunk failures  -> 'unhandledrejection' (ChunkLoadError)
+//      These are Dash components loaded at runtime via dynamic import(), e.g.
+//      async-dropdown.js.  They never reach the <script> error listener.
+//
+// Both trigger the same recovery: poll /_dash-dependencies until the server
+// responds 200, then reload.  Loop prevention: performance.navigation.type
+// tells us if THIS load was itself a programmatic reload; if so we skip
+// registration.  (sessionStorage is avoided -- Brave restores it across
+// browser restarts, defeating a flag written there.)
+(function() {
+    try {
+        var nav = performance.getEntriesByType('navigation');
+        if (nav.length && nav[0].type === 'reload') return;
+    } catch (e) {}
+
+    var reloading = false;
+
+    function triggerReload(reason) {
+        if (reloading) return;
+        reloading = true;
+        console.warn('Rhythm: ' + reason + ' -- polling /_dash-dependencies before reload');
+        var attempts = 0;
+        function poll() {
+            if (attempts++ > 30) {
+                console.error('Rhythm: server unresponsive after 30 s -- giving up on auto-reload');
+                return;
+            }
+            fetch('/_dash-dependencies')
+                .then(function(r) {
+                    if (r.ok) {
+                        console.warn('Rhythm: server ready -- reloading');
+                        window.location.reload();
+                    } else {
+                        console.warn('Rhythm: /_dash-dependencies returned ' + r.status + ', retrying in 1 s');
+                        setTimeout(poll, 1000);
+                    }
+                })
+                .catch(function(err) {
+                    console.warn('Rhythm: fetch /_dash-dependencies failed (' + err + '), retrying in 1 s');
+                    setTimeout(poll, 1000);
+                });
+        }
+        setTimeout(poll, 500);
+    }
+
+    // Static <script> tag load failures (e.g. plotly.min.js returns 500).
+    window.addEventListener('error', function(ev) {
+        var t = ev.target || ev.srcElement;
+        if (t && t.tagName === 'SCRIPT') {
+            triggerReload('Dash script load failed (' + (t.src || 'unknown') + ')');
+        }
+    }, true /* capture phase -- resource errors do not bubble */);
+
+    // Webpack async chunk failures (e.g. async-dropdown.js, async-graph.js).
+    // These are thrown as ChunkLoadError by the webpack runtime and surface as
+    // unhandled promise rejections -- the <script> error listener never sees them.
+    window.addEventListener('unhandledrejection', function(ev) {
+        var msg = ev.reason ? String(ev.reason.message || ev.reason) : '';
+        if (msg.indexOf('Loading chunk') !== -1) {
+            triggerReload('Webpack chunk load failed (' + msg + ')');
+        }
+    });
+}());
+
 if (!window.dash_clientside) {
     window.dash_clientside = {};
 }
@@ -61,6 +132,7 @@ let currentRecordingPhase = 'idle';
 let calibrationMode = false;
 let calibrationWarmupMeasures = 3;  // 3 for auto-cal (cold pipeline), 1 for manual (already warm)
 let calibrationRecordingEnded = false;  // snapshotted synchronously so stop-event handler routes correctly
+let calibrationSafetyNetTimeout = null;  // timer ID for the per-calibration safety net; cancelled on new start
 let exerciseSchedule = null;  // null = free mode; set to {schedule, duration, spb} in exercise mode
 let lastExerciseCellId = null;
 let metronomeState = {
@@ -639,6 +711,13 @@ function configureMediaRecorder(stream) {
                 });
             }).catch((err) => {
                 console.error('decodeAudioData failed:', err);
+                // Restore calibrate button if audio processing failed mid-calibration.
+                const btn = document.getElementById('calibrate-btn');
+                if (btn && btn.textContent === 'Calibrating...') {
+                    btn.textContent = 'Calibrate';
+                    btn.disabled = false;
+                    btn.className = btn.className.replace(/\bbtn-secondary\b/g, '').trim() + ' btn-warning';
+                }
             }).finally(() => {
                 if (decodeCtx && decodeCtx.state !== 'closed') {
                     decodeCtx.close().catch(() => {
@@ -652,6 +731,10 @@ function configureMediaRecorder(stream) {
 function cancelPendingRecording() {
     pendingRecordingRequestId += 1;
     clearRecordingTimers();
+    if (calibrationSafetyNetTimeout !== null) {
+        clearTimeout(calibrationSafetyNetTimeout);
+        calibrationSafetyNetTimeout = null;
+    }
     cleanupRecordingStream();
     if (mediaRecorder && mediaRecorder.state !== 'inactive') {
         try {
@@ -1054,6 +1137,14 @@ try {
         },
 
         startCalibration: function() {
+            // Cancel any stale safety net from a previous calibration run before
+            // doing anything else -- this is the primary guard against old timers
+            // interfering with the new calibration.
+            if (calibrationSafetyNetTimeout !== null) {
+                clearTimeout(calibrationSafetyNetTimeout);
+                calibrationSafetyNetTimeout = null;
+            }
+
             if (currentRecordingPhase !== 'idle') {
                 cancelPendingRecording();
             }
@@ -1124,6 +1215,12 @@ try {
                     const calDurationMs = calibrationTrackBuffer.duration * 1000 + 500;
                     recordingTimeout = setTimeout(() => {
                         if (mediaRecorder && mediaRecorder.state === 'recording') {
+                            // Normal completion -- cancel safety net before flipping the flag
+                            // so no stale timer can race with the stop event.
+                            if (calibrationSafetyNetTimeout !== null) {
+                                clearTimeout(calibrationSafetyNetTimeout);
+                                calibrationSafetyNetTimeout = null;
+                            }
                             calibrationRecordingEnded = true;
                             calibrationMode = false;
                             mediaRecorder.stop();
@@ -1137,6 +1234,10 @@ try {
 
             }).catch(err => {
                 console.error('startCalibration failed:', err);
+                if (calibrationSafetyNetTimeout !== null) {
+                    clearTimeout(calibrationSafetyNetTimeout);
+                    calibrationSafetyNetTimeout = null;
+                }
                 calibrationMode = false;
                 calibrationRecordingEnded = false;
                 setRecordingPhase('idle');
@@ -1148,13 +1249,23 @@ try {
                 }
             });
 
-            // Safety net
-            setTimeout(() => {
+            // Safety net: stored so the NEXT startCalibration call can cancel it.
+            // Without this, stale timers from earlier calibrations fire during later
+            // ones and corrupt the calibrationRecordingEnded flag (the primary hang bug).
+            calibrationSafetyNetTimeout = setTimeout(() => {
+                calibrationSafetyNetTimeout = null;
                 if (calibrationMode || currentRecordingPhase !== 'idle') {
                     console.log('startCalibration: safety-net stop');
                     calibrationMode = false;
                     calibrationRecordingEnded = false;
                     stopActiveRecording();
+                    // Restore button -- normal completion path doesn't run in a genuine hang.
+                    const btn = document.getElementById('calibrate-btn');
+                    if (btn && btn.textContent === 'Calibrating...') {
+                        btn.textContent = 'Calibrate';
+                        btn.disabled = false;
+                        btn.className = btn.className.replace(/\bbtn-secondary\b/g, '').trim() + ' btn-warning';
+                    }
                 }
             }, 20000);
         },
