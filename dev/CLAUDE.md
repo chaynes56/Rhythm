@@ -66,32 +66,33 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-26
+## Last session -- 2026-05-27
 
-**Warmup UX: Record and Calibrate buttons disabled during 8s warmup (main.py, recorder.js):**
+**Auto-persist settings to localStorage + Default Settings button (main.py, df9150d):**
 
-- Both buttons render as "Warming Up..." (disabled) from first paint via Python layout
-  initial state; re-enabled by a new Dash clientside callback keyed off `warmup-info-store`
-  completing. This makes `disabled` a proper Dash-managed prop so React never resets it.
-- Root cause of post-warmup inoperative buttons: `disabled=True` was only in the layout,
-  not in any callback Output. Any subsequent callback re-render reset it to True.
-- `recording-phase-sync -> recording-phase-store` callback gained `prevent_initial_call=True`
-  to stop it chaining into `update_record_button` at page load and overwriting the warmup label.
-- `update_record_button` gained `prevent_initial_call=True`; fires only on real phase changes.
-- `process_audio`: guard `tempo` against None with `(tempo or 120)`.
+- `dcc.Store(id="local-settings-store", storage_type="local")` -- Dash persists this to
+  browser localStorage automatically. A clientside callback watching all 13 settings inputs
+  writes their values there on every change (`prevent_initial_call=True` skips first render).
+- On page load, a second clientside callback reads `local-settings-store` and serializes the
+  dict to a YAML string via `set_props` into `settings-raw-store`, which feeds the existing
+  `load_settings` Python callback. `dcc.Store(id="startup-applied-store", storage_type="memory",
+  data=False)` (per-session flag) breaks the loop: after `load_settings` updates the 13
+  components, the auto-save fires and re-writes `local-settings-store`, which re-triggers the
+  startup callback -- but the flag is already True so it no-ops.
+- "Default Settings" button added to button row (after "Load Settings"). Python callback pushes
+  `DEFAULT_SETTINGS_YAML` to `settings-raw-store`; `load_settings` applies it; auto-save then
+  captures the defaults to localStorage. `default_settings` is the sole formal owner of
+  `settings-raw-store.data`; startup restore uses `set_props` to avoid duplicate-output conflict.
 
-**Code hygiene (main.py, recorder.js):**
+**Consolidate buttons into dropdowns; rename heading (main.py, d76fb63):**
 
-- Removed dead constants `DEVIATION_WARN_MS`, `DEVIATION_ALERT_MS`, `RECORDING_PRE_ROLL_SECONDS`
-  (values already drawn from `TRAINING_LEVEL` in callbacks; Python-side duplicate of JS constant).
-- `var` -> `const`/`let` in warning-suppressor IIFE; destructure `payload` in
-  `loadCalibrationTrack` to resolve `first_beat_ms` IDE warning.
-
-**Tooling:**
-
-- `dev/bump-version` renamed to `dev/bump`; default part is `patch`; added Plotly reminder.
-- `v0.1.4 -> v0.1.4` in git push output is standard git tag push notation (local -> remote),
-  not a bump-my-version error.
+- Play/Save/Load Recording collapsed into a single `dbc.DropdownMenu(label="Recordings")` with
+  three `dbc.DropdownMenuItem` children, keeping the same IDs (`play-btn`, `save-btn`,
+  `load-btn`) so all existing callbacks are unchanged.
+- Save/Load/Default Settings collapsed into `dbc.DropdownMenu(label="Settings")` the same way.
+- Card header renamed: "Recording -- Playback -- Settings" -> "Recordings -- Settings -- Calibration".
+- `update_play_button` callback: dropped `Output("play-btn", "color")` -- `DropdownMenuItem`
+  has no `color` prop. Item label still toggles between "Play Recording" / "Stop Playback".
 
 **Open:** voicing options and associated behavior not yet implemented.
 
