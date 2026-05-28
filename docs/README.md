@@ -263,15 +263,15 @@ The technically proficient may download the app from its
 computer) instead of relying on the `plotly.app` server. This might result in better
 performance.
 
-## Issues, suggestions and collaboration
+## Issues and suggestions
 
 Please report performance issues (bugs) and improvement suggestions using 
 [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
 
-This form may also be used to inquire about making contributions to this open 
-source project. 
+## Collaboration and credits
 
-## Credits
+Those interested in contributing to development of this open source project see the 
+[development notes](https://chaynes56.github.io/Rhythm/#/DevNotes). 
 
 Thanks to Julian Douglas of [RhythmArise](https://rhythmarise.com/) for consultation,
 inspiration, voicing tones, and the 

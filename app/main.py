@@ -37,6 +37,7 @@ _custom_exercises_text: str = ""
 from audio_utils import (
     CALIBRATION_BPM,
     CALIBRATION_BEATS,
+    CALIBRATION_FAIL_STD,
     METRONOME_MAX_LOOP_SECONDS,
     WAVEFORM_DISPLAY_SHIFT_SECONDS,
     build_spectrum_figure,
@@ -716,30 +717,38 @@ def process_calibration(base64_audio, debug_mode_store, warmup_info_str):
         residuals = np.where(residuals > seconds_per_beat / 2, residuals - seconds_per_beat, residuals)
         phase_offset_s = float(np.median(residuals))
         offset_ms = round(phase_offset_s * 1000)
-        std_ms = round(float(np.std(residuals)) * 1000)
-        confidence_str = f"±{std_ms} ms"
+        std_ms = round(float(np.std(residuals)) * 1000, 1)
         print(f"process_calibration: offset={offset_ms}ms std={std_ms}ms from {len(beat_times)} beats")
         debug = is_debug_mode(debug_mode_store)
-        msg = f"Calibrated: {offset_ms} ms (std {std_ms} ms)" if debug else ""
+        failed = std_ms >= CALIBRATION_FAIL_STD
 
-        # Build user-context update to persist calibration for this platform
+        if failed:
+            fail_str = f"Calibration failure: {offset_ms} +/- {std_ms} ms"
+            confidence_display = html.Span(fail_str, style={"color": "#dc3545"})
+            msg = fail_str if debug else ""
+        else:
+            confidence_display = f"±{std_ms} ms" if debug else ""
+            msg = f"Calibrated: {offset_ms} ms (std {std_ms} ms)" if debug else ""
+
+        # Build user-context update only on success
         new_context = no_update
-        try:
-            if warmup_info_str:
-                info = json.loads(warmup_info_str)
-                new_context = {
-                    "platform_key": info.get("platform_key", ""),
-                    "calibration_offset_ms": offset_ms,
-                    "confidence_ms": std_ms,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                }
-        except (json.JSONDecodeError, AttributeError):
-            pass
+        if not failed:
+            try:
+                if warmup_info_str:
+                    info = json.loads(warmup_info_str)
+                    new_context = {
+                        "platform_key": info.get("platform_key", ""),
+                        "calibration_offset_ms": offset_ms,
+                        "confidence_ms": std_ms,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                    }
+            except (json.JSONDecodeError, AttributeError):
+                pass
 
-        if not debug:
-            return offset_ms, msg, no_update, no_update, no_update, offset_ms, confidence_str, new_context
+        if not failed and not debug:
+            return offset_ms, msg, no_update, no_update, no_update, offset_ms, confidence_display, new_context
 
-        # Debug: show calibration waveform with beat markers
+        # Failure or debug: show calibration waveform with beat markers
         duration = len(y) / sr
         bpm = 4
         mpp = CALIBRATION_BEATS // bpm
@@ -765,7 +774,8 @@ def process_calibration(base64_audio, debug_mode_store, warmup_info_str):
             "spectrum_psd": [],
             "duration": duration,
         }
-        return offset_ms, msg, json.dumps(save_data), True, fig, offset_ms, confidence_str, new_context
+        cal_out = no_update if failed else offset_ms
+        return cal_out, msg, json.dumps(save_data), True, fig, cal_out, confidence_display, new_context
     except Exception as e:
         print(f"process_calibration error: {e}")
         return no_update, f"Calibration failed: {e}", *nu8[2:]

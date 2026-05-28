@@ -21,9 +21,9 @@ using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359Zcoi
 2. Optionally, in GitHub: Releases → Draft a new release → choose your tag → write a
    short description → Publish release
 
-Just using `patch` in initial development: Version 0.1.x versions may introduce new
-features. After version 0.2.0 significant new features are to have new minor versions
-with corresponding release notes. Should start CHANGELOG.md then, if not earlier.
+Only `patch` has been used in initial development, so `0.1.x` versions may introduce new
+features. After version `0.2.0` significant new features are to have new minor versions
+with corresponding release notes. Should start `CHANGELOG.md` then, if not earlier.
 
 ## Publishing
 

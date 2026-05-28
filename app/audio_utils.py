@@ -26,6 +26,7 @@ CALIBRATION_BPM = 200        # fixed BPM used for all calibration recordings
 CALIBRATION_BEATS = 10       # number of beats in the calibration track
 CALIBRATION_TONE = 'high'    # tone type for calibration ticks
 CALIBRATION_WARMUP_MS = 200  # silence prefix in the calibration track (ms)
+CALIBRATION_FAIL_STD = 2     # std threshold (ms) above which calibration is rejected
 
 # ---------------------------------------------------------------------------
 # Waveform display constants
