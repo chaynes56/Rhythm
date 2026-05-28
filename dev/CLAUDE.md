@@ -75,74 +75,24 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-27
+## Last session -- 2026-05-28
 
-**Auto-persist settings to localStorage + Default Settings button (main.py, df9150d):**
+**Calibration failure detection (main.py + audio_utils.py, cc304ff):**
 
-- `dcc.Store(id="local-settings-store", storage_type="local")` -- Dash persists this to
-  browser localStorage automatically. A clientside callback watching all 13 settings inputs
-  writes their values there on every change (`prevent_initial_call=True` skips first render).
-- On page load, a second clientside callback reads `local-settings-store` and serializes the
-  dict to a YAML string via `set_props` into `settings-raw-store`, which feeds the existing
-  `load_settings` Python callback. `dcc.Store(id="startup-applied-store", storage_type="memory",
-  data=False)` (per-session flag) breaks the loop: after `load_settings` updates the 13
-  components, the auto-save fires and re-writes `local-settings-store`, which re-triggers the
-  startup callback -- but the flag is already True so it no-ops.
-- "Default Settings" button added to button row (after "Load Settings"). Python callback pushes
-  `DEFAULT_SETTINGS_YAML` to `settings-raw-store`; `load_settings` applies it; auto-save then
-  captures the defaults to localStorage. `default_settings` is the sole formal owner of
-  `settings-raw-store.data`; startup restore uses `set_props` to avoid duplicate-output conflict.
+- `CALIBRATION_FAIL_STD = 1.5` ms added to `audio_utils.py` (user later edited from 2 to 1.5).
+- `std_ms` restored to `.1f` float format (`round(..., 1)`); was integer after previous session.
+- On failure (`std_ms >= CALIBRATION_FAIL_STD`): show red `html.Span` "Calibration failure:
+  <median> +/- <std> ms" in the `calibration-confidence` span; do not update
+  `calibration-value`, `calibration-offset-store`, or `user-context`.
+- Confidence string (`±{std_ms} ms`) now shown only in debug mode on successful calibration;
+  empty string returned in non-debug success path.
+- Waveform analysis always shown on failure (debug or not); skipped on non-debug success.
+  Achieved by restructuring: single waveform-building block shared by failure and debug-success
+  paths; `cal_out = no_update if failed else offset_ms` controls whether value updates.
 
-**Consolidate buttons into dropdowns; rename heading (main.py, d76fb63):**
+**Move dev/Notes.md -> docs/DevNotes.md (cc304ff):**
 
-- Play/Save/Load Recording collapsed into a single `dbc.DropdownMenu(label="Recordings")` with
-  three `dbc.DropdownMenuItem` children, keeping the same IDs (`play-btn`, `save-btn`,
-  `load-btn`) so all existing callbacks are unchanged.
-- Save/Load/Default Settings collapsed into `dbc.DropdownMenu(label="Settings")` the same way.
-- Card header renamed: "Recording -- Playback -- Settings" -> "Recordings -- Settings -- Calibration".
-- `update_play_button` callback: dropped `Output("play-btn", "color")` -- `DropdownMenuItem`
-  has no `color` prop. Item label still toggles between "Play Recording" / "Stop Playback".
-
-**Calibration hang fix + browser startup auto-reload (recorder.js, 57fd8c2):**
-
-- Root cause of "Calibrating..." hang: each `startCalibration()` planted a 20-second safety-net
-  `setTimeout` whose ID was never saved. After 3-4 calibrations the safety net from call N fired
-  during call N+3/4, cleared `calibrationRecordingEnded`, routing audio to `audio-process-btn`
-  instead of `calibration-process-btn`. Button stayed disabled permanently.
-- Fix: added `calibrationSafetyNetTimeout` module variable; each new `startCalibration()` cancels
-  the previous safety net first; the normal completion path (inside `recordingTimeout`) also
-  cancels it; `cancelPendingRecording()` cancels it too.
-- Safety net now restores the calibrate button text/state when it legitimately fires.
-- `decodeAudioData` `.catch` now restores the calibrate button (handles audio pipeline failures).
-- Auto-reload on browser startup (Brave session restore race):
-  - Replaced `sessionStorage` (Brave restores it across restarts, defeating the guard) with
-    `performance.navigation.type === 'reload'` check.
-  - Added `unhandledrejection` handler for webpack async `ChunkLoadError` (chunk 157/746 etc.)
-    -- these are dynamic `import()` failures, invisible to the `<script>` error listener.
-  - Replaced fixed 1.5 s delay with `/_dash-dependencies` polling; only reloads when server
-    actually responds 200.
-  - All poll failures now logged (no silent swallowing).
-
-**Calibration hang diagnosed + orphaned chain fix + cleanup (main.py + recorder.js, this session):**
-
-- Hang was caused by stale Werkzeug reloader child processes (Dash debug mode spawns parent +
-  child; PyCharm Stop only killed the parent; orphaned children held port 8006 across "restarts").
-  Browser always talked to the old server. Fix: `use_reloader=False` in `app.run()` -- single
-  process, PyCharm Stop kills it cleanly. Hard-reload browser (`Cmd+Shift+R`) after every restart.
-- Diagnostic logging added and removed: `[CAL-DIAG]` tags in stop event handler, wavReader.loadend
-  routing, safety net, and auto-retry callback. Confirmed the JS async chain is healthy.
-- Orphaned calibration chain fix (recorder.js): `wasCalibration = calibrationMode` captured at
-  `configureMediaRecorder()` call time. When quick-succession clicks cause the previous cycle's
-  async chain to complete after a new calibration has already started, `calibrationRecordingEnded`
-  is already false; the new `wasCalibration` branch discards the orphaned audio instead of routing
-  it to `audio-process-btn` (which was causing junk offset spikes of ~120ms in the display).
-- Auto-retry removed (main.py): `calibration-auto-retry-done` store and clientside callback that
-  fired `startCalibration()` when `offset_ms < -20` are gone. The retry added complexity and never
-  fired in practice (system offset is consistently +40ms). If a large negative offset appears, it
-  will be visible directly in the calibration value box.
-- Red calibration value fixed: `round(phase_offset_s * 1000, 1)` -> `round(phase_offset_s * 1000)`
-  (integer). Browser's `step=1` validation on the number input flagged non-integer values (44.5,
-  45.5 ms) as invalid and rendered them red. Same fix applied to `std_ms`.
+- File moved and docs/README.md updated (collaboration section links to DevNotes).
 
 **Open:** None.
 
