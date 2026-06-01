@@ -16,6 +16,8 @@ voicing_code = {  # the keys are voicing characters
     's': dict(name='slap', tone='sub'),
     't': dict(name='tone', tone='high'),
     'F': dict(name='flam', tone='high'),
+    'm': dict(name='mute', tone='mute'),
+    'q': dict(name='quiet', tone='quiet'),
     '.': dict(name='ghost note', tone='none'),
 }
 voicing_characters = ''.join(list(voicing_code.keys()))

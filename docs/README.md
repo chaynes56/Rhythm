@@ -252,7 +252,8 @@ of a name line followed by one or more patterns.
   corresponding subdivision's letters or beat integer. Multiple pattern lines in a
   measure line group share the same subdivision line.
 - A *voicing character* is one of those in the following key, which also indicates the
-  common name: `x: any, B: base, l: low, h: high, s: slap, t: tone, F: flam, .: ghost note`.
+  common name: `x: any, B: base, l: low, h: high, s: slap, t: tone, F: flam, m: mute,
+   q: quiet, .: ghost note`.
 
 ## Local server
 

@@ -61,12 +61,14 @@ FFT_DISPLAY_POINTS = 500        # log-spaced output points for serialization
 # Metronome constants
 # ---------------------------------------------------------------------------
 
-# name -> {synth_frequency_hz, synth_duration_s, voicing_code}
-METRONOME_TONES: dict[str, tuple[int, float, str]] = {
-    'low':  (294,  0.040, 'B'),
-    'mid':  (440,  0.040, 'l'),
-    'high': (587,  0.040, 'h'),
-    'sub':  (1200, 0.010, ''),
+# name -> (synth, voicing_code), where synth = (frequency_hz, duration_s, volume_%)
+METRONOME_TONES: dict[str, tuple[tuple[int, float, float], str]] = {
+    'low':  ((294,  0.040, 100), 'B'),
+    'mid':  ((440,  0.040, 100), 'l'),
+    'high': ((587,  0.040, 100), 'h'),
+    'quiet': ((587,  0.040, 25), 'q'),
+    'mute': ((587,  0.040, 50), 'm'),
+    'sub':  ((1200, 0.010, 100), ''),
 }
 
 METRONOME_SAMPLE_RATE = 22050
@@ -491,7 +493,7 @@ _sample_cache: dict[tuple[str, str, int], np.ndarray] = {}
 
 
 def _make_synth_tick(sr: int, tone_type: str) -> np.ndarray:
-    freq, duration, _voicing = METRONOME_TONES[tone_type]
+    (freq, duration, _volume), _voicing = METRONOME_TONES[tone_type]
     n = int(sr * duration)
     t = np.arange(n) / sr
     return np.sin(2 * np.pi * freq * t) * np.exp(-40 * t)
@@ -517,7 +519,7 @@ def _get_tick(sr: int, tone_type: str, vs: str = 'synthesized',
               vc_char: str | None = None) -> np.ndarray:
     if vs == 'synthesized':
         return _make_synth_tick(sr, tone_type)
-    char = vc_char if vc_char else METRONOME_TONES[tone_type][2]
+    char = vc_char if vc_char else METRONOME_TONES[tone_type][1]
     if not char:  # 'sub' has no VC char; keep synthesized
         return _make_synth_tick(sr, tone_type)
     return _load_sample(vs, char, sr)

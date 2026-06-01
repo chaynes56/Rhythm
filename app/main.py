@@ -131,6 +131,8 @@ exercise-name: ~
 custom-exercises: |-
 show-intervals: false
 show-spectrum: false
+metronome-voicing: synthesized
+exercise-voicing: synthesized
 """
 
 settings = yaml.safe_load(DEFAULT_SETTINGS_YAML)
@@ -423,7 +425,11 @@ app.layout = dbc.Container([
                                 html.Label("Exercise Voicing", className="small mt-2"),
                                 dcc.Dropdown(
                                     id="exercise-voicing",
-                                    options=[{"label": "Synthesized", "value": "synthesized"}],
+                                    options=[
+                                        {"label": "Synthesized", "value": "synthesized"},
+                                        {"label": "Djembe",      "value": "Djembe"},
+                                        {"label": "Darbuka",     "value": "Darbuka"},
+                                    ],
                                     value="synthesized",
                                     clearable=False,
                                     style={"width": "175px"},
@@ -433,7 +439,11 @@ app.layout = dbc.Container([
                                 html.Label("Metronome Voicing", className="small mt-2"),
                                 dcc.Dropdown(
                                     id="metronome-voicing",
-                                    options=[{"label": "Synthesized", "value": "synthesized"}],
+                                    options=[
+                                        {"label": "Synthesized", "value": "synthesized"},
+                                        {"label": "Djembe",      "value": "Djembe"},
+                                        {"label": "Darbuka",     "value": "Darbuka"},
+                                    ],
                                     value="synthesized",
                                     clearable=False,
                                     style={"width": "175px"},
@@ -804,10 +814,13 @@ def calibration_value_edited(value):
     Input("play-subdivisions", "value"),
     Input("play-tones", "value"),
     Input("play-only-tones", "value"),
+    Input("metronome-voicing", "value"),
+    Input("exercise-voicing",  "value"),
     prevent_initial_call="initial_duplicate",
 )
 def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi, play_only_low,
-                           exercise_name, play_subdivisions, play_tones, play_only_tones):
+                           exercise_name, play_subdivisions, play_tones, play_only_tones,
+                           metro_vs, exercise_vs):
     try:
         t = tempo or 120
         exercise_patterns = None
@@ -835,6 +848,8 @@ def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_
             play_tones=bool(play_tones),
             char_tone_map=char_tone_map,
             play_only_tones=bool(play_only_tones),
+            metro_vs=metro_vs or 'synthesized',
+            exercise_vs=exercise_vs or 'synthesized',
         )
         print(f"update_metronome_track: {beats_per_measure}/{measures_per_pattern} at {t} BPM, exercise={exercise_name!r}")
         return data_url, no_update
@@ -2302,11 +2317,14 @@ clientside_callback(
     State("exercise-select", "value"),
     State("show-intervals", "value"),
     State("show-spectrum", "value"),
+    State("metronome-voicing", "value"),
+    State("exercise-voicing",  "value"),
     prevent_initial_call=True,
 )
 def save_settings(_n_clicks, training_level, subdivisions, rec_vol, play_vol,
                   measures, beats, play_hi, play_only_low, tempo, metro_vol,
-                  exercise_name, show_intervals, show_spectrum):
+                  exercise_name, show_intervals, show_spectrum,
+                  metronome_voicing, exercise_voicing):
     current = {
         "training-level": training_level,
         "subdivisions-per-beat": subdivisions,
@@ -2323,6 +2341,8 @@ def save_settings(_n_clicks, training_level, subdivisions, rec_vol, play_vol,
         "custom-exercises": _custom_exercises_text,
         "show-intervals": bool(show_intervals),
         "show-spectrum": bool(show_spectrum),
+        "metronome-voicing": metronome_voicing or "synthesized",
+        "exercise-voicing":  exercise_voicing  or "synthesized",
     }
     buf = io.StringIO()
     yaml.dump(current, buf, default_flow_style=False, sort_keys=False)
@@ -2346,13 +2366,15 @@ def save_settings(_n_clicks, training_level, subdivisions, rec_vol, play_vol,
     Output("exercise-select", "options", allow_duplicate=True),
     Output("show-intervals", "value", allow_duplicate=True),
     Output("show-spectrum", "value", allow_duplicate=True),
+    Output("metronome-voicing", "value", allow_duplicate=True),
+    Output("exercise-voicing",  "value", allow_duplicate=True),
     Input("settings-raw-store", "data"),
     prevent_initial_call=True,
 )
 def load_settings(data):
     if data is None:
         raise PreventUpdate
-    no_change = (no_update,) * 16  # 10 settings + status-msg + debug-mode-store + exercise-select + options + 2 toggles
+    no_change = (no_update,) * 18  # 10 settings + status-msg + debug-mode-store + exercise-select + options + 2 toggles + 2 voicings
     try:
         text = data["content"]
         try:
@@ -2362,7 +2384,7 @@ def load_settings(data):
             line_num = getattr(mark, "line", None)
             loc = f" at line {line_num}" if line_num is not None else ""
             prob = getattr(ye, "problem", str(ye))
-            err = [no_update] * 16
+            err = [no_update] * 18
             err[10] = f"Invalid YAML syntax{loc}: {prob}"
             return tuple(err)
         if not isinstance(loaded, dict):
@@ -2422,6 +2444,8 @@ def load_settings(data):
             new_options,
             bool(loaded.get("show-intervals", False)),
             bool(loaded.get("show-spectrum", False)),
+            loaded.get("metronome-voicing", "synthesized"),
+            loaded.get("exercise-voicing",  "synthesized"),
         )
     except Exception as e:
         print(f"load_settings error: {e}")
