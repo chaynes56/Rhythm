@@ -9,6 +9,7 @@ import io
 import librosa
 import numpy as np
 import os
+from pathlib import Path
 import plotly.graph_objects as go
 import soundfile as sf
 import tempfile
@@ -26,7 +27,7 @@ CALIBRATION_BPM = 200        # fixed BPM used for all calibration recordings
 CALIBRATION_BEATS = 10       # number of beats in the calibration track
 CALIBRATION_TONE = 'high'    # tone type for calibration ticks
 CALIBRATION_WARMUP_MS = 200  # silence prefix in the calibration track (ms)
-CALIBRATION_FAIL_STD = 2     # std threshold (ms) above which calibration is rejected
+CALIBRATION_FAIL_STD = 1.5   # std threshold (ms) above which calibration is rejected
 
 # ---------------------------------------------------------------------------
 # Waveform display constants
@@ -60,12 +61,12 @@ FFT_DISPLAY_POINTS = 500        # log-spaced output points for serialization
 # Metronome constants
 # ---------------------------------------------------------------------------
 
-# name -> {frequency_hz, duration_s}; tone field reserved for future audio clip routing
-METRONOME_TONES: dict[str, tuple[int, float]] = {
-    'low':  (294,  0.040),
-    'mid':  (440,  0.040),
-    'high': (587,  0.040),
-    'sub':  (1200, 0.010),
+# name -> {synth_frequency_hz, synth_duration_s, voicing_code}
+METRONOME_TONES: dict[str, tuple[int, float, str]] = {
+    'low':  (294,  0.040, 'B'),
+    'mid':  (440,  0.040, 'l'),
+    'high': (587,  0.040, 'h'),
+    'sub':  (1200, 0.010, ''),
 }
 
 METRONOME_SAMPLE_RATE = 22050
@@ -486,11 +487,40 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
 # ---------------------------------------------------------------------------
 
 
-def _make_metronome_tick(sr: int, tone_type: str) -> np.ndarray:
-    freq, duration = METRONOME_TONES[tone_type]
+_sample_cache: dict[tuple[str, str, int], np.ndarray] = {}
+
+
+def _make_synth_tick(sr: int, tone_type: str) -> np.ndarray:
+    freq, duration, _voicing = METRONOME_TONES[tone_type]
     n = int(sr * duration)
     t = np.arange(n) / sr
     return np.sin(2 * np.pi * freq * t) * np.exp(-40 * t)
+
+
+def _load_sample(vs: str, vc_char: str, sr: int) -> np.ndarray:
+    key = (vs, vc_char, sr)
+    if key in _sample_cache:
+        return _sample_cache[key]
+    path = Path(__file__).parent / "data" / vs / f"{vc_char}.wav"
+    try:
+        data, file_sr = sf.read(str(path), dtype='float32', always_2d=False)
+        if file_sr != sr:
+            data = librosa.resample(data, orig_sr=file_sr, target_sr=sr)
+    except Exception as e:
+        print(f"_load_sample: could not load {path}: {e} -- falling back to synthesized")
+        data = _make_synth_tick(sr, 'high')
+    _sample_cache[key] = data
+    return data
+
+
+def _get_tick(sr: int, tone_type: str, vs: str = 'synthesized',
+              vc_char: str | None = None) -> np.ndarray:
+    if vs == 'synthesized':
+        return _make_synth_tick(sr, tone_type)
+    char = vc_char if vc_char else METRONOME_TONES[tone_type][2]
+    if not char:  # 'sub' has no VC char; keep synthesized
+        return _make_synth_tick(sr, tone_type)
+    return _load_sample(vs, char, sr)
 
 
 def compute_calibration_track() -> dict:
@@ -508,7 +538,7 @@ def compute_calibration_track() -> dict:
     track = np.zeros(total_samples)
     for i in range(CALIBRATION_BEATS):
         start = warmup_samples + i * beat_samples
-        tick = _make_metronome_tick(sr, CALIBRATION_TONE)
+        tick = _make_synth_tick(sr, CALIBRATION_TONE)
         end = min(start + len(tick), total_samples)
         track[start:end] += tick[:end - start]
     peak = np.max(np.abs(track))
@@ -532,7 +562,8 @@ def _metro_tone(b: int, m: int, play_hi: bool, play_only_low: bool) -> tuple[str
 
 def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_hi,
                              play_only_low, exercise_patterns=None, play_subdivisions=False,
-                             play_tones=False, char_tone_map=None, play_only_tones=False):
+                             play_tones=False, char_tone_map=None, play_only_tones=False,
+                             metro_vs='synthesized', exercise_vs='synthesized'):
     sr = METRONOME_SAMPLE_RATE
     seconds_per_beat = 60.0 / tempo
 
@@ -566,16 +597,17 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
                                 if char == '.':
                                     continue
                                 tone_type = char_tone_map.get(char, 'high') if char_tone_map else 'high'
+                                tick = _get_tick(sr, tone_type, exercise_vs, vc_char=char)
                             elif play_tones and char_tone_map and char != '.':
                                 tone_type = char_tone_map.get(char, 'high')
+                                tick = _get_tick(sr, tone_type, exercise_vs, vc_char=char)
                             elif s == 0 and metro_play:
-                                tone_type = metro_tone
+                                tick = _get_tick(sr, metro_tone, metro_vs)
                             elif s > 0 and play_subdivisions:
-                                tone_type = 'sub'
+                                tick = _get_tick(sr, 'sub', metro_vs)
                             else:
                                 continue
                             start = round(t_sub * sr)
-                            tick = _make_metronome_tick(sr, tone_type)
                             end = min(start + len(tick), track_samples)
                             track[start:end] += tick[:end - start]
                 pat_offset += pat_durations[pi]
@@ -594,7 +626,7 @@ def compute_metronome_track(tempo, beats_per_measure, measures_per_pattern, play
                     if should_play:
                         beat_time = ((p * measures_per_pattern + m) * beats_per_measure + b) * seconds_per_beat
                         start = round(beat_time * sr)
-                        tick = _make_metronome_tick(sr, tone_type)
+                        tick = _get_tick(sr, tone_type, metro_vs)
                         end = min(start + len(tick), track_samples)
                         track[start:end] += tick[:end - start]
 

@@ -75,26 +75,33 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-28
+## Last session -- 2026-05-31
 
-**Calibration failure detection (main.py + audio_utils.py, cc304ff):**
+**Voicing feature -- planning and Stage 1 (audio_utils.py, not yet committed):**
 
-- `CALIBRATION_FAIL_STD = 1.5` ms added to `audio_utils.py` (user later edited from 2 to 1.5).
-- `std_ms` restored to `.1f` float format (`round(..., 1)`); was integer after previous session.
-- On failure (`std_ms >= CALIBRATION_FAIL_STD`): show red `html.Span` "Calibration failure:
-  <median> +/- <std> ms" in the `calibration-confidence` span; do not update
-  `calibration-value`, `calibration-offset-store`, or `user-context`.
-- Confidence string (`±{std_ms} ms`) now shown only in debug mode on successful calibration;
-  empty string returned in non-debug success path.
-- Waveform analysis always shown on failure (debug or not); skipped on non-debug success.
-  Achieved by restructuring: single waveform-building block shared by failure and debug-success
-  paths; `cal_out = no_update if failed else offset_ms` controls whether value updates.
+Codec decisions: WAV, 16-bit PCM, mono, individual files per VC per VS. Confirmed
+server-side Python loads samples (current architecture extended). Plotly cloud
+re-upload and file-count are non-issues. Full plan written to
+`dev/AI/Claude/Voicing-plan.md`.
 
-**Move dev/Notes.md -> docs/DevNotes.md (cc304ff):**
+Stage 1 changes to `audio_utils.py`:
+- Added `pathlib.Path` import.
+- Added `_sample_cache: dict[tuple, np.ndarray] = {}` at module level.
+- Renamed `_make_metronome_tick` -> `_make_synth_tick`.
+- Added `_load_sample(vs, vc_char, sr)`: loads `app/data/{VS}/{vc_char}.wav`,
+  resamples to `sr` if needed, caches; falls back to synthesized 'high' on missing file.
+- Added `_get_tick(sr, tone_type, vs='synthesized', vc_char=None)`: routes to
+  `_make_synth_tick` for Synthesized or sub with no VC char, else `_load_sample`.
+- Extended `compute_metronome_track` signature with `metro_vs='synthesized'` and
+  `exercise_vs='synthesized'`; all internal tick calls use `_get_tick` with the
+  appropriate VS. Exercise note ticks pass `vc_char=char` so samples are looked up
+  by VC character directly.
+- `compute_calibration_track` uses `_make_synth_tick` (always synthesized).
+- Verified: synthesized path output identical to pre-change baseline.
 
-- File moved and docs/README.md updated (collaboration section links to DevNotes).
-
-**Open:** None.
+**Open:** Stage 2 (main.py: dropdown options, callback inputs, settings save/load).
+User still needs to generate WAV files and place in `app/data/Djembe/` and
+`app/data/Darbuka/`.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 

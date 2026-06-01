@@ -239,7 +239,7 @@ app.index_string = f"""
 
 app.layout = dbc.Container([
     html.Div(
-        html.A("Help", href="https://github.com/chaynes56/Rhythm/blob/main/README.md",
+        html.A("Help", href="https://chaynes56.github.io/Rhythm/#/",
                target="_blank",
                style={"fontSize": "1.1rem", "fontWeight": "600"}),
         style={"position": "absolute", "top": "10px", "right": "20px", "zIndex": "1000"}
@@ -1196,12 +1196,13 @@ def update_beat_indicator_boxes(beats_per_measure, measures_per_pattern, exercis
 )
 def update_exercise_ui(exercise_name, tempo):
     hidden = {"display": "none"}
+    show = {"display": "block"}
     if not exercise_name:
-        return {"display": "block"}, hidden, hidden, hidden, hidden, None, no_update, no_update, no_update
+        return show, hidden, hidden, show, hidden, None, no_update, no_update, no_update
 
     all_ex = get_all_exercises()
     if exercise_name not in all_ex:
-        return {"display": "block"}, hidden, hidden, hidden, hidden, None, no_update, no_update, no_update
+        return show, hidden, hidden, show, hidden, None, no_update, no_update, no_update
     ex = all_ex[exercise_name]
 
     alert = None

@@ -1,7 +1,11 @@
-# Development notes
+# Rhythm Analyzer Development Notes
+
+This is an open source project with [Github repo](https://github.
+com/chaynes56/Rhythm) and [user documentation](https://chaynes56.github.io/Rhythm/#/).
 
 Those interested in contributing to development are encouraged to so indicate
-using [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
+and provide contact email using [this form](https://docs.google.
+com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
 
 ## Versioning
 
@@ -48,5 +52,4 @@ All documentation is in `docs/`, published via `Github Pages` using `docsify`.
 
 - Installation: `npm i docsify-cli -g; npm install -g npm@11.15.0`
 - To run local preview server: `docsify serve docs`
-- [Published view](https://chaynes56.github.io/Rhythm/#/)
 - How to add [more pages](https://docsify.js.org/#/more-pages)

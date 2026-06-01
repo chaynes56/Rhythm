@@ -19,8 +19,6 @@ capabilities and limitations.
 You may return to this page at any time via the
 [Help](https://chaynes56.github.io/Rhythm/#/) link at upper right of the app page.
 
-This is an open source project with [Github repo](https://github.com/chaynes56/Rhythm).
-
 ## Practical considerations
 
 It takes some time to start the `plotly.app` server, so app loading can take of up to a
