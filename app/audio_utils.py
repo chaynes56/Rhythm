@@ -16,6 +16,7 @@ import tempfile
 from concurrent.futures import ThreadPoolExecutor
 import warnings
 from scipy.signal import find_peaks, resample as scipy_resample, welch as scipy_welch
+from exercises import voicing_code
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
@@ -499,11 +500,11 @@ def _make_synth_tick(sr: int, tone_type: str) -> np.ndarray:
     return np.sin(2 * np.pi * freq * t) * np.exp(-40 * t) * (volume / 100.0)
 
 
-def _load_sample(vs: str, vc_char: str, sr: int) -> np.ndarray:
-    key = (vs, vc_char, sr)
+def _load_sample(vs: str, name: str, sr: int) -> np.ndarray:
+    key = (vs, name, sr)
     if key in _sample_cache:
         return _sample_cache[key]
-    path = Path(__file__).parent / "data" / vs / f"{vc_char}.wav"
+    path = Path(__file__).parent / "data" / vs / f"{name}.wav"
     try:
         data, file_sr = sf.read(str(path), dtype='float32', always_2d=False)
         if file_sr != sr:
@@ -522,7 +523,8 @@ def _get_tick(sr: int, tone_type: str, vs: str = 'synthesized',
     char = vc_char if vc_char else METRONOME_TONES[tone_type][1]
     if not char:  # 'sub' has no VC char; keep synthesized
         return _make_synth_tick(sr, tone_type)
-    return _load_sample(vs, char, sr)
+    name = voicing_code[char]['name'] if char in voicing_code else char
+    return _load_sample(vs, name, sr)
 
 
 def compute_calibration_track() -> dict:
