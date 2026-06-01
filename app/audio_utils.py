@@ -493,10 +493,10 @@ _sample_cache: dict[tuple[str, str, int], np.ndarray] = {}
 
 
 def _make_synth_tick(sr: int, tone_type: str) -> np.ndarray:
-    (freq, duration, _volume), _voicing = METRONOME_TONES[tone_type]
+    (freq, duration, volume), _voicing = METRONOME_TONES[tone_type]
     n = int(sr * duration)
     t = np.arange(n) / sr
-    return np.sin(2 * np.pi * freq * t) * np.exp(-40 * t)
+    return np.sin(2 * np.pi * freq * t) * np.exp(-40 * t) * (volume / 100.0)
 
 
 def _load_sample(vs: str, vc_char: str, sr: int) -> np.ndarray:
