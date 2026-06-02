@@ -75,33 +75,23 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-05-31
+## Last session -- 2026-06-01 (87e0e94)
 
-**Voicing feature -- planning and Stage 1 (audio_utils.py, not yet committed):**
+**Voicing feature Stages 1-2 committed:**
 
-Codec decisions: WAV, 16-bit PCM, mono, individual files per VC per VS. Confirmed
-server-side Python loads samples (current architecture extended). Plotly cloud
-re-upload and file-count are non-issues. Full plan written to
-`dev/AI/Claude/Voicing-plan.md`.
+Stage 1 (`audio_utils.py`): `METRONOME_TONES` refactored to nested pairs
+`((freq, dur, vol%), voicing_code)`; `'quiet'` (25%) and `'mute'` (50%) tone types
+added. `_make_synth_tick` and `_get_tick` updated for new structure.
 
-Stage 1 changes to `audio_utils.py`:
-- Added `pathlib.Path` import.
-- Added `_sample_cache: dict[tuple, np.ndarray] = {}` at module level.
-- Renamed `_make_metronome_tick` -> `_make_synth_tick`.
-- Added `_load_sample(vs, vc_char, sr)`: loads `app/data/{VS}/{vc_char}.wav`,
-  resamples to `sr` if needed, caches; falls back to synthesized 'high' on missing file.
-- Added `_get_tick(sr, tone_type, vs='synthesized', vc_char=None)`: routes to
-  `_make_synth_tick` for Synthesized or sub with no VC char, else `_load_sample`.
-- Extended `compute_metronome_track` signature with `metro_vs='synthesized'` and
-  `exercise_vs='synthesized'`; all internal tick calls use `_get_tick` with the
-  appropriate VS. Exercise note ticks pass `vc_char=char` so samples are looked up
-  by VC character directly.
-- `compute_calibration_track` uses `_make_synth_tick` (always synthesized).
-- Verified: synthesized path output identical to pre-change baseline.
+`exercises.py`: `'m'` (mute) and `'q'` (quiet) voicing chars added.
 
-**Open:** Stage 2 (main.py: dropdown options, callback inputs, settings save/load).
-User still needs to generate WAV files and place in `app/data/Djembe/` and
-`app/data/Darbuka/`.
+Stage 2 (`main.py`): Djembe and Darbuka options in both voicing dropdowns;
+`update_metronome_track` wired to voicing inputs; settings save/load updated
+(`no_change` / YAML-error tuple widened from 16 to 18 Outputs).
+
+**Voicing feature complete (2026-06-02).** All three stages done. Djembe and
+Darbuka voicing sets working end-to-end; settings persist; synthesized baseline
+unchanged. No open items.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 
