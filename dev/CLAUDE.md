@@ -75,23 +75,32 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-06-01 (87e0e94)
+## Last session -- 2026-06-03 (1818bc3 + pending)
 
-**Voicing feature Stages 1-2 committed:**
+**Error handling system complete (`audio_utils.py`, `main.py`, `recorder.js`):**
 
-Stage 1 (`audio_utils.py`): `METRONOME_TONES` refactored to nested pairs
-`((freq, dur, vol%), voicing_code)`; `'quiet'` (25%) and `'mute'` (50%) tone types
-added. `_make_synth_tick` and `_get_tick` updated for new structure.
+- `error-store` (dcc.Store) + `error-msg-row` div (red, with Clear button) added to
+  layout. Clear button is only visible when an error is displayed (Bootstrap `d-flex`
+  conflict with `display:none` was fixed by moving flex to inline style in callback).
+- `reportJsError()` in `recorder.js` routes all `console.error` paths to the UI
+  error div, with `SUPPRESSED_JS_ERRORS` list for easy per-message suppression.
+- All server-side callbacks now output to `error-store` on failure: `process_audio`,
+  `load_recording`, `load_settings`, `update_metronome_track`, and all five analysis
+  callbacks.
+- Dash 4 `allow_duplicate` hash collision fixed: hash is computed from Inputs only
+  (not States). Three callbacks promoted State->Input or gained a new Input to give
+  each a unique fingerprint.
 
-`exercises.py`: `'m'` (mute) and `'q'` (quiet) voicing chars added.
+**Voicing case bug fixed (`audio_utils.py`):** `vs.lower()` in `_get_tick` so
+Linux case-sensitive paths resolve for Djembe/Darbuka on Plotly cloud.
 
-Stage 2 (`main.py`): Djembe and Darbuka options in both voicing dropdowns;
-`update_metronome_track` wired to voicing inputs; settings save/load updated
-(`no_change` / YAML-error tuple widened from 16 to 18 Outputs).
+**Layout changes (`main.py`):**
+- Subdivisions/Beat dropdown moved to metronome card, below Beats/Measure.
+- Play Subdivisions switch now always visible (was hidden until exercise selected).
+- Show Intervals and Show Spectrum placed side by side in same row, bottom-aligned.
 
-**Voicing feature complete (2026-06-02).** All three stages done. Djembe and
-Darbuka voicing sets working end-to-end; settings persist; synthesized baseline
-unchanged. No open items.
+**Docs (`docs/index.html`, `docs/README.md`, `docs/DevNotes.md`):** minor content
+and formatting updates; `.markdown-section` font-size set to 18px in index.html.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 

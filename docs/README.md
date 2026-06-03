@@ -6,20 +6,21 @@ cloud server at [this page](https://2e7b9ba9-3380-4afa-b92e-f1ff3eee1007.plotly.
 
 Most common modern browsers may be used, though performance in Safari may be
 unsatisfactory. Mobile devices are much less capable of accurate timing than most laptop
-and desktop computers, but some are usable. The app performance section below provides
-more guidance on which devices, operating systems, and browsers are most likely to be
-satisfactory.
+and desktop computers, but some are usable. The App Performance Section below provides
+more guidance on which devices, operating systems, browsers and practice environments
+are most likely to be satisfactory.
 
-Trying out the app for a while is the best way to become familiar with its basic
-capabilities. After a while you will likely run into questions about aspects of the
-app's many features or wonder why it does not seem to work well in some circumstances.
-Then it is time to explore this documentation with some care to understand the apps
-capabilities and limitations.
+Begin by reviewing the following Practical Considerations section. Then trying out the
+app for a while is the best way to become familiar with its basic capabilities. After a
+while you will likely run into questions about aspects of the app's many features or
+wonder why it does not work well in some circumstances. Then it is time to explore more
+of this documentation with some care to understand the apps capabilities and
+limitations.
 
 You may return to this page at any time via the
 [Help](https://chaynes56.github.io/Rhythm/#/) link at upper right of the app page.
 
-## Practical considerations
+## Practical Considerations
 
 It takes some time to start the `plotly.app` server, so app loading can take of up to a
 minute when first visiting the page. After a fairly long period of inactivity
@@ -28,18 +29,18 @@ functionality will be lost, and it is necessary to refresh or revisit the app's 
 page.
 
 After the app is loaded, there are several additional seconds in which the Start
-Recording and Calibration buttons say `Warming up...` and are unresponsive, allowing
-time for the audio chains to stabilize before being used.
+Recording and Calibration buttons say `Warming up...` and are unresponsive. This allows
+time for the audio software to stabilize before being used.
 
 App performance is satisfactory with most Wi-Fi connections but may be unsatisfactory
-with a cellular data connection. Recording and playback are done via the browser, with
-audio sent to the server for analysis.
+with a cellular data connection. The server sends metronome and exercise tracks to the
+browser and the browser sends recordings back to the server.
 
-Browsers need permission to use the microphone. It is usually possible, via an
-appropriate privacy setting, for the browser to remember this permission for the
-`plotly.app` domain so it does not need to be granted each time the app is loaded. For
-example, in Chrome when the permission dialog appears on first visiting or restarting
-the `plotly.app` page, click Allow or Allow always or forever.
+It is necessary to grant permission for the
+`plotly.app` domain to use the microphone. Via an appropriate privacy setting it is
+usually possible to avoid having to do this every time the app is loaded. For example,
+in Chrome when the permission dialog appears on first visiting or restarting the
+`plotly.app` page, click `Allow` or `Allow always` or `Forever`.
 
 Recording length is limited to 10 minutes, at which point it stops automatically with an
 alerting tone.
@@ -47,7 +48,7 @@ alerting tone.
 Starting a recording starts the metronome as well, with a few seconds of metronome beats
 before the recording begins. This is similar to a conductor counting in the orchestra.
 
-## Analysis interpretation
+## Analysis Interpretation
 
 At risk of stating the obvious: though precision timing is an essential percussion
 skill, musical expression may include subtle timing deviations that this app cannot
@@ -59,7 +60,7 @@ was late.
 
 Deviations are color coded according to the `Training Level` selected. An expert may
 detect timing deviations of as little as 5 ms, while a deviation of 15 ms is apparent to
-most listeners. Thus deviations of less than 5 ms are indicated in green at the expert
+most listeners. Thus, deviations of less than 5 ms are indicated in green at the expert
 level, while deviations less than 15 ms are green at the beginner level and the green
 threshold for intermediate is 10 ms. Deviations up to twice the green cutoff are orange
 and over that are red.
@@ -123,7 +124,7 @@ the wrong subdivision.
 
 TODO: TABLE AND HISTOGRAM INTERPRETATION
 
-## Rhythm units and constraints
+## Rhythm Units and Constraints
 
 - **Subdivision**: The unit of time used for analysis. From 1 to 6 subdivisions per beat
   may be selected (default is 4).
@@ -158,7 +159,7 @@ will be rejected with an alert.
 
 ## Calibration
 
-## App performance issues
+## App Performance Issues
 
 For the metronome **beat indicator** (the highlighted box that advances with each beat)
 to synchronized to the audio output and recording analysis to be reasonably accurate,
@@ -263,7 +264,7 @@ The technically proficient may download the app from its
 computer) instead of relying on the `plotly.app` server. This might result in better
 performance.
 
-## Issues and suggestions
+## Issues and Suggestions
 
 Please report instances in which errors are reported (in red) along with any quoted
 details, unless of course the problem is due to known issues in your environment.
@@ -272,7 +273,7 @@ factors detailed in this documentation. Suggestions for improvement are also wel
 Please submit all such reports using
 [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
 
-## Collaboration and credits
+## Collaboration and Credits
 
 Those interested in contributing to development of this open source project see the
 [development notes](https://chaynes56.github.io/Rhythm/#/DevNotes).

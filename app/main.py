@@ -285,20 +285,11 @@ app.layout = dbc.Container([
                                     ),
                                 ], width="auto"),
                                 dbc.Col([
-                                    html.Label("Subdivisions / Beat", className="small"),
-                                    dcc.Dropdown(
-                                        id="subdivisions-per-beat",
-                                        options=[{"label": str(i), "value": i} for i in
-                                                 range(1, 7)],
-                                        value=settings["subdivisions-per-beat"],
-                                        clearable=False,
-                                        style={"width": "110px"},
-                                    ),
-                                ], width="auto"),
-                                dbc.Col([
-                                    dbc.Switch(id="show-intervals", label="Show Intervals", value=False, className="mb-1"),
-                                    dbc.Switch(id="show-spectrum", label="Show Spectrum", value=False),
-                                ], width="auto"),
+                                    html.Div([
+                                        dbc.Switch(id="show-intervals", label="Show Intervals", value=False, className="me-3"),
+                                        dbc.Switch(id="show-spectrum", label="Show Spectrum", value=False),
+                                    ], className="d-flex align-items-center"),
+                                ], width="auto", className="align-self-end"),
                             ], className="g-2 mb-2", align="center"),
                             dcc.Markdown(id="analysis-data-block"),
                         ], width="auto"),
@@ -410,7 +401,7 @@ app.layout = dbc.Container([
                                    outline=True, color="danger", className="ms-2",
                                    style={"fontSize": "0.75rem", "padding": "1px 8px"}),
                     ], id="error-msg-row",
-                       className="mt-1 d-flex align-items-center gap-2 text-danger fw-bold",
+                       className="mt-1 text-danger fw-bold",
                        style={"display": "none"}),
                 ]),
             ], className="mb-4"),
@@ -491,6 +482,15 @@ app.layout = dbc.Container([
                                         clearable=False,
                                         style={"width": "90px"},
                                     ),
+                                    html.Label("Subdivisions / Beat", className="small mt-2"),
+                                    dcc.Dropdown(
+                                        id="subdivisions-per-beat",
+                                        options=[{"label": str(i), "value": i} for i in
+                                                 range(1, 7)],
+                                        value=settings["subdivisions-per-beat"],
+                                        clearable=False,
+                                        style={"width": "90px"},
+                                    ),
                                 ]
                             ),
                         ], width="auto"),
@@ -531,7 +531,6 @@ app.layout = dbc.Container([
                                     value=False,
                                 ),
                                 id="play-subdivisions-col",
-                                style={"display": "none"},
                             ),
                         ], width="auto"),
                         dbc.Col([
@@ -1387,7 +1386,7 @@ clientside_callback(
     """
     function(errData) {
         if (errData) {
-            return [errData, {"display": "flex"}];
+            return [errData, {"display": "flex", "alignItems": "center", "gap": "0.5rem"}];
         }
         return ["", {"display": "none"}];
     }
