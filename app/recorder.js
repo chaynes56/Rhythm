@@ -92,6 +92,29 @@ if (!window.dash_clientside) {
     console.error = function() { if (!shouldSuppress(arguments)) _error.apply(console, arguments); };
 }());
 
+// App-level error routing.  Add substrings to SUPPRESSED_JS_ERRORS to keep a specific
+// error in the browser console but out of the UI error display.
+const SUPPRESSED_JS_ERRORS = [
+    // Example: 'Error playing end alarm'
+];
+
+function reportJsError(message) {
+    const msg = String(message);
+    console.error('[error]', msg);
+    if (SUPPRESSED_JS_ERRORS.some(function(p) { return msg.includes(p); })) return;
+    try {
+        window.dash_clientside.set_props('error-store', {data: 'JS: ' + msg});
+    } catch (e) { /* set_props not yet available on early errors */ }
+}
+
+window.addEventListener('unhandledrejection', function(ev) {
+    const reason = ev.reason;
+    // ChunkLoadError is handled by the auto-reload IIFE above -- skip it here.
+    const msg = reason ? String(reason.message || reason) : 'Unhandled promise rejection';
+    if (msg.indexOf('Loading chunk') !== -1) return;
+    reportJsError(msg);
+});
+
 // Timing constants
 const INITIAL_WARMUP_SECONDS = 8;      // silent warmup duration on page load
 // (Stage 2)
@@ -401,7 +424,7 @@ function _decodeMetronomeTrack(dataUrl) {
             if (pendingStart) {
                 pendingStart = false;
                 startMetronomePlayback({preserveOffset: false}).catch(err => {
-                    console.error('pendingStart auto-start failed:', err);
+                    reportJsError('pendingStart auto-start failed: ' + err);
                     setMetronomePlayingState(false);
                 });
             } else {
@@ -410,7 +433,7 @@ function _decodeMetronomeTrack(dataUrl) {
         }
         return buffer;
     }).catch(err => {
-        console.error('Metronome track decode error:', err);
+        reportJsError('Metronome track decode error: ' + err);
         return null;
     }).finally(() => {
         metronomeDecodePromise = null;
@@ -481,7 +504,7 @@ function startMetronomePlayback(options = {}) {
 
     const startScheduler = async () => {
         if (!metronomeTrackBuffer) {
-            console.error('startMetronomePlayback: no track buffer');
+            reportJsError('startMetronomePlayback: no track buffer');
             return {firstBeatDelayMs: 0, secondsPerBeat: 60 / metronomeState.tempo, outputLatencyMs: 0};
         }
 
@@ -588,7 +611,7 @@ function startMetronomePlayback(options = {}) {
             console.log('AudioContext resumed successfully');
             return startScheduler();
         }).catch(err => {
-            console.error('Failed to resume AudioContext:', err);
+            reportJsError('Failed to resume AudioContext: ' + err);
             return {firstBeatDelayMs: 0, secondsPerBeat: 60.0 / metronomeState.tempo};
         });
     }
@@ -716,7 +739,7 @@ function configureMediaRecorder(stream) {
                     }
                 });
             }).catch((err) => {
-                console.error('decodeAudioData failed:', err);
+                reportJsError('decodeAudioData failed: ' + err);
                 // Restore calibrate button if audio processing failed mid-calibration.
                 const btn = document.getElementById('calibrate-btn');
                 if (btn && btn.textContent === 'Calibrating...') {
@@ -809,7 +832,7 @@ function beginActiveRecording(requestId) {
             }
         }, maxRecordingTime);
     } catch (err) {
-        console.error('Error starting delayed recording:', err);
+        reportJsError('Error starting delayed recording: ' + err);
         cancelPendingRecording();
     }
 }
@@ -916,8 +939,7 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
             });
         })
         .catch(err => {
-            console.error('Error accessing microphone:', err);
-            alert('Error accessing microphone: ' + err.message);
+            reportJsError('Microphone access denied: ' + (err.message || err));
             cancelPendingRecording();
         });
 }
@@ -943,7 +965,7 @@ function loadCalibrationTrack(payload) {
         calibrationTrackBuffer = buffer;
         console.log(`Calibration track decoded: ${buffer.duration.toFixed(2)}s, first beat at ${calibrationFirstBeatMs}ms`);
     }).catch(err => {
-        console.error('Calibration track decode error:', err);
+        reportJsError('Calibration track decode error: ' + err);
     }).finally(() => {
         calibrationDecodePromise = null;
     });
@@ -1032,7 +1054,7 @@ try {
                 });
 
                 currentAudio.play().catch(err => {
-                    console.error("Playback error:", err);
+                    reportJsError('Playback error: ' + err);
                     currentAudio = null;
                 });
 
@@ -1085,7 +1107,7 @@ try {
                     return false;
                 }
                 startMetronomePlayback({preserveOffset: false}).catch(err => {
-                    console.error('startMetronomePlayback rejected:', err);
+                    reportJsError('Metronome start failed: ' + err);
                 });
                 return true;
             }
@@ -1123,7 +1145,7 @@ try {
                 });
                 console.log("Played end alarm");
             } catch (err) {
-                console.error("Error playing end alarm:", err);
+                reportJsError('Error playing end alarm: ' + err);
             }
         },
 
@@ -1135,7 +1157,7 @@ try {
                     console.log("Displayed auto-stop message");
                 }
             } catch (err) {
-                console.error("Error showing auto-stop message:", err);
+                reportJsError('Error showing auto-stop message: ' + err);
             }
         },
         loadMetronomeTrack: function(dataUrl) {
@@ -1155,7 +1177,7 @@ try {
                 cancelPendingRecording();
             }
             if (!calibrationTrackBuffer) {
-                console.error('startCalibration: calibration track not decoded yet');
+                reportJsError('startCalibration: calibration track not decoded yet');
                 return;
             }
 
@@ -1239,7 +1261,7 @@ try {
                 }, recordDelayMs);
 
             }).catch(err => {
-                console.error('startCalibration failed:', err);
+                reportJsError('startCalibration failed: ' + err);
                 if (calibrationSafetyNetTimeout !== null) {
                     clearTimeout(calibrationSafetyNetTimeout);
                     calibrationSafetyNetTimeout = null;
@@ -1314,7 +1336,7 @@ try {
                 console.log('reconfigureMetronome: track params changed, waiting for new track');
             } else {
                 startMetronomePlayback({preserveOffset: false}).catch(err => {
-                    console.error('reconfigureMetronome: startMetronomePlayback rejected:', err);
+                    reportJsError('reconfigureMetronome: startMetronome rejected: ' + err);
                 });
             }
         },
@@ -1421,19 +1443,19 @@ try {
         });
     }
 } catch (initErr) {
-    console.error("recorder.js: CRITICAL - failed to initialize recorder namespace:", initErr, initErr.stack);
+    reportJsError('recorder.js init failed: ' + initErr);
     // Install stubs so Dash doesn't cascade-crash on undefined.method() calls
     window.recorderControls = {
         toggleRecording: function () {
-            console.error("recorder not initialized");
+            reportJsError('recorder not initialized');
             return false;
         },
         playAudio: function () {
-            console.error("recorder not initialized");
+            reportJsError('recorder not initialized');
             return false;
         },
         toggleMetronome: function () {
-            console.error("recorder not initialized");
+            reportJsError('recorder not initialized');
             return false;
         },
         playEndAlarm: function () {

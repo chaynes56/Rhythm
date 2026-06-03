@@ -491,6 +491,13 @@ def build_waveform_figure(y: np.ndarray, sr: int, metronome_times: np.ndarray,
 
 
 _sample_cache: dict[tuple[str, str, int], np.ndarray] = {}
+_load_log: list[str] = []
+
+
+def flush_load_log() -> list[str]:
+    msgs = list(_load_log)
+    _load_log.clear()
+    return msgs
 
 
 def _make_synth_tick(sr: int, tone_type: str) -> np.ndarray:
@@ -500,7 +507,7 @@ def _make_synth_tick(sr: int, tone_type: str) -> np.ndarray:
     return np.sin(2 * np.pi * freq * t) * np.exp(-40 * t) * (volume / 100.0)
 
 
-def _load_sample(vs: str, name: str, sr: int) -> np.ndarray:
+def _load_sample(vs: str, name: str, sr: int, fallback_tone: str = 'high') -> np.ndarray:
     key = (vs, name, sr)
     if key in _sample_cache:
         return _sample_cache[key]
@@ -509,22 +516,26 @@ def _load_sample(vs: str, name: str, sr: int) -> np.ndarray:
         data, file_sr = sf.read(str(path), dtype='float32', always_2d=False)
         if file_sr != sr:
             data = librosa.resample(data, orig_sr=file_sr, target_sr=sr)
+        _load_log.append(f"loaded: {path}")
     except Exception as e:
-        print(f"_load_sample: could not load {path}: {e} -- falling back to synthesized")
-        data = _make_synth_tick(sr, 'high')
+        msg = f"FAILED: {path} -- {e}"
+        _load_log.append(msg)
+        print(f"_load_sample: {msg} -- falling back to synthesized")
+        data = _make_synth_tick(sr, fallback_tone)
     _sample_cache[key] = data
     return data
 
 
 def _get_tick(sr: int, tone_type: str, vs: str = 'synthesized',
               vc_char: str | None = None) -> np.ndarray:
+    vs = vs.lower()
     if vs == 'synthesized':
         return _make_synth_tick(sr, tone_type)
     char = vc_char if vc_char else METRONOME_TONES[tone_type][1]
     if not char:  # 'sub' has no VC char; keep synthesized
         return _make_synth_tick(sr, tone_type)
     name = voicing_code[char]['name'] if char in voicing_code else char
-    return _load_sample(vs, name, sr)
+    return _load_sample(vs, name, sr, fallback_tone=tone_type)
 
 
 def compute_calibration_track() -> dict:

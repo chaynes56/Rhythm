@@ -46,6 +46,7 @@ from audio_utils import (
     compute_metronome_track,
     compute_spectrum,
     detect_onsets_rms,
+    flush_load_log,
     load_audio_from_bytes,
     normalize_waveform_for_display,
     serialize_audio_to_base64_wav,
@@ -403,6 +404,14 @@ app.layout = dbc.Container([
                         ], width=6),
                     ]),
                     html.Div(id="status-msg", className="mt-2 fw-bold"),
+                    html.Div([
+                        html.Span(id="error-msg-text", className="flex-grow-1"),
+                        dbc.Button("Clear", id="error-clear-btn", size="sm",
+                                   outline=True, color="danger", className="ms-2",
+                                   style={"fontSize": "0.75rem", "padding": "1px 8px"}),
+                    ], id="error-msg-row",
+                       className="mt-1 d-flex align-items-center gap-2 text-danger fw-bold",
+                       style={"display": "none"}),
                 ]),
             ], className="mb-4"),
             dbc.Card([
@@ -427,8 +436,8 @@ app.layout = dbc.Container([
                                     id="exercise-voicing",
                                     options=[
                                         {"label": "Synthesized", "value": "synthesized"},
-                                        {"label": "Djembe",      "value": "Djembe"},
-                                        {"label": "Darbuka",     "value": "Darbuka"},
+                                        {"label": "Djembe",      "value": "djembe"},
+                                        {"label": "Darbuka",     "value": "darbuka"},
                                     ],
                                     value="synthesized",
                                     clearable=False,
@@ -441,8 +450,8 @@ app.layout = dbc.Container([
                                     id="metronome-voicing",
                                     options=[
                                         {"label": "Synthesized", "value": "synthesized"},
-                                        {"label": "Djembe",      "value": "Djembe"},
-                                        {"label": "Darbuka",     "value": "Darbuka"},
+                                        {"label": "Djembe",      "value": "djembe"},
+                                        {"label": "Darbuka",     "value": "darbuka"},
                                     ],
                                     value="synthesized",
                                     clearable=False,
@@ -589,6 +598,8 @@ app.layout = dbc.Container([
     dcc.Store(id="debug-mode-store", data=False),
     dcc.Store(id="exercise-schedule-store"),
     dcc.Store(id="error-beep-sink"),
+    dcc.Store(id="server-log-store", storage_type="memory"),
+    dcc.Store(id="error-store", data=""),
     dcc.Store(id="user-context", storage_type="local"),
     dcc.Input(id="warmup-info-store", type="text", value="",
               style={"display": "none"}),
@@ -634,9 +645,7 @@ clientside_callback(
         if (userContext && userContext.platform_key === info.platform_key
                 && userContext.calibration_offset_ms != null) {
             // Silently restore calibration for this platform
-            var conf = (userContext.confidence_ms != null)
-                ? ('±' + userContext.confidence_ms + ' ms') : '';
-            return [userContext.calibration_offset_ms, userContext.calibration_offset_ms, conf];
+            return [userContext.calibration_offset_ms, userContext.calibration_offset_ms, ''];
         }
 
         // No stored calibration for this platform -- run auto-calibration after warmup
@@ -749,7 +758,6 @@ def process_calibration(base64_audio, debug_mode_store, warmup_info_str):
                     new_context = {
                         "platform_key": info.get("platform_key", ""),
                         "calibration_offset_ms": offset_ms,
-                        "confidence_ms": std_ms,
                         "timestamp": datetime.now(timezone.utc).isoformat(),
                     }
             except (json.JSONDecodeError, AttributeError):
@@ -805,6 +813,8 @@ def calibration_value_edited(value):
 @app.callback(
     Output("metronome-track-store", "data"),
     Output("status-msg", "children", allow_duplicate=True),
+    Output("server-log-store", "data", allow_duplicate=True),
+    Output("error-store", "data", allow_duplicate=True),
     Input("tempo-slider", "value"),
     Input("beats-per-measure", "value"),
     Input("measures-per-pattern", "value"),
@@ -833,10 +843,11 @@ def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_
                     return no_update, (
                         f"Exercise too long at {t} BPM "
                         f"({total_seconds:.0f}s; limit {int(METRONOME_MAX_LOOP_SECONDS / 60)} min)."
-                    )
+                    ), no_update, no_update
                 exercise_patterns = ex["patterns"]
 
         char_tone_map = {ch: v['tone'] for ch, v in voicing_code.items()}
+        flush_load_log()
         data_url = compute_metronome_track(
             t,
             beats_per_measure or 4,
@@ -851,11 +862,12 @@ def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_
             metro_vs=metro_vs or 'synthesized',
             exercise_vs=exercise_vs or 'synthesized',
         )
+        log = flush_load_log()
         print(f"update_metronome_track: {beats_per_measure}/{measures_per_pattern} at {t} BPM, exercise={exercise_name!r}")
-        return data_url, no_update
+        return data_url, no_update, (log or no_update), no_update
     except Exception as e:
         print(f"update_metronome_track error: {e}")
-        raise PreventUpdate
+        return no_update, no_update, no_update, f"Metronome track failed: {e}"
 
 
 # Clientside callbacks for recording and playback
@@ -1357,6 +1369,71 @@ clientside_callback(
     prevent_initial_call=True,
 )
 
+clientside_callback(
+    """
+    function(msgs) {
+        if (Array.isArray(msgs)) {
+            msgs.forEach(function(m) { console.log('[server]', m); });
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("error-beep-sink", "data", allow_duplicate=True),
+    Input("server-log-store", "data"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
+    function(errData) {
+        if (errData) {
+            return [errData, {"display": "flex"}];
+        }
+        return ["", {"display": "none"}];
+    }
+    """,
+    Output("error-msg-text", "children"),
+    Output("error-msg-row", "style"),
+    Input("error-store", "data"),
+)
+
+clientside_callback(
+    """
+    function(n_clicks) {
+        if (n_clicks) return "";
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("error-store", "data"),
+    Input("error-clear-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """
+    function(errData) {
+        if (!errData) return window.dash_clientside.no_update;
+        try {
+            const ac = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ac.createOscillator();
+            const gain = ac.createGain();
+            osc.connect(gain);
+            gain.connect(ac.destination);
+            osc.type = 'sine';
+            osc.frequency.value = 220;
+            gain.gain.setValueAtTime(0.5, ac.currentTime);
+            gain.gain.linearRampToValueAtTime(0, ac.currentTime + 0.7);
+            osc.start(ac.currentTime);
+            osc.stop(ac.currentTime + 0.7);
+        } catch(e) {}
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output("error-beep-sink", "data", allow_duplicate=True),
+    Input("error-store", "data"),
+    prevent_initial_call=True,
+)
+
 
 clientside_callback(
     """
@@ -1409,13 +1486,14 @@ def update_play_button(playing_value):
 
 @app.callback(
     Output("spectrum-graph", "figure"),
+    Output("error-store", "data", allow_duplicate=True),
     Input("audio-store", "data"),
     Input("waveform-graph", "relayoutData"),
     prevent_initial_call=True,
 )
 def update_spectrum(audio_json, relayout_data):
     if not audio_json:
-        return go.Figure()
+        return go.Figure(), no_update
     try:
         data = json.loads(audio_json)
         if relayout_data and ctx.triggered_id != "audio-store":
@@ -1423,8 +1501,8 @@ def update_spectrum(audio_json, relayout_data):
             if "xaxis.range[0]" in relayout_data:
                 t0, t1 = float(relayout_data["xaxis.range[0]"]), float(relayout_data["xaxis.range[1]"])
             elif "xaxis.range" in relayout_data:
-                t0, t1 = relayout_data["xaxis.range"]
-            if t0 is not None:
+                t0, t1 = float(relayout_data["xaxis.range"][0]), float(relayout_data["xaxis.range"][1])
+            if t0 is not None and t1 is not None:
                 audio_b64 = data.get("audio", "")
                 if audio_b64:
                     audio_data = audio_b64.split(",", 1)[-1] if "," in audio_b64 else audio_b64
@@ -1437,15 +1515,15 @@ def update_spectrum(audio_json, relayout_data):
                     y_slice = y[i0:i1]
                     freqs, psd = compute_spectrum(y_slice, sr)
                     if len(freqs) > 0:
-                        return build_spectrum_figure(freqs, psd)
+                        return build_spectrum_figure(freqs, psd), no_update
         freqs = np.array(data.get("spectrum_freqs", []))
         psd = np.array(data.get("spectrum_psd", []))
         if len(freqs) == 0:
-            return go.Figure()
-        return build_spectrum_figure(freqs, psd)
+            return go.Figure(), no_update
+        return build_spectrum_figure(freqs, psd), no_update
     except Exception as e:
         print(f"update_spectrum: {e}")
-        return go.Figure()
+        return go.Figure(), f"Spectrum error: {e}"
 
 
 @app.callback(
@@ -1462,14 +1540,15 @@ def show_analyzing_message(data):
 @app.callback(
     Output("analysis-data-block", "children"),
     Output("status-msg", "children", allow_duplicate=True),
+    Output("error-store", "data", allow_duplicate=True),
     Input("audio-store", "data"),
     Input("waveform-graph", "relayoutData"),
-    State("subdivisions-per-beat", "value"),
+    Input("subdivisions-per-beat", "value"),
     prevent_initial_call=True,
 )
 def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
     if not audio_json:
-        return "", ""
+        return "", "", no_update
     try:
         data = json.loads(audio_json)
         all_beat_times = data.get("beat_times", [])
@@ -1499,7 +1578,7 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         dt = 60 / data.get("tempo") / subdivisions_per_beat  # seconds per subdivision
         cal_s = data.get("calibration_offset_ms", 0) / 1000.0
         if pulse_count == 0:
-            return f"No pulses detected in **{beat_count}** beats{window_note}.", ""
+            return f"No pulses detected in **{beat_count}** beats{window_note}.", "", no_update
         deviations = np.array([((t - cal_s - dt / 2) % dt - dt / 2) * 1000 for t in beat_times])
         mean = deviations.mean()
         std = deviations.std()
@@ -1512,23 +1591,24 @@ def update_analysis(audio_json, relayout_data, subdivisions_per_beat):
         each **{round(dt * 1000)}** ms subdivision: **{round(mean)}** mean,
         **{round(median)}** median, **{round(std)}** std dev, **{round(minimum)}** min, 
         **{round(maximum)}** max (ms)"""
-        return markdown_text, ""
+        return markdown_text, "", no_update
     except Exception as exc:
         print(f"update_analysis: {exc}")
-        return "", ""
+        return "", "", f"Analysis failed: {exc}"
 
 
 @app.callback(
     Output("subdivision-table-container", "children"),
+    Output("error-store", "data", allow_duplicate=True),
     Input("audio-store", "data"),
     Input("waveform-graph", "relayoutData"),
     Input("training-level", "value"),
-    State("subdivisions-per-beat", "value"),
+    Input("subdivisions-per-beat", "value"),
     prevent_initial_call=True,
 )
 def update_subdivision_table(audio_json, relayout_data, training_level, subdivisions_per_beat):
     if not audio_json:
-        return None
+        return None, no_update
     try:
         data = json.loads(audio_json)
         all_beat_times = np.array(data.get("beat_times", []))
@@ -1537,7 +1617,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
         mpp = int(data.get("measures_per_pattern") or 1)
 
         if not tempo or len(all_beat_times) == 0:
-            return None
+            return None, no_update
 
         spb = int(subdivisions_per_beat or 1)
         cal_s = data.get("calibration_offset_ms", 0) / 1000.0
@@ -1560,7 +1640,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
                     (all_beat_times >= t0) & (all_beat_times <= t1)]
 
         if len(beat_times) == 0:
-            return None
+            return None, no_update
 
         if exercise_name and exercise_name in all_ex:
             ex = all_ex[exercise_name]
@@ -1676,7 +1756,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
                 style={"fontSize": "0.75rem", "marginBottom": "4px", "color": "#444",
                        "fontStyle": "italic"}
             )
-            return html.Div([title] + tables, style={"overflowX": "auto"})
+            return html.Div([title] + tables, style={"overflowX": "auto"}), no_update
 
         # Free metronome mode: single table with beat/sub header rows and mean deviation.
         dt = 60.0 / tempo / spb
@@ -1767,26 +1847,28 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
             html.Tbody(rows),
             style={"borderCollapse": "collapse", "border": "1px solid #aaa"},
         )
-        return html.Div(table, style={"overflowX": "auto"})
+        return html.Div(table, style={"overflowX": "auto"}), no_update
     except Exception as e:
         print(f"update_subdivision_table: {e}")
-        return None
+        return None, f"Subdivision table error: {e}"
 
 
 @app.callback(
     Output("interval-histogram", "figure"),
+    Output("error-store", "data", allow_duplicate=True),
     Input("audio-store", "data"),
     Input("waveform-graph", "relayoutData"),
+    Input("show-intervals", "value"),
     prevent_initial_call=True,
 )
-def update_interval_histogram(audio_json, relayout_data):
+def update_interval_histogram(audio_json, relayout_data, show_intervals):
     if not audio_json:
-        return go.Figure()
+        return go.Figure(), no_update
     try:
         data = json.loads(audio_json)
         all_beat_times = np.array(data.get("beat_times", []))
         if len(all_beat_times) < 2:
-            return go.Figure()
+            return go.Figure(), no_update
 
         beat_times = all_beat_times
         if relayout_data and ctx.triggered_id != "audio-store":
@@ -1798,7 +1880,7 @@ def update_interval_histogram(audio_json, relayout_data):
                 beat_times = all_beat_times[(all_beat_times >= t0) & (all_beat_times <= t1)]
 
         if len(beat_times) < 2:
-            return go.Figure()
+            return go.Figure(), no_update
 
         intervals_ms = np.diff(beat_times) * 1000
         print(f"update_interval_histogram: {len(beat_times)} pulses, {len(intervals_ms)} intervals")
@@ -1816,14 +1898,15 @@ def update_interval_histogram(audio_json, relayout_data):
             margin=dict(l=50, r=20, t=20, b=40),
         )
         fig.update_xaxes(tickmode="auto", nticks=10, tickformat=".0f")
-        return fig
+        return fig, no_update
     except Exception as e:
         print(f"update_interval_histogram: {e}")
-        return go.Figure()
+        return go.Figure(), f"Histogram error: {e}"
 
 
 @app.callback(
     Output("deviation-graph", "figure"),
+    Output("error-store", "data", allow_duplicate=True),
     Input("audio-store", "data"),
     Input("waveform-graph", "relayoutData"),
     Input("training-level", "value"),
@@ -1832,14 +1915,14 @@ def update_interval_histogram(audio_json, relayout_data):
 )
 def update_deviation_graph(audio_json, relayout_data, training_level, subdivisions_per_beat):
     if not audio_json:
-        return go.Figure()
+        return go.Figure(), no_update
     try:
         data = json.loads(audio_json)
         beat_times = np.array(data.get("beat_times", []))
         tempo = data.get("tempo")
         duration = data.get("duration")
         if not tempo or len(beat_times) == 0:
-            return go.Figure()
+            return go.Figure(), no_update
 
         spb = int(subdivisions_per_beat or 1)
         warn_ms, alert_ms = TRAINING_LEVEL.get(training_level, TRAINING_LEVEL["Novice"])
@@ -1997,10 +2080,10 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
         if x_range is not None:
             fig.update_xaxes(range=x_range, autorange=False)
         fig.update_yaxes(automargin=False)
-        return fig
+        return fig, no_update
     except Exception as e:
         print(f"update_deviation_graph: {e}")
-        return go.Figure()
+        return go.Figure(), f"Deviation graph error: {e}"
 
 
 @app.callback(
@@ -2008,6 +2091,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
     Output("waveform-visible-store", "data"),
     Output("waveform-graph", "figure"),
     Output("status-msg", "children"),
+    Output("error-store", "data", allow_duplicate=True),
     Input("audio-data-store", "data"),
     State("tempo-slider", "value"),
     State("beats-per-measure", "value"),
@@ -2052,14 +2136,12 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
             # For large recordings, use timeout
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
-                # Don't show an error message for auto-stop timeout - just log it
-                print(
-                    f"process_audio: Audio loading timeout (likely due to large file size)")
-                return None, False, go.Figure(), ""
+                print(f"process_audio: Audio loading timeout (likely due to large file size)")
+                return None, False, go.Figure(), "", no_update
 
             if not isinstance(result, tuple) or result[0] is None or result[1] is None:
                 msg = "Error: Failed to process audio. Recording may be corrupted or in unsupported format."
-                return None, False, go.Figure(), msg
+                return None, False, go.Figure(), "", msg
 
             y, sr = result
             print(
@@ -2123,7 +2205,7 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
         # Log success but don't show a message (waveform appearing is enough feedback)
         print(
             f"process_audio: Successfully processed recording, duration={duration:.2f}s")
-        return json.dumps(save_data), True, fig, ""
+        return json.dumps(save_data), True, fig, "", no_update
     except PreventUpdate:
         raise
     except Exception as e:
@@ -2131,8 +2213,7 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
         print(error_msg)
         import traceback
         traceback.print_exc()
-        # Don't show an error message to the user - just log it
-        return None, False, go.Figure(), ""
+        return None, False, go.Figure(), "", error_msg
 
 
 # noinspection PyUnusedLocal
@@ -2154,6 +2235,7 @@ def save_recording(n_clicks, audio_json):
     Output("waveform-graph", "figure", allow_duplicate=True),
     Output("status-msg", "children", allow_duplicate=True),
     Output("exercise-select", "value", allow_duplicate=True),
+    Output("error-store", "data", allow_duplicate=True),
     Input("upload-audio", "contents"),
     State("beats-per-measure", "value"),
     State("subdivisions-per-beat", "value"),
@@ -2163,7 +2245,7 @@ def save_recording(n_clicks, audio_json):
 def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
                    _calibration_offset_ms):
     if not contents:
-        return None, False, go.Figure(), "", no_update
+        return None, False, go.Figure(), "", no_update, no_update
 
     try:
         print(f"load_recording: contents length = {len(contents) if contents else 0}")
@@ -2178,10 +2260,10 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
                 f"load_recording: JSON parsed successfully, keys = {list(data.keys())}")
         except UnicodeDecodeError as e:
             print(f"load_recording: UnicodeDecodeError: {e}")
-            return None, False, go.Figure(), "Error: Uploaded file is not a valid JSON recording saved by this app.", no_update
+            return None, False, go.Figure(), "", no_update, "Error: Uploaded file is not a valid JSON recording saved by this app."
         except json.JSONDecodeError as e:
             print(f"load_recording: JSONDecodeError: {e}")
-            return None, False, go.Figure(), "Error: Uploaded file contains invalid JSON.", no_update
+            return None, False, go.Figure(), "", no_update, "Error: Uploaded file contains invalid JSON."
 
         base64_audio = data["audio"]
         # Set global for playback
@@ -2207,10 +2289,10 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
             # For large recordings, use timeout
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
-                return None, False, go.Figure(), "Error: Recording too long or corrupted. Max length is 10 minutes.", no_update
+                return None, False, go.Figure(), "", no_update, "Error: Recording too long or corrupted. Max length is 10 minutes."
 
             if not isinstance(result, tuple) or result[0] is None or result[1] is None:
-                return None, False, go.Figure(), "Error: Failed to load recording. File may be corrupted or in unsupported format.", no_update
+                return None, False, go.Figure(), "", no_update, "Error: Failed to load recording. File may be corrupted or in unsupported format."
 
             y, sr = result
             print(f"load_recording: Loaded with librosa, sr={sr}")
@@ -2253,11 +2335,10 @@ def load_recording(contents, beats_per_measure_slider, subdivisions_per_beat,
 
         data["duration"] = duration
         exercise_name = data.get("exercise_name") or ""
-        # Don't show a success message (waveform appearing is enough feedback)
-        return json.dumps(data), True, fig, "", exercise_name
+        return json.dumps(data), True, fig, "", exercise_name, no_update
     except Exception as e:
         print(f"Error loading recording: {e}")
-        return None, False, go.Figure(), "", no_update
+        return None, False, go.Figure(), "", no_update, f"Load recording failed: {e}"
 
 
 clientside_callback(
@@ -2338,11 +2419,11 @@ def save_settings(_n_clicks, training_level, subdivisions, rec_vol, play_vol,
         "metronome-vol": metro_vol,
         "debug-mode": False,  # always saved as false; enable via env var or Flask debug flag
         "exercise-name": exercise_name or None,
-        "custom-exercises": _custom_exercises_text,
         "show-intervals": bool(show_intervals),
         "show-spectrum": bool(show_spectrum),
         "metronome-voicing": metronome_voicing or "synthesized",
         "exercise-voicing":  exercise_voicing  or "synthesized",
+        "custom-exercises": _custom_exercises_text,
     }
     buf = io.StringIO()
     yaml.dump(current, buf, default_flow_style=False, sort_keys=False)
@@ -2368,13 +2449,14 @@ def save_settings(_n_clicks, training_level, subdivisions, rec_vol, play_vol,
     Output("show-spectrum", "value", allow_duplicate=True),
     Output("metronome-voicing", "value", allow_duplicate=True),
     Output("exercise-voicing",  "value", allow_duplicate=True),
+    Output("error-store", "data", allow_duplicate=True),
     Input("settings-raw-store", "data"),
     prevent_initial_call=True,
 )
 def load_settings(data):
     if data is None:
         raise PreventUpdate
-    no_change = (no_update,) * 18  # 10 settings + status-msg + debug-mode-store + exercise-select + options + 2 toggles + 2 voicings
+    no_change = (no_update,) * 19  # 10 settings + status-msg + debug-mode-store + exercise-select + options + 2 toggles + 2 voicings + error-store
     try:
         text = data["content"]
         try:
@@ -2384,8 +2466,8 @@ def load_settings(data):
             line_num = getattr(mark, "line", None)
             loc = f" at line {line_num}" if line_num is not None else ""
             prob = getattr(ye, "problem", str(ye))
-            err = [no_update] * 18
-            err[10] = f"Invalid YAML syntax{loc}: {prob}"
+            err = [no_update] * 19
+            err[18] = f"Invalid YAML syntax{loc}: {prob}"
             return tuple(err)
         if not isinstance(loaded, dict):
             raise ValueError("Settings file did not contain a YAML mapping")
@@ -2446,10 +2528,13 @@ def load_settings(data):
             bool(loaded.get("show-spectrum", False)),
             loaded.get("metronome-voicing", "synthesized"),
             loaded.get("exercise-voicing",  "synthesized"),
+            no_update,
         )
     except Exception as e:
         print(f"load_settings error: {e}")
-        return no_change
+        err = list(no_change)
+        err[18] = f"Load settings failed: {e}"
+        return tuple(err)
 
 
 # Auto-save every settings change to localStorage.

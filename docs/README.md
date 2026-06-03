@@ -1,8 +1,8 @@
 # Rhythm Analyzer
 
-This app provides solo percussion analysis to improve the precision of performance. 
-Version 0.1.6 is running and available for public use via the Plotly/Dash cloud server
-at [this page](https://2e7b9ba9-3380-4afa-b92e-f1ff3eee1007.plotly.app/#).
+This app provides solo percussion analysis to assist improvement of performance
+precision. Version 0.1.6 is running and available for public use via the Plotly/Dash
+cloud server at [this page](https://2e7b9ba9-3380-4afa-b92e-f1ff3eee1007.plotly.app/#).
 
 Most common modern browsers may be used, though performance in Safari may be
 unsatisfactory. Mobile devices are much less capable of accurate timing than most laptop
@@ -27,8 +27,8 @@ minute when first visiting the page. After a fairly long period of inactivity
 functionality will be lost, and it is necessary to refresh or revisit the app's browser
 page.
 
-After the app is loaded, there are several additional seconds in which the Start 
-Recording and Calibration buttons say `Warming up...` and are unresponsive, allowing 
+After the app is loaded, there are several additional seconds in which the Start
+Recording and Calibration buttons say `Warming up...` and are unresponsive, allowing
 time for the audio chains to stabilize before being used.
 
 App performance is satisfactory with most Wi-Fi connections but may be unsatisfactory
@@ -190,22 +190,23 @@ TODO: finish this section
 
 ## Settings
 
-The Settings dropdown provides options for saving and loading settings, and 
-restoring the default settings. The settings include all the user's selections in 
-the app. These are automatically saved in the browser's *local storage*, and restored 
-when the app is restarted in the same browser, so many users will not need to 
-routinely use these manual save and load options. Situations where manual 
-saving and loading of settings will be useful include:
+The Settings dropdown provides options for saving and loading settings, and restoring
+the default settings. The settings include all the user's selections in the app. These
+are automatically saved in the browser's *local storage*, and restored when the app is
+restarted in the same browser, so many users will not need to routinely use these manual
+save and load options. Situations where manual saving and loading of settings will be
+useful include:
+
 - Switching between different practice contexts that require multiple setting changes
 - Switching between browsers or devices, which never share local storage
-- As a way of loading custom exercises or enabling debug mode, which cannot be done 
-  via the graphic user interface
+- As a way of loading custom exercises or enabling debug mode, which cannot be done via
+  the graphic user interface
 
 When Save Settings is selected in the dropdown, a file named `rhythm-settings.yaml`
 is stored in the browser's default download folder (typically `Downloads` or `My 
-Documents`) in YAML format. The Load Settings button restores the settings from the 
-selected `.yaml` file. *It is essential that modification of a YAML file be done
-with a plain-text editor, or the file will be corrupted.*
+Documents`) in YAML format. The Load Settings button restores the settings from the
+selected `.yaml` file. *It is essential that modification of a YAML file be done with a
+plain-text editor, or the file will be corrupted.*
 
 ### Debug mode
 
@@ -264,15 +265,19 @@ performance.
 
 ## Issues and suggestions
 
-Please report performance issues (bugs) and improvement suggestions using 
+Please report instances in which errors are reported (in red) along with any quoted
+details, unless of course the problem is due to known issues in your environment.
+Reports of unsatisfactory performance are also welcome if they cannot be explained by
+factors detailed in this documentation. Suggestions for improvement are also welcome.
+Please submit all such reports using
 [this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
 
 ## Collaboration and credits
 
-Those interested in contributing to development of this open source project see the 
-[development notes](https://chaynes56.github.io/Rhythm/#/DevNotes). 
+Those interested in contributing to development of this open source project see the
+[development notes](https://chaynes56.github.io/Rhythm/#/DevNotes).
 
 Thanks to Julian Douglas of [RhythmArise](https://rhythmarise.com/) for consultation,
-inspiration, voicing tones, and the 
+inspiration, voicing tones, and the
 [patterns](https://rhythmarise.com/rhythm-vocabulary/).
 

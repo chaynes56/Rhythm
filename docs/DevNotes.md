@@ -1,7 +1,7 @@
 # Rhythm Analyzer Development Notes
 
-This is an open source project with [Github repo](https://github.
-com/chaynes56/Rhythm) and [user documentation](https://chaynes56.github.io/Rhythm/#/).
+This is an open source project with [Github repo](https://github.com/chaynes56/Rhythm) 
+and [user documentation](https://chaynes56.github.io/Rhythm/#/).
 
 Those interested in contributing to development are encouraged to so indicate
 and provide contact email using [this form](https://docs.google.
@@ -40,16 +40,19 @@ To publish:
 2. In the `Rhythm` app line select settings (the gear widget)
 3. `Actions > Update`
 4. Click in Drag and Drop box
-5. In the pop-up file picker, select and upload all the `app/` folder contents
+5. In the pop-up file picker, select and upload all the `app/` folder contents 
+   except for those beginning with `__`
 6. Click `Update`
 7. In a few seconds at the top of the revision history list a new version will appear
-   with state `Building`, which in several seconds more turns into Running and the
-   previous version state turns to Stopped.
+   with state `Building`, which in several seconds more turns into `Starting`, as 
+   the previous version state turns to `Stopped`, and finally the new version is 
+   `Running`.
 
 ## Documentation
 
 All documentation is in `docs/`, published via `Github Pages` using `docsify`.
 
+- [Docsify documentation](https://docsify.js.org/#/?id=docsify)
 - Installation: `npm i docsify-cli -g; npm install -g npm@11.15.0`
 - To run local preview server: `docsify serve docs`
 - How to add [more pages](https://docsify.js.org/#/more-pages)
