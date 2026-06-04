@@ -848,7 +848,6 @@ def update_metronome_track(tempo, beats_per_measure, measures_per_pattern, play_
 
         char_tone_map = {ch: v['tone'] for ch, v in voicing_code.items()}
         flush_load_log()
-        _load_log.append(f"build: metro_vs={metro_vs!r} exercise_vs={exercise_vs!r} play_only_tones={bool(play_only_tones)}")
         data_url = compute_metronome_track(
             t,
             beats_per_measure or 4,
