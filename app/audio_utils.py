@@ -511,8 +511,15 @@ def _load_sample(vs: str, name: str, sr: int, fallback_tone: str = 'high') -> np
     key = (vs, name, sr)
     if key in _sample_cache:
         return _sample_cache[key]
-    path = Path(__file__).parent / "data" / vs / f"{name}.wav"
+    path = Path(__file__).parent / "assets" / vs / f"{name}.wav"
     try:
+        if not path.exists():
+            data_dir = path.parent
+            contents = sorted(data_dir.glob("*")) if data_dir.exists() else []
+            detail = ([f.name for f in contents] or ["(empty)"])
+            raise FileNotFoundError(
+                f"not found: {path} (dir contents: {detail})"
+            )
         data, file_sr = sf.read(str(path), dtype='float32', always_2d=False)
         if file_sr != sr:
             data = librosa.resample(data, orig_sr=file_sr, target_sr=sr)
