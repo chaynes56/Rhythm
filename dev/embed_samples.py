@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerate app/data_samples.py from app/assets/{vs}/*.wav.
+"""Regenerate app/data_samples.py from dev/assets/{vs}/*.wav.
 
 Run from the project root:
     python dev/embed_samples.py
@@ -7,7 +7,7 @@ Run from the project root:
 import base64
 from pathlib import Path
 
-ASSETS = Path(__file__).parent.parent / "app" / "assets"
+ASSETS = Path(__file__).parent / "assets"
 OUT = Path(__file__).parent.parent / "app" / "data_samples.py"
 
 voicing_sets = sorted(d.name for d in ASSETS.iterdir() if d.is_dir())
