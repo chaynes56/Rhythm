@@ -17,6 +17,10 @@ from concurrent.futures import ThreadPoolExecutor
 import warnings
 from scipy.signal import find_peaks, resample as scipy_resample, welch as scipy_welch
 from exercises import voicing_code
+try:
+    from data_samples import SAMPLES as _EMBEDDED_SAMPLES
+except ImportError:
+    _EMBEDDED_SAMPLES: dict[str, dict[str, str]] = {}
 
 warnings.filterwarnings("ignore", category=FutureWarning, module="librosa")
 
@@ -513,17 +517,26 @@ def _load_sample(vs: str, name: str, sr: int, fallback_tone: str = 'high') -> np
         return _sample_cache[key]
     path = Path(__file__).parent / "assets" / vs / f"{name}.wav"
     try:
-        if not path.exists():
+        if path.exists():
+            data, file_sr = sf.read(str(path), dtype='float32', always_2d=False)
+            source = str(path)
+        elif vs in _EMBEDDED_SAMPLES and name in _EMBEDDED_SAMPLES[vs]:
+            wav_bytes = base64.b64decode(_EMBEDDED_SAMPLES[vs][name])
+            data, file_sr = sf.read(io.BytesIO(wav_bytes), dtype='float32', always_2d=False)
+            source = f"embedded:{vs}/{name}"
+        elif name != 'high':
+            _load_log.append(f"fallback: {vs}/{name} -> {vs}/high")
+            result = _load_sample(vs, 'high', sr, fallback_tone)
+            _sample_cache[key] = result
+            return result
+        else:
             data_dir = path.parent
             contents = sorted(data_dir.glob("*")) if data_dir.exists() else []
-            detail = ([f.name for f in contents] or ["(empty)"])
-            raise FileNotFoundError(
-                f"not found: {path} (dir contents: {detail})"
-            )
-        data, file_sr = sf.read(str(path), dtype='float32', always_2d=False)
+            detail = [f.name for f in contents] or ["(empty)"]
+            raise FileNotFoundError(f"not found: {path} (dir: {detail})")
         if file_sr != sr:
             data = librosa.resample(data, orig_sr=file_sr, target_sr=sr)
-        _load_log.append(f"loaded: {path}")
+        _load_log.append(f"loaded: {source}")
     except Exception as e:
         msg = f"FAILED: {path} -- {e}"
         _load_log.append(msg)
