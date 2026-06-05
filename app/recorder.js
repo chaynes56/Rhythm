@@ -1,4 +1,4 @@
-const VERSION = "0.1.6";
+const VERSION = "0.1.7";
 
 // Auto-reload when Dash assets fail to load on browser startup.
 // Brave (and other Chromium browsers) restore session tabs immediately, which can
