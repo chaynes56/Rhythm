@@ -15,8 +15,8 @@ is a routine wrap-up/commit/summary sequence.
 python app/main.py          # runs on http://localhost:8006 in debug mode
 ```
 
-Dependencies are managed via `app/pyproject.toml` with a virtual env at `.venv/`. 
-Python 3.14+ required. 
+Dependencies are managed via `pyproject.toml` with a virtual env at `.venv/`.
+Python 3.13+ required (matches Plotly cloud runtime).
 
 
 ## Architecture
@@ -75,32 +75,21 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-06-03 (1818bc3 + pending)
+## Last session -- 2026-06-04 (dfdbe79)
 
-**Error handling system complete (`audio_utils.py`, `main.py`, `recorder.js`):**
+**Cloud deployment verified working.** Plotly cloud JS chunk errors (`plotly.min.js`
+returning HTML) were transient; base64-embedded samples fix from 7d2a790 is confirmed.
 
-- `error-store` (dcc.Store) + `error-msg-row` div (red, with Clear button) added to
-  layout. Clear button is only visible when an error is displayed (Bootstrap `d-flex`
-  conflict with `display:none` was fixed by moving flex to inline style in callback).
-- `reportJsError()` in `recorder.js` routes all `console.error` paths to the UI
-  error div, with `SUPPRESSED_JS_ERRORS` list for easy per-message suppression.
-- All server-side callbacks now output to `error-store` on failure: `process_audio`,
-  `load_recording`, `load_settings`, `update_metronome_track`, and all five analysis
-  callbacks.
-- Dash 4 `allow_duplicate` hash collision fixed: hash is computed from Inputs only
-  (not States). Three callbacks promoted State->Input or gained a new Input to give
-  each a unique fingerprint.
+**`app/assets/` moved to `dev/assets/` (ced7442).** WAV sample files serve no
+purpose in the deployed app now that samples are embedded in `data_samples.py`.
+`dev/embed_samples.py` `ASSETS` path updated from `app/assets` -> `dev/assets`
+(sibling path relative to the script).
 
-**Voicing case bug fixed (`audio_utils.py`):** `vs.lower()` in `_get_tick` so
-Linux case-sensitive paths resolve for Djembe/Darbuka on Plotly cloud.
+**Diagnostic log line removed (dfdbe79).** `build: metro_vs=... exercise_vs=...`
+line in `update_metronome_track` removed after cloud verification passed.
 
-**Layout changes (`main.py`):**
-- Subdivisions/Beat dropdown moved to metronome card, below Beats/Measure.
-- Play Subdivisions switch now always visible (was hidden until exercise selected).
-- Show Intervals and Show Spectrum placed side by side in same row, bottom-aligned.
-
-**Docs (`docs/index.html`, `docs/README.md`, `docs/DevNotes.md`):** minor content
-and formatting updates; `.markdown-section` font-size set to 18px in index.html.
+**Python pinned to 3.13 (dfdbe79).** `requires-python` changed from `>=3.14`
+to `>=3.13` to match Plotly cloud runtime. Venv rebuilt with `uv venv --python 3.13 && uv sync`.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 
