@@ -4,8 +4,8 @@ This is an open source project with [Github repo](https://github.com/chaynes56/R
 and [user documentation](https://chaynes56.github.io/Rhythm/#/).
 
 Those interested in contributing to development are encouraged to so indicate and
-provide contact email using [this form](https://docs.google.
-com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
+provide contact email using
+[this form](https://docs.google.com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?usp=publish-editor).
 
 ## Setup
 
@@ -17,7 +17,7 @@ com/forms/d/e/1FAIpQLSe5rD8X_BpVd9I359ZcoiqN-0E0De1JOvnbr7X3xj22Ca96cg/viewform?
    dependencies as `pyproject.toml` specifies. This also creates a `uv.lock` file to
    track exact versions.
 4. `source .venv/bin/activate`
-   - Within the project, `python` and `plotly` commands then run the project versions. 
+    - Within the project, `python` and `plotly` commands then run the project versions.
 
 ## Check for Plotly cloud python version update
 
@@ -69,21 +69,25 @@ used in the `Check for Plotly cloud python version update` section above (upload
 MiB via the web interface vs 200 MiB via CLI, so at some point the CLI method may be the
 only option.
 
-1. From the project root, `cd app`
-2. `plotly user login` to authenticate with the Plotly cloud. A verification URL is
-   provided with a device code. Follow the URL and confirm the device code to complete
-   authentication.
-3. `plotly app publish --name Rhythm`
-   - `plotly app publish --help` lists other options that may be useful if there are 
-     difficulties
-4. Wait a while for the Publish Status to be `Running`
+Run `./dev/publish` to publish the current version, and wait a while for the Publish
+Status to be `Running`. You may be asked to authenticate with the Plotly cloud. A
+verification URL is provided with a device code. Follow the URL and confirm the device
+code to complete authentication.
 
-`plotly --help` lists a few other options, including `plotly app status`, which may be
-useful to confirm that the app is running. 
+The `publish` script does the following:
+
+1. `cd app`
+2. `plotly user login`
+3. `plotly app publish --name Rhythm`
+
+`plotly --help` and `plotly app publish --help` list other options, including
+`plotly app status`, which may be useful to confirm that the app is running.
 
 ## Documentation
 
-All documentation is in `docs/`, published via `Github Pages` using `docsify`.
+All documentation is in `docs/`, published via `Github Pages` using `docsify`. The 
+[documentation page](https://chaynes56.github.io/Rhythm/#/) formats the `docs/*.md` 
+files on the fly, so documentation changes are published when pushed.
 
 - [Docsify documentation](https://docsify.js.org/#/?id=docsify)
 - Installation: `npm i docsify-cli -g; npm install -g npm@11.15.0`

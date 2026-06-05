@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Usage: ./dev/publish
+
+cd app
+plotly user login
+plotly app publish --name Rhythm
