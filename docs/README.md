@@ -58,15 +58,12 @@ All analysis is reported as millisecond (ms) deviations of each detected pulse f
 "ideal" timing established by the metronome. A positive deviation indicates the pulse
 was late.
 
-Deviations are color coded according to the `Training Level` selected. An expert may
-detect timing deviations of as little as 5 ms, while a deviation of 15 ms is apparent to
-most listeners. Thus, deviations of less than 5 ms are indicated in green at the expert
-level, while deviations less than 15 ms are green at the beginner level and the green
-threshold for intermediate is 10 ms. Deviations up to twice the green cutoff are orange
-and over that are red.
-
-Since analysis is with respect to subdivision timing, and the metronome does not play
-subdivisions, the `Subdivisions per beat` selection is in the analysis section.
+Deviations are color coded according to the `Training Level` selected: `Novice`,
+`Intermediate`, or `Advanced`. An expert may detect timing deviations of as little as 5
+ms, while a deviation of 15 ms is apparent to most listeners. Thus, deviations of less
+than 5 ms are indicated in green at the expert level, while deviations less than 15 ms
+are green at the beginner level and the green threshold for intermediate is 10 ms.
+Deviations up to twice the green cutoff are orange and over that are red.
 
 The app's analysis section provides a variety of perspectives on timing deviations,
 which are detailed later in this section. However, it is first important to be aware of
