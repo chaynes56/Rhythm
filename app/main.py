@@ -1,38 +1,21 @@
 #!python3
 # Copyright 2026 Christopher T. Haynes. See the project LICENSE file.
 
-VERSION = "0.1.7"
-
 import base64
 import io
 import json
 import os
-from pathlib import Path
 from datetime import datetime, timezone
+from pathlib import Path
 from time import time as time_now
 
 import dash_bootstrap_components as dbc
 import numpy as np
 import plotly.graph_objects as go
 import soundfile as sf
+import yaml
 from dash import Dash, ctx, dcc, html, Input, no_update, Output, State, clientside_callback
 from dash.exceptions import PreventUpdate
-import yaml
-
-
-def _yaml_str_presenter(dumper, data):
-    if "\n" in data:
-        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
-    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
-
-
-yaml.add_representer(str, _yaml_str_presenter)
-
-from exercises import make_exercises, exercises as builtin_exercises, voicing_code
-
-# Session-scoped custom exercises, populated by load_settings.
-_custom_exercises: dict = {}
-_custom_exercises_text: str = ""
 
 from audio_utils import (
     CALIBRATION_BPM,
@@ -46,13 +29,28 @@ from audio_utils import (
     compute_metronome_track,
     compute_spectrum,
     detect_onsets_rms,
-    _load_log,
     flush_load_log,
     load_audio_from_bytes,
     normalize_waveform_for_display,
     serialize_audio_to_base64_wav,
     trim_audio_tail,
 )
+from exercises import make_exercises, exercises as builtin_exercises, voicing_code
+
+VERSION = "0.1.7"
+
+
+def _yaml_str_presenter(dumper, data):
+    if "\n" in data:
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+
+yaml.add_representer(str, _yaml_str_presenter)
+
+# Session-scoped custom exercises, populated by load_settings.
+_custom_exercises: dict = {}
+_custom_exercises_text: str = ""
 
 METRONOME_END_MARGIN_SECONDS = 0.1  # exclude metronome ticks within this many seconds of
 # the audio end (avoids counting a beat at the recording cutoff)
@@ -1859,7 +1857,9 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
     Input("show-intervals", "value"),
     prevent_initial_call=True,
 )
-def update_interval_histogram(audio_json, relayout_data, show_intervals):
+def update_interval_histogram(audio_json,
+                              relayout_data,
+                              show_intervals):  # noqa
     if not audio_json:
         return go.Figure(), no_update
     try:
@@ -2102,7 +2102,7 @@ def update_deviation_graph(audio_json, relayout_data, training_level, subdivisio
 def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
                   subdivisions_per_beat, calibration_offset_ms, exercise_name):
     print(f"\n{'=' * 60}")
-    print(f"PROCESS_AUDIO CALLBACK TRIGGERED!")
+    print("PROCESS_AUDIO CALLBACK TRIGGERED!")
     print(f"audio_len={len(base64_audio) if base64_audio else 0}")
     print(f"tempo={tempo}, beats_per_measure={beats_per_measure}")
     print(f"{'=' * 60}\n")
@@ -2134,7 +2134,7 @@ def process_audio(base64_audio, tempo, beats_per_measure, measures_per_pattern,
             # For large recordings, use timeout
             result = load_audio_from_bytes(audio_bytes)
             if result is None:
-                print(f"process_audio: Audio loading timeout (likely due to large file size)")
+                print("process_audio: Audio loading timeout (likely due to large file size)")
                 return None, False, go.Figure(), "", no_update
 
             if not isinstance(result, tuple) or result[0] is None or result[1] is None:

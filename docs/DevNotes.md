@@ -1,6 +1,6 @@
 # Rhythm Analyzer Development Notes
 
-This is an open source project with [Github repo](https://github.com/chaynes56/Rhythm)
+This is an open source project with [GitHub repo](https://github.com/chaynes56/Rhythm)
 and [user documentation](https://chaynes56.github.io/Rhythm/#/).
 
 Those interested in contributing to development are encouraged to so indicate and
@@ -52,10 +52,10 @@ Python version that it supports, and update the local environment as needed to m
         - Earlier ran `git config --global push.followTags true`, so don't need
           `--follow-tags` in push
         - Automatically updates documentation in GitHub Pages.
-2. Optionally for patch releases, always for others, in GitHub: `Releases → Draft a new 
+3. Optionally for patch releases, always for others, in GitHub: `Releases → Draft a new 
    release → choose your tag →` write a short description `→ Publish release`. This
    makes it easy to track major and minor releases.
-3. Starting with version `0.2.0`, for minor and major releases add release notes in
+4. Starting with version `0.2.0`, for minor and major releases add release notes in
    `CHANGELOG.md`, including the version number and corresponding tag. This is also
    recommended for significant patch releases.
 
