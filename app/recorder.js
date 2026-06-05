@@ -421,8 +421,13 @@ function _decodeMetronomeTrack(dataUrl) {
         if (dataUrl === pendingMetronomeTrackUrl) {
             metronomeTrackBuffer = buffer;
             console.log(`Metronome track decoded: ${buffer.duration.toFixed(1)}s at ${buffer.sampleRate}Hz`);
-            if (pendingStart) {
+            // Auto-start if the user was waiting (pendingStart), or if the standalone
+            // metronome is already playing with a stale buffer (e.g. voicing changed
+            // while the metronome was running -- restart it with the new track).
+            const standaloneIsPlaying = !!metronomeSourceNode && !metronomeAutoStartedByRecording;
+            if (pendingStart || standaloneIsPlaying) {
                 pendingStart = false;
+                if (standaloneIsPlaying) stopMetronomePlayback();
                 startMetronomePlayback({preserveOffset: false}).catch(err => {
                     reportJsError('pendingStart auto-start failed: ' + err);
                     setMetronomePlayingState(false);

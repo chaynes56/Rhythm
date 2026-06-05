@@ -272,28 +272,6 @@ app.layout = dbc.Container([
                         className="mb-3",
                     ),
                     dbc.Row([
-                        dbc.Col([
-                            dbc.Row([
-                                dbc.Col([
-                                    html.Label("Training Level", className="small"),
-                                    dcc.Dropdown(
-                                        id="training-level",
-                                        options=[{"label": k, "value": k} for k in
-                                                 TRAINING_LEVEL],
-                                        value=settings["training-level"],
-                                        clearable=False,
-                                        style={"width": "140px"},
-                                    ),
-                                ], width="auto"),
-                                dbc.Col([
-                                    html.Div([
-                                        dbc.Switch(id="show-intervals", label="Show Intervals", value=False, className="me-3"),
-                                        dbc.Switch(id="show-spectrum", label="Show Spectrum", value=False),
-                                    ], className="d-flex align-items-center"),
-                                ], width="auto", className="align-self-end"),
-                            ], className="g-2 mb-2", align="center"),
-                            dcc.Markdown(id="analysis-data-block"),
-                        ], width="auto"),
                         dbc.Col(
                             dbc.Row([
                                 dbc.Col(
@@ -327,6 +305,26 @@ app.layout = dbc.Container([
                             width="auto",
                         ),
                     ], className="mt-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Label("Training Level", className="small"),
+                            dcc.Dropdown(
+                                id="training-level",
+                                options=[{"label": k, "value": k} for k in
+                                         TRAINING_LEVEL],
+                                value=settings["training-level"],
+                                clearable=False,
+                                style={"width": "140px"},
+                            ),
+                        ], width="auto"),
+                        dbc.Col([
+                            dbc.Switch(id="show-intervals", label="Show Intervals", value=False),
+                            dbc.Switch(id="show-spectrum", label="Show Spectrum", value=False),
+                        ], width="auto"),
+                        dbc.Col([
+                            dcc.Markdown(id="analysis-data-block"),
+                        ], style={"minWidth": "400px"}),
+                    ], align="center", className="g-3 mt-2"),
                 ]),
             ], className="mb-4"),
         ], width=12)
