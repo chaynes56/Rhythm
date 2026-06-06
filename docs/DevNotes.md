@@ -28,11 +28,11 @@ Python version that it supports, and update the local environment as needed to m
    to [Plotly Cloud](https://cloud.plotly.com/app/7cfb3e1c-4795-4466-8dff-29677836cf73/settings?tab=general)
 2. `General > Python version` and select the most current version. If this is not the
    same as `pyproject.toml`'s `requires-python`:
-   1. Update `requires-python` to the new version
-   2. Run `uv venv --python 3.13 && uv sync` to update the local venv
-   3. PyCharm also requires a manual update of the project interpreter to the new venv.
-   4. Smoke test the local version
-   5. Create and publish a new version as follows.
+    1. Update `requires-python` to the new version
+    2. Run `uv venv --python 3.13 && uv sync` to update the local venv
+    3. PyCharm also requires a manual update of the project interpreter to the new venv.
+    4. Smoke test the local version
+    5. Create and publish a new version as follows.
 
 ## Versioning
 
@@ -86,11 +86,15 @@ The `publish` script does the following:
 
 ## Documentation
 
-All documentation is in `docs/`, published via `Github Pages` using `docsify`. The 
-[documentation page](https://chaynes56.github.io/Rhythm/#/) formats the `docs/*.md` 
-files on the fly, so documentation changes are published when pushed.
+All documentation is in `docs/` and available online at
+[documentation page](https://chaynes56.github.io/Rhythm/#/). Custom CSS styling is via
+the `<style>` section of `index.html`.
+
+Publishing is via `Github Pages` using `docsify`. After documentation changes are
+pushed, publishing takes 2-15 minutes. The status of publication can be seen via the
+GitHub `Actions` tab.
 
 - [Docsify documentation](https://docsify.js.org/#/?id=docsify)
 - Installation: `npm i docsify-cli -g; npm install -g npm@11.15.0`
-- To run local preview server: `docsify serve docs`
+- To run a local preview server: `docsify serve docs`
 - How to add [more pages](https://docsify.js.org/#/more-pages)

@@ -18,17 +18,17 @@ const VERSION = "0.1.8";
 // browser restarts, defeating a flag written there.)
 (function() {
     try {
-        var nav = performance.getEntriesByType('navigation');
+        const nav = performance.getEntriesByType('navigation');
         if (nav.length && nav[0].type === 'reload') return;
     } catch (e) {}
 
-    var reloading = false;
+    let reloading = false;
 
     function triggerReload(reason) {
         if (reloading) return;
         reloading = true;
         console.warn('Rhythm: ' + reason + ' -- polling /_dash-dependencies before reload');
-        var attempts = 0;
+        let attempts = 0;
         function poll() {
             if (attempts++ > 30) {
                 console.error('Rhythm: server unresponsive after 30 s -- giving up on auto-reload');
@@ -54,7 +54,7 @@ const VERSION = "0.1.8";
 
     // Static <script> tag load failures (e.g. plotly.min.js returns 500).
     window.addEventListener('error', function(ev) {
-        var t = ev.target || ev.srcElement;
+        const t = ev.target;
         if (t && t.tagName === 'SCRIPT') {
             triggerReload('Dash script load failed (' + (t.src || 'unknown') + ')');
         }
@@ -64,7 +64,7 @@ const VERSION = "0.1.8";
     // These are thrown as ChunkLoadError by the webpack runtime and surface as
     // unhandled promise rejections -- the <script> error listener never sees them.
     window.addEventListener('unhandledrejection', function(ev) {
-        var msg = ev.reason ? String(ev.reason.message || ev.reason) : '';
+        const msg = ev.reason ? String(ev.reason.message || ev.reason) : '';
         if (msg.indexOf('Loading chunk') !== -1) {
             triggerReload('Webpack chunk load failed (' + msg + ')');
         }
@@ -155,7 +155,7 @@ let currentRecordingPhase = 'idle';
 let calibrationMode = false;
 let calibrationWarmupMeasures = 3;  // 3 for auto-cal (cold pipeline), 1 for manual (already warm)
 let calibrationRecordingEnded = false;  // snapshotted synchronously so stop-event handler routes correctly
-let calibrationSafetyNetTimeout = null;  // timer ID for the per-calibration safety net; cancelled on new start
+let calibrationSafetyNetTimeout = null;  // timer ID for the per-calibration safety net; canceled on new start
 let exerciseSchedule = null;  // null = free mode; set to {schedule, duration, spb} in exercise mode
 let lastExerciseCellId = null;
 let metronomeState = {
