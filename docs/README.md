@@ -179,7 +179,10 @@ of a name line followed by one or more patterns.
 
 ## Calibration
 
-<<<<<<<<
+[coming soon]
+
+Calibration that is close enough to the ideal (say within 6 ms) for the app to be 
+useful to a novice may make it useless for an expert.  
 
 ## Analysis
 
@@ -319,6 +322,8 @@ headphones may be satisfactory if buffering delay is stable.
 
 It is possible that a VPN may introduce additional latency or other issues. Reports of
 experience in this regard are welcome via the issue tracker mentioned below.
+
+[more details coming soon]
 
 ## Local server
 

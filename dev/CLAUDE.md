@@ -75,18 +75,19 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-06-06
+## Last session -- 2026-06-06 (760594e)
 
-**Export as WAV (main.py).** "Export as WAV" added to the Recordings dropdown.
-New `dcc.Download(id="download-wav")` component; `export_wav` callback parses
-`audio-store` JSON, strips the `data:audio/wav;base64,` prefix, decodes to raw
-bytes, and triggers a binary download as `recording.wav`.
+**Analysis table unified to median:n format (main.py).** Free metronome mode now
+shows `median:n` per cell (was mean only), uses median for color thresholds, and
+adds the same title as exercise mode. Ghost note cells in exercise mode now use black
+highlight (`#000000`) instead of dark red when pulses are detected at a rest position.
 
-**README.md rewritten (docs/README.md).** Major additions: Metronome and exercises
-section (terminology, exercise table, voicing dropdowns), Recording section (count-in
-description, Recordings dropdown explanation including Export as WAV), Settings section
-(auto-save, debug mode, custom exercises), Analysis section restructured (waveform/bar
-graph, histogram/spectrum, subdivision table, statistics prose improved).
+**Recordings dropdown renames (main.py).** "Save Recording" -> "Save as JSON";
+"Load Recording" -> "Load JSON"; Load JSON moved before Export as WAV.
+
+**README subdivision table section filled in (docs/README.md).** Describes median:n
+format, dash for empty cells, color coding, and ghost note black highlight. Updated
+to match menu renames.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 
