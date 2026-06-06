@@ -37,7 +37,7 @@ from audio_utils import (
 )
 from exercises import make_exercises, exercises as builtin_exercises, voicing_code
 
-VERSION = "0.1.7"
+VERSION = "0.1.8"
 
 
 def _yaml_str_presenter(dumper, data):

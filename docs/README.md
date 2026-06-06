@@ -1,7 +1,7 @@
 # Rhythm Analyzer
 
 This app provides solo percussion analysis to assist improvement of performance
-precision. Version 0.1.7 is running and available for public use via the Plotly/Dash
+precision. Version 0.1.8 is running and available for public use via the Plotly/Dash
 cloud server at [this page](https://2e7b9ba9-3380-4afa-b92e-f1ff3eee1007.plotly.app/#).
 
 Most common modern browsers may be used, though performance in Safari may be
