@@ -103,10 +103,11 @@ Recording length is limited to 10 minutes, at which point it stops automatically
 alerting tone.
 
 The **Recordings** dropdown allows saving, loading and listening to recordings.
-**Save Recording** uses a JSON format that allows the recording to be loaded later for
-analysis. **Export as WAV** saves the recording in WAV format, which is compatible with
-most media players. **Load Recording** loads a saved JSON format recordings and displays
-its analysis, for which the metadata provided by the JSON format is required.
+**Save as JSON** uses a JSON format that allows the recording to be loaded later for
+analysis. **Load JSON** loads a saved JSON-format recording and displays its analysis,
+for which the metadata provided by the JSON format is required.
+**Export as WAV** saves the recording in WAV format, which is compatible with most media
+players.
 
 ## Settings
 
@@ -240,26 +241,40 @@ perfect subdivision interval.
 ### Interval histogram and waveform spectrum
 
 The **Show Intervals** and **Show Spectrum** toggles enable display of an *interval
-histogram* and the *waveform spectrum*. They are hidden by default, since for most 
-purposes these displays are not helpful. Along with the waveform, these displays are 
-the only analysis elements that are not dependent on how well the recording is 
-synced with the metronome. 
+histogram* and the *waveform spectrum*. They are hidden by default, since for most
+purposes these displays are not helpful. Along with the waveform, these displays are the
+only analysis elements that are not dependent on how well the recording is synced with
+the metronome.
 
-The interval histogram visualizes the distribution of time periods between pulses. 
-For example, if a groove has both two and four box subdivisions intervals between 
-tones, there should be two distinct peaks in the histogram. If just the metronome is 
-recorded, there should be one distinct peak. If calibration values are inconsistent 
-this is worth checking. 
+The interval histogram visualizes the distribution of time periods between pulses. For
+example, if a groove has both two and four box subdivisions intervals between tones,
+there should be two distinct peaks in the histogram. If just the metronome is recorded,
+there should be one distinct peak. If calibration values are inconsistent this is worth
+checking.
 
-The waveform spectrum shows the distribution of energy in the recording as a 
-function of the frequency. This is a log-log display. Thus equal x-axis intervals 
-correspond to equal musical intervals (such as octave) and equal y-axis intervals 
-correspond to the same number of decibels (db), and both axis are greatly compressed 
-compared with linear axes. 
+The waveform spectrum shows the distribution of energy in the recording as a function of
+the frequency. This is a log-log display. Thus equal x-axis intervals correspond to
+equal musical intervals (such as octave) and equal y-axis intervals correspond to the
+same number of decibels (db), and both axis are greatly compressed compared with linear
+axes.
 
 ### Subdivision beat deviation table
 
-<<<<<<<<
+This table has subdivision columns and measure rows, with each cell representing the
+time interval of a subdivision in the overall pattern. The beginning of the subdivision
+is the middle of the interval. (If an exercise with multiple patterns is selected, there
+will be a table for each pattern.)
+
+If no pulse was detected in a cell's time interval, it contains a dash. Otherwise, the
+cell contains the *median* pulse deviation (to the nearest ms) from the center of the
+cell's interval, followed by the number of pulses detected in the interval. (The median
+is the value in the middle of a sorted list of values.)
+
+Cells are highlighted with the same green/orange/red color indicated in the bar graph
+legend above, which is determined by the selected training level. If an exercise is
+selected and a cell corresponds to a ghost note (.) in the exercise, the cell should
+contain a dash. If not, it has black highlighting, indicating one or more pulses were
+far enough off that they landed in the wrong interval.
 
 ### Statistics
 
@@ -273,11 +288,11 @@ is provided as a point of comparison.
 
 Good performance is indicated when all four of the following statistics are relatively
 small. While the *mean* might be considered the primary measure, if a small percentage
-of pulses are way off that will affect the mean more than the *median* (mid-point of
-sorted values). If the mean and median are large while the *standard deviation (std)* is
-small, that indicates a consistent timing error. The *maximum (max)* is how far off your
-worst pulse was, unless that pulse was off by more than half the subdivision length, in
-which case it will be computed as deviation from the wrong subdivision.
+of pulses are way off that will affect the mean more than the median. If the mean and
+median are large while the *standard deviation (std)* is small, that indicates a
+consistent timing error. The *maximum (max)* is how far off your worst pulse was, unless
+that pulse was off by more than half the subdivision length, in which case it will be
+computed as deviation from the wrong subdivision.
 
 ## App Performance Issues
 

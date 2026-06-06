@@ -341,9 +341,9 @@ app.layout = dbc.Container([
                                 label="Recordings",
                                 children=[
                                     dbc.DropdownMenuItem("Play Recording", id="play-btn"),
-                                    dbc.DropdownMenuItem("Save Recording", id="save-btn"),
+                                    dbc.DropdownMenuItem("Save as JSON", id="save-btn"),
+                                    dbc.DropdownMenuItem("Load JSON", id="load-btn"),
                                     dbc.DropdownMenuItem("Export as WAV", id="export-wav-btn"),
-                                    dbc.DropdownMenuItem("Load Recording", id="load-btn"),
                                 ],
                                 color="primary",
                                 className="me-2 d-inline-block",
@@ -1687,7 +1687,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
                     return "#e8e8e8"
                 row_idx = cell_m_idx % len(cell_pat["measures"])
                 if cell_sub_pos < len(cell_pat["measures"][row_idx]) and cell_pat["measures"][row_idx][cell_sub_pos] == '.':
-                    return "#c0392b"
+                    return "#000000"
                 med = abs(float(np.median(d)))
                 if med < warn_ms:
                     return "#c8e6c9"
@@ -1738,7 +1738,7 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
                         bg = cell_bg_ex(devs, pat, m_idx, sub_pos)
                         txt = cell_text_ex(devs)
                         cell_style = {**base_cell_ex, "backgroundColor": bg}
-                        if bg == "#c0392b":
+                        if bg == "#000000":
                             cell_style["color"] = "#ffffff"
                         row_cells.append(html.Td(txt, style=cell_style))
                     rows.append(html.Tr(row_cells))
@@ -1778,16 +1778,17 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
         def cell_bg(deviations, _m_idx, _b_idx, _s_idx):
             if not deviations:
                 return "#e8e8e8"
-            if abs(float(np.mean(deviations))) < warn_ms:
+            if abs(float(np.median(deviations))) < warn_ms:
                 return "#c8e6c9"
-            if abs(float(np.mean(deviations))) < alert_ms:
+            if abs(float(np.median(deviations))) < alert_ms:
                 return "#ffe0b2"
             return "#ffcdd2"
 
         def cell_text(deviations):
             if not deviations:
                 return "\u2014"
-            return str(round(float(np.mean(deviations))))
+            med = int(round(float(np.median(deviations))))
+            return f"{med}:{len(deviations)}"
 
         base_cell = {"textAlign": "center", "padding": "3px 6px",
                      "fontSize": "0.75rem", "minWidth": "30px"}
@@ -1845,7 +1846,12 @@ def update_subdivision_table(audio_json, relayout_data, training_level, subdivis
             html.Tbody(rows),
             style={"borderCollapse": "collapse", "border": "1px solid #aaa"},
         )
-        return html.Div(table, style={"overflowX": "auto"}), no_update
+        title = html.P(
+            "Median pulse deviation relative to beat : number of pulses",
+            style={"fontSize": "0.75rem", "marginBottom": "4px", "color": "#444",
+                   "fontStyle": "italic"}
+        )
+        return html.Div([title, table], style={"overflowX": "auto"}), no_update
     except Exception as e:
         print(f"update_subdivision_table: {e}")
         return None, f"Subdivision table error: {e}"
