@@ -8,9 +8,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0">
   <link rel="stylesheet" href="//cdn.jsdelivr.net/npm/docsify@4/lib/themes/vue.css">
   <style>
-    .markdown-section { font-size: 14px; }
+    .markdown-section { font-size: 16px; }
+    @page { margin: 0.75in 0.75in 0.75in 0.75in; }
     @media print {
-      .markdown-section { font-size: 14pt; }
+      html { font-size: 10pt; }
+      .markdown-section { font-size: 10pt; }
+      body, main { width: 100%; overflow: visible; }
+      .content { position: static; left: 0; padding-top: 0; }
+      .markdown-section { max-width: 100%; padding-left: 0; padding-right: 0; }
     }
   </style>
 </head>
