@@ -75,21 +75,18 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-06-04 (dfdbe79)
+## Last session -- 2026-06-06
 
-**Cloud deployment verified working.** Plotly cloud JS chunk errors (`plotly.min.js`
-returning HTML) were transient; base64-embedded samples fix from 7d2a790 is confirmed.
+**Export as WAV (main.py).** "Export as WAV" added to the Recordings dropdown.
+New `dcc.Download(id="download-wav")` component; `export_wav` callback parses
+`audio-store` JSON, strips the `data:audio/wav;base64,` prefix, decodes to raw
+bytes, and triggers a binary download as `recording.wav`.
 
-**`app/assets/` moved to `dev/assets/` (ced7442).** WAV sample files serve no
-purpose in the deployed app now that samples are embedded in `data_samples.py`.
-`dev/embed_samples.py` `ASSETS` path updated from `app/assets` -> `dev/assets`
-(sibling path relative to the script).
-
-**Diagnostic log line removed (dfdbe79).** `build: metro_vs=... exercise_vs=...`
-line in `update_metronome_track` removed after cloud verification passed.
-
-**Python pinned to 3.13 (dfdbe79).** `requires-python` changed from `>=3.14`
-to `>=3.13` to match Plotly cloud runtime. Venv rebuilt with `uv venv --python 3.13 && uv sync`.
+**README.md rewritten (docs/README.md).** Major additions: Metronome and exercises
+section (terminology, exercise table, voicing dropdowns), Recording section (count-in
+description, Recordings dropdown explanation including Export as WAV), Settings section
+(auto-save, debug mode, custom exercises), Analysis section restructured (waveform/bar
+graph, histogram/spectrum, subdivision table, statistics prose improved).
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 

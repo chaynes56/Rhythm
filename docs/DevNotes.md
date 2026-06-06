@@ -28,10 +28,11 @@ Python version that it supports, and update the local environment as needed to m
    to [Plotly Cloud](https://cloud.plotly.com/app/7cfb3e1c-4795-4466-8dff-29677836cf73/settings?tab=general)
 2. `General > Python version` and select the most current version. If this is not the
    same as `pyproject.toml`'s `requires-python`:
-    1. Update `requires-python` to the new version
-    2. Run `uv venv --python 3.13 && uv sync` to update the local venv
-    3. Smoke test the local version
-    4. Create and publish a new version as follows.
+   1. Update `requires-python` to the new version
+   2. Run `uv venv --python 3.13 && uv sync` to update the local venv
+   3. PyCharm also requires a manual update of the project interpreter to the new venv.
+   4. Smoke test the local version
+   5. Create and publish a new version as follows.
 
 ## Versioning
 

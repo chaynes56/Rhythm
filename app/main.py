@@ -342,6 +342,7 @@ app.layout = dbc.Container([
                                 children=[
                                     dbc.DropdownMenuItem("Play Recording", id="play-btn"),
                                     dbc.DropdownMenuItem("Save Recording", id="save-btn"),
+                                    dbc.DropdownMenuItem("Export as WAV", id="export-wav-btn"),
                                     dbc.DropdownMenuItem("Load Recording", id="load-btn"),
                                 ],
                                 color="primary",
@@ -544,7 +545,7 @@ app.layout = dbc.Container([
                                   value=[], style={"display": "none"}),
                     dbc.Row([
                         dbc.Col([
-                            html.Label("Tempo (BPM)", className="small"),
+                            html.Label("Tempo (Beats / Minute)", className="small"),
                             dcc.Slider(min=40, max=240, step=1, value=settings["tempo-slider"],
                                        id="tempo-slider",
                                        marks={i: str(i) for i in range(40, 241, 40)}),
@@ -581,6 +582,7 @@ app.layout = dbc.Container([
     dbc.Button("Calibration Process", id="calibration-process-btn",
                style={"display": "none"}, n_clicks=0),
     dcc.Download(id="download-audio"),
+    dcc.Download(id="download-wav"),
     dcc.Upload(id="upload-audio", style={"display": "none"}),
     dcc.Download(id="download-settings"),
     dcc.Store(id="settings-raw-store"),
@@ -2225,6 +2227,25 @@ def save_recording(n_clicks, audio_json):
     if not audio_json:
         return None
     return dict(content=audio_json, filename="recording.json")
+
+
+# noinspection PyUnusedLocal
+@app.callback(
+    Output("download-wav", "data"),
+    Input("export-wav-btn", "n_clicks"),
+    State("audio-store", "data"),
+    prevent_initial_call=True
+)
+def export_wav(n_clicks, audio_json):
+    if not audio_json:
+        return None
+    data = json.loads(audio_json)
+    audio_b64 = data.get("audio", "")
+    if not audio_b64:
+        return None
+    raw_b64 = audio_b64.split(",", 1)[-1] if "," in audio_b64 else audio_b64
+    wav_bytes = base64.b64decode(raw_b64)
+    return dcc.send_bytes(wav_bytes, "recording.wav")
 
 
 @app.callback(
