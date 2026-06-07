@@ -257,7 +257,7 @@ app.layout = dbc.Container([
                 dbc.CardBody([
                     dcc.Graph(
                         id="waveform-graph",
-                        style={"height": "260px", "visibility": "hidden"},
+                        style={"display": "none"},
                         config=dict(scrollZoom=False, displayModeBar=True, doubleClick='reset',  # type: ignore[arg-type]
                                     modeBarButtonsToRemove=["pan2d", "select2d", "lasso2d",
                                                             "autoScale2d"], displaylogo=False),
@@ -265,7 +265,7 @@ app.layout = dbc.Container([
                     ),
                     dcc.Graph(
                         id="deviation-graph",
-                        style={"height": "260px", "visibility": "hidden"},
+                        style={"display": "none"},
                         config={"staticPlot": True},  # type: ignore[arg-type]
                         className="mb-3",
                     ),
@@ -1097,23 +1097,15 @@ clientside_callback(
 clientside_callback(
     """
     function(recording_phase, waveform_visible) {
-        const baseStyle = {
-            height: '260px',
-            visibility: 'hidden'
-        };
-
         if (recording_phase && recording_phase !== 'idle') {
-            return baseStyle;
+            return { display: 'none' };
         }
 
         if (waveform_visible) {
-            return {
-                height: '260px',
-                visibility: 'visible'
-            };
+            return { height: '260px', display: 'block' };
         }
 
-        return baseStyle;
+        return { display: 'none' };
     }
     """,
     Output("waveform-graph", "style"),
@@ -1124,7 +1116,7 @@ clientside_callback(
 clientside_callback(
     """
     function(waveform_visible) {
-        return { visibility: waveform_visible ? 'visible' : 'hidden' };
+        return { display: waveform_visible ? 'block' : 'none' };
     }
     """,
     Output("analysis-data-block", "style"),
@@ -1134,7 +1126,7 @@ clientside_callback(
 clientside_callback(
     """
     function(waveform_visible) {
-        return { height: '260px', visibility: waveform_visible ? 'visible' : 'hidden' };
+        return waveform_visible ? { height: '260px', display: 'block' } : { display: 'none' };
     }
     """,
     Output("deviation-graph", "style"),
