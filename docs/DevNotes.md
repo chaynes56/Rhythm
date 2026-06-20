@@ -18,6 +18,7 @@ provide contact email using
    track exact versions.
 4. `source .venv/bin/activate`
     - Within the project, `python` and `plotly` commands then run the project versions.
+5. If using Claude, see `.claude/README.md`.
 
 ## Check for Plotly cloud python version update
 
@@ -71,7 +72,7 @@ MiB via the web interface vs 200 MiB via CLI, so at some point the CLI method ma
 only option.
 
 Run `./dev/publish` to publish the current version, and wait a while for the Publish
-Status to be `Running`. You may be asked to authenticate with the Plotly cloud. A
+Status to be `Running`. You may be asked to authenticate with Plotly cloud. For this a
 verification URL is provided with a device code. Follow the URL and confirm the device
 code to complete authentication.
 
@@ -86,9 +87,15 @@ The `publish` script does the following:
 
 ## Documentation
 
-All documentation is in `docs/` and available online at
-[documentation page](https://chaynes56.github.io/Rhythm/#/). Custom CSS styling is via
-the `<style>` section of `index.html`.
+### Online
+
+Online documentation is in `docs/*.md` files and published as formatted HTML at
+[documentation page](https://chaynes56.github.io/Rhythm/#/). 
+
+Custom CSS styling is via the `<style>` section of `index.html`.
+`docs/README.md` is published as`https://chaynes56.github.io/Rhythm/#/`; other 
+`docs/NAME.md` files are published as `https://chaynes56.github.io/Rhythm/#/NAME`. 
+Subdirectories of `docs/` are not published.
 
 Publishing is via `Github Pages` using `docsify`. After documentation changes are
 pushed, publishing takes 2-15 minutes. The status of publication can be seen via the
@@ -97,4 +104,8 @@ GitHub `Actions` tab.
 - [Docsify documentation](https://docsify.js.org/#/?id=docsify)
 - Installation: `npm i docsify-cli -g; npm install -g npm@11.15.0`
 - To run a local preview server: `docsify serve docs`
-- How to add [more pages](https://docsify.js.org/#/more-pages)
+
+### Local
+
+`dev/docs` contains detailed information. These docs are primarily AI generated, and 
+provides useful context for AI agents. 

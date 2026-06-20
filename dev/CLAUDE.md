@@ -115,3 +115,18 @@ to match menu renames.
 
 - For Python venv/dependency issues, prefer running `uv venv` directly when requested rather than suggesting shell-level VIRTUAL_ENV workarounds.
 - Respect IDE-native solutions (e.g., PyCharm interpreter settings) over global shell hacks.
+
+### Commit Hygiene
+- Never include WAV samples, .DS_Store, or other binary/system files in commits
+- Review `git status` and stage files explicitly rather than using `git add .`
+- Confirm the staged file list with the user before committing when adding new file types
+
+### Dev Server
+- This project uses Flask/Dash with Werkzeug; the auto-reloader can leave orphaned processes serving stale JS
+- Before debugging frontend behavior, kill stray server processes (`pkill -f 'python.*app'` or check `lsof -i :PORT`) and do a hard reload
+- Prefer running with reloader disabled when diagnosing client-server issues
+
+### Linting & Types
+- Run lint/type checks after edits to Python (Pyright) and JS files; the project has had repeated lint cleanup sessions
+- For Pyright type-narrowing issues, prefer refactoring with `in` checks or subscript access over adding type annotations that can cascade new warnings
+- Use `mcp__ide__getDiagnostics` to surface issues before committing
