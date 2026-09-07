@@ -141,6 +141,44 @@ the other patterns miss.
 behavior. Covered by design (conservative warmup, capability gates,
 per-device fingerprints, advisory warnings) rather than by test.
 
+**Wireless detection logic tested headlessly (10/10 cases).** The real
+`detectWirelessAudio`/`warnIfWirelessAudio` functions were extracted and run
+against mocked device data: 4 wired configs stay silent (incl. the Windows
+`Headset (USB Audio Device)` + Realtek regression case), 6 wireless configs
+warn via the expected signal (mic label / output label / telephony rate),
+and the degraded paths behave (enumerateDevices rejecting, or absent as on
+older Firefox, still warns from the mic label without throwing).
+
+### NEXT SESSION -- pending browser verification
+
+Nothing is known-broken; the items below are unverified, not failing.
+
+1. **Bluetooth warning, end-to-end in the browser.** The detection functions
+   are top-level globals in the inlined script, so after page load + warmup,
+   in the browser console:
+   `warnIfWirelessAudio({sampleRate: 48000}, 'AirPods Pro')`
+   -> should render the warning in the app error UI. `{sampleRate: 16000}`
+   exercises the HFP branch; `'MacBook Pro Microphone'` should stay silent.
+   Fuller test: pair a real headset while idle -- `devicechange` should fire,
+   warmup re-runs, warning appears alongside recalibration.
+   What is unverified is only the UI rendering path
+   (`reportJsWarning` -> `dash_clientside.set_props('error-store')`, the same
+   mechanism `reportJsError` already uses) and real-world device labels.
+2. **Capability gating:** block the mic in Chrome site settings, reload ->
+   buttons should read "Recording Unavailable"/"Unavailable" with advice
+   (previously they hung on "Warming Up..." forever).
+3. **Cold-start calibration after reboot** -- the 8s warmup is back, so this
+   should be fine; worth one confirmation that a cold calibration lands
+   within a few ms of warm runs.
+4. **Safari (needs 14.1+ for AudioWorklet) and Firefox** never exercised.
+
+**Environment note:** the dev server is started manually
+(`.venv/bin/python app/main.py`, port 8006, reloader off). recorder.js is
+inlined at server startup, so **every JS change needs a server restart**, not
+just a browser reload. After a reboot nothing needs restoring beyond starting
+the server; stored calibrations live in browser localStorage
+(`user-context`), so they survive a reboot but not a browser profile wipe.
+
 ## Previous session -- 2026-09-06 (2) (store-and-skip calibration, 8299f14)
 
 **Store-and-skip calibration flow completed (main.py, recorder.js).** The
