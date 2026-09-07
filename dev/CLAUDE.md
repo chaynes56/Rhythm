@@ -86,7 +86,62 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-09-06 (2) (store-and-skip calibration wired up)
+## Last session -- 2026-09-06 (3) (cross-platform robustness; wireless warning)
+
+**Reframed from "shrink the warmup" to cross-platform robustness.** Claude had
+cut INITIAL_WARMUP_SECONDS 8 -> 2 based on first-principles reasoning plus one
+dev machine. User pushed back: the app must work across a wide variety of
+user hardware/software, unsupported platforms should be recognized and
+signaled, recalibration should happen automatically or be advised, and a few
+seconds of startup delay does not matter. **Warmup reverted to 8s** (comment
+records why: users have Bluetooth, layered Windows drivers, slow hardware;
+the first auto-calibration measures physical latency that must be settled).
+
+**Unsupported-platform signaling (recorder.js).** Previously a denied mic or
+old browser left the buttons on "Warming Up..." forever with no message
+(warmup-info-store never fires). Now capability checks run before warmup --
+getUserMedia/secure context, Web Audio, AudioWorklet -- and each failure
+relabels record-btn/calibrate-btn to "Recording Unavailable"/"Unavailable"
+with specific advice (`signalAudioUnavailable`). getUserMedia errors are
+mapped by err.name: NotAllowedError/SecurityError -> permission blocked,
+NotFoundError/OverconstrainedError -> no mic. Mobile UAs get a non-blocking
+advisory.
+
+**Automatic recalibration on device change (recorder.js).** `devicechange`
+listener, debounced 1.5s: when idle, re-runs triggerPermissionDialog, which
+re-fingerprints the new device combo and then restores that combo's stored
+calibration or auto-calibrates. Mid-recording/playback it advises instead.
+platformInfo gained a `seq` field so an identical fingerprint still re-fires
+the Dash callbacks (otherwise buttons stay disabled after a re-run).
+
+**Calibration failure advice + fallback (main.py).** `platform_entry()`
+helper added. Failures now always produce actionable guidance (not just in
+debug mode), and fall back to the stored platform offset when one exists --
+including the stale-entry case, on the reasoning that a months-old measured
+offset beats an unmeasured zero.
+
+**Capture dropouts surfaced (recorder.js).** Input gaps >= 20ms in a
+recording now warn the user that pulses may be missing (was console-only).
+Calibration gaps are left to the std-based failure path.
+
+**Wireless/Bluetooth detection and warning (recorder.js).** Confirmed the
+May-2026 Opus assessment: Bluetooth is the worst case because opening the
+mic forces A2DP -> HFP/HSP (changes output latency mid-session, drops to
+telephony sample rate), the headset runs its own clock (real drift over long
+recordings, unlike wired), and A2DP buffering is renegotiated dynamically.
+`WIRELESS_NAME_PATTERN` matches device labels plus a sampleRate <= 24000
+HFP check, and also inspects the default audiooutput device (playback can be
+wireless when the mic is not). Warns, never blocks. Regex validated against
+21 realistic labels: no false positives on Blue Yeti / Shure MV7 /
+Scarlett 2i2 / Realtek. A bare `Headset (` pattern was deliberately removed
+-- Windows labels wired USB/Realtek headsets that way and it caught nothing
+the other patterns miss.
+
+**Not verified on hardware:** old browsers, mobile, and actual Bluetooth
+behavior. Covered by design (conservative warmup, capability gates,
+per-device fingerprints, advisory warnings) rather than by test.
+
+## Previous session -- 2026-09-06 (2) (store-and-skip calibration, 8299f14)
 
 **Store-and-skip calibration flow completed (main.py, recorder.js).** The
 skeleton (local `user-context` store, warmup-triggered restore-or-auto-cal,

@@ -697,6 +697,19 @@ clientside_callback(
 USER_CONTEXT_MAX_PLATFORMS = 5
 
 
+def platform_entry(context, warmup_info_str):
+    """Return the stored calibration entry for the current platform, or None."""
+    try:
+        info = json.loads(warmup_info_str) if warmup_info_str else None
+    except json.JSONDecodeError:
+        return None
+    key = (info or {}).get("platform_key")
+    if not key or not isinstance(context, dict):
+        return None
+    entry = (context.get("platforms") or {}).get(key)
+    return entry if isinstance(entry, dict) else None
+
+
 def updated_user_context(context, warmup_info_str, offset_ms, std_ms=None,
                          source="calibration"):
     """Merge a calibration result into the platform-keyed user context.
@@ -785,10 +798,22 @@ def process_calibration(base64_audio, debug_mode_store, warmup_info_str,
         debug = is_debug_mode(debug_mode_store)
         failed = std_ms >= CALIBRATION_FAIL_STD
 
+        fallback = platform_entry(user_context, warmup_info_str) if failed else None
+        fallback_ms = fallback.get("calibration_offset_ms") if fallback else None
         if failed:
             fail_str = f"Calibration failure: {offset_ms} +/- {std_ms} ms"
             confidence_display = html.Span(fail_str, style={"color": "#dc3545"})
-            msg = fail_str if debug else ""
+            # Always give actionable advice on failure (not only in debug):
+            # a novice user needs to know what to do next.
+            if fallback_ms is not None:
+                msg = (f"Calibration failed (spread ±{std_ms} ms) -- keeping the "
+                       f"saved value of {fallback_ms} ms for this setup. To retry: "
+                       "raise speaker volume, reduce background noise, and click "
+                       "Calibrate.")
+            else:
+                msg = (f"Calibration failed (spread ±{std_ms} ms). Make sure the "
+                       "metronome is audible through your speakers, reduce "
+                       "background noise, and click Calibrate to retry.")
         else:
             confidence_display = f"±{std_ms} ms" if debug else ""
             msg = f"Calibrated: {offset_ms} ms (std {std_ms} ms)" if debug else ""
@@ -828,7 +853,13 @@ def process_calibration(base64_audio, debug_mode_store, warmup_info_str,
             "spectrum_psd": [],
             "duration": duration,
         }
-        cal_out = no_update if failed else offset_ms
+        if failed:
+            # Fall back to the stored platform value when one exists (it also
+            # covers the stale-entry case, where auto-cal ran and failed: a
+            # months-old measured offset beats an unmeasured zero).
+            cal_out = fallback_ms if fallback_ms is not None else no_update
+        else:
+            cal_out = offset_ms
         return cal_out, msg, json.dumps(save_data), True, fig, cal_out, confidence_display, new_context
     except Exception as e:
         print(f"process_calibration error: {e}")
@@ -852,18 +883,11 @@ def calibration_value_edited(value, warmup_info_str, user_context):
     # calibration-value), so skip the write when the value already matches
     # the stored entry -- only a genuine change is persisted as "manual".
     new_context = no_update
-    try:
-        info = json.loads(warmup_info_str) if warmup_info_str else None
-    except json.JSONDecodeError:
-        info = None
-    key = (info or {}).get("platform_key")
-    if key:
-        platforms = (user_context or {}).get("platforms") if isinstance(user_context, dict) else None
-        entry = (platforms or {}).get(key)
-        stored = entry.get("calibration_offset_ms") if isinstance(entry, dict) else None
-        if stored is None or abs(float(stored) - value) >= 0.5:
-            new_context = updated_user_context(
-                user_context, warmup_info_str, value, source="manual")
+    entry = platform_entry(user_context, warmup_info_str)
+    stored = entry.get("calibration_offset_ms") if entry else None
+    if stored is None or abs(float(stored) - value) >= 0.5:
+        new_context = updated_user_context(
+            user_context, warmup_info_str, value, source="manual")
     return value, new_context
 
 

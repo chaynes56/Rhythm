@@ -115,9 +115,106 @@ window.addEventListener('unhandledrejection', function(ev) {
     reportJsError(msg);
 });
 
+// Wireless/Bluetooth audio detection.
+//
+// Bluetooth is the worst case for this app, for reasons beyond its large
+// (but constant, hence calibratable) latency:
+//   - Opening the mic forces a switch from A2DP to HFP/HSP, which changes
+//     output latency mid-session and drops the sample rate to telephony
+//     rates -- so a calibration measured before the switch no longer holds.
+//   - The headset runs its own clock, so playback/record drift accumulates
+//     over a long recording (wired devices share the host clock and do not).
+//   - A2DP buffering is renegotiated dynamically, so latency is not even
+//     stable within one session.
+// Detection is heuristic (device labels are free text), so this warns and
+// never blocks.
+// Deliberately excludes a bare "Headset (...)" pattern: Windows labels wired
+// USB and Realtek headsets that way, and every real Bluetooth label it would
+// have caught is already matched by "bluetooth" or "hands-free".
+const WIRELESS_NAME_PATTERN =
+    /bluetooth|hands[\s-]?free|hfp|a2dp|airpods|air\s?pods|buds|beats|jabra|wireless/i;
+const HFP_SAMPLE_RATE_MAX = 24000;  // 8/16 kHz means telephony mode is active
+
+function detectWirelessAudio(ctx, micLabel) {
+    const reasons = [];
+    if (micLabel && WIRELESS_NAME_PATTERN.test(micLabel)) {
+        reasons.push(`microphone "${micLabel}"`);
+    }
+    if (ctx && ctx.sampleRate && ctx.sampleRate <= HFP_SAMPLE_RATE_MAX) {
+        reasons.push(`telephony-rate audio (${ctx.sampleRate} Hz)`);
+    }
+    // Also check the default output device -- playback can be on a headset
+    // even when the mic is not.  Labels require granted permission, which
+    // warmup has by this point; Firefox may expose no audiooutput entries.
+    if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+        return Promise.resolve(reasons);
+    }
+    return navigator.mediaDevices.enumerateDevices().then(devices => {
+        const out = devices.filter(d => d.kind === 'audiooutput');
+        const dflt = out.find(d => d.deviceId === 'default') || out[0];
+        if (dflt && dflt.label && WIRELESS_NAME_PATTERN.test(dflt.label)) {
+            reasons.push(`output "${dflt.label}"`);
+        }
+        return reasons;
+    }).catch(() => reasons);
+}
+
+function warnIfWirelessAudio(ctx, micLabel) {
+    return detectWirelessAudio(ctx, micLabel).then(reasons => {
+        if (!reasons.length) return false;
+        console.warn('Wireless audio suspected:', reasons.join('; '));
+        reportJsWarning(
+            'Wireless/Bluetooth audio detected (' + reasons.join('; ') + '). ' +
+            'Timing accuracy will be poor and may drift during long recordings, ' +
+            'because the headset switches modes when the microphone opens and ' +
+            'runs on its own clock. Wired headphones or your built-in speakers ' +
+            'and microphone are strongly recommended. If this detection is wrong, ' +
+            'you can ignore this message.');
+        return true;
+    });
+}
+
+// Advisory (non-error) message routed to the same UI surface as errors.
+function reportJsWarning(message) {
+    console.warn('[warn]', message);
+    try {
+        window.dash_clientside.set_props('error-store', {data: 'JS: ' + message});
+    } catch (e) { /* set_props not yet available on early warnings */ }
+}
+
+function setStatusMessage(msg) {
+    const el = document.getElementById('status-msg');
+    if (el) el.textContent = msg;
+}
+
+function setButtonState(id, label, disabled) {
+    const btn = document.getElementById(id);
+    if (btn) {
+        btn.textContent = label;
+        btn.disabled = disabled;
+    }
+}
+
+// Unsupported or broken audio platform: relabel the gated buttons (they would
+// otherwise sit on "Warming Up..." forever, since warmup-info-store never
+// fires) and tell the user what is wrong and what to do.
+function signalAudioUnavailable(msg) {
+    warmupInProgress = false;
+    setButtonState('record-btn', 'Recording Unavailable', true);
+    setButtonState('calibrate-btn', 'Unavailable', true);
+    setStatusMessage(msg);
+    reportJsError(msg);
+}
+
 // Timing constants
-const INITIAL_WARMUP_SECONDS = 8;      // silent warmup duration on page load
-// (Stage 2)
+// Silent warmup duration on page load.  Deliberately conservative: on this
+// dev machine ~2s suffices (stream open + ADC/DAC clock lock), but users run
+// Bluetooth audio, layered Windows drivers, and slow hardware where settling
+// takes longer, and the first auto-calibration measures physical latency
+// that must be at steady state.  Startup delay is cheap; a skewed stored
+// calibration is not.  Gates record-btn/calibrate-btn enablement via
+// warmup-info-store.
+const INITIAL_WARMUP_SECONDS = 8;
 const FIRST_TONE_DELAY_SECONDS = 0.15; // scheduling buffer before first audio tone
 const MIN_COUNT_IN_PERIOD_SEC = 3;     // minimum count-in duration before recording starts
 
@@ -137,6 +234,10 @@ let calibrationTrackBuffer = null;
 let calibrationDecodePromise = null;
 let calibrationFirstBeatMs = 0;
 let warmupCompleted = false;
+let warmupInProgress = false;
+let warmupSeq = 0;  // makes each warmup-info-store value unique so Dash callbacks re-fire
+let deviceChangeDebounce = null;
+let lastCaptureGapFrames = 0;  // input-delivery gaps in the most recent assembled capture
 let metronomeSourceNode = null;
 let metronomeGainNode = null;
 let pendingMetronomeTrackUrl = null;
@@ -358,6 +459,7 @@ function discardCapture() {
 // contiguous runs tagged with their frame position; any input-delivery gaps
 // stay zero-filled (silence) so downstream timing is unaffected.
 function assembleCapture(chunks, startFrame) {
+    lastCaptureGapFrames = 0;
     if (!chunks.length) return null;
     let firstFrame = Infinity;
     let endFrame = 0;
@@ -381,6 +483,7 @@ function assembleCapture(chunks, startFrame) {
     }
     const gapFrames = (endFrame - Math.max(startFrame, firstFrame)) - covered;
     if (gapFrames > 0) {
+        lastCaptureGapFrames = gapFrames;
         console.warn(`assembleCapture: ${gapFrames} frames of input gaps filled with silence`);
     }
     return out;
@@ -910,6 +1013,17 @@ function finishActiveRecording(route) {
         }
         console.log(`finishActiveRecording: ${route}, ${samples.length} samples` +
             ` (${(samples.length / sampleRate).toFixed(2)}s) from frame ${startFrame}`);
+        // Input dropouts mean the pipeline was starved (system overload,
+        // device glitch); frame indexing keeps alignment, but audio is
+        // missing -- tell the user rather than failing silently.  For
+        // calibration the inflated std already triggers the failure path.
+        if (route !== 'calibration' && lastCaptureGapFrames > 0) {
+            const gapMs = Math.round(lastCaptureGapFrames / sampleRate * 1000);
+            if (gapMs >= 20) {
+                reportJsWarning(`Audio input dropped for ~${gapMs}ms during this recording; ` +
+                    'some pulses may be missing. Close other apps and consider recalibrating.');
+            }
+        }
         processCapturedAudio(samples, sampleRate, route);
     });
     cleanupRecordingStream();
@@ -1086,6 +1200,28 @@ function loadMetronomeTrack(dataUrl) {
     if (audioContext && audioContext.state !== 'closed') {
         _decodeMetronomeTrack(dataUrl);
     }
+}
+
+// Audio devices changed (headset plugged/unplugged, Bluetooth connected...):
+// the active calibration may no longer match the physical pipeline.  When
+// idle, automatically re-run the warmup flow -- it re-fingerprints the new
+// device combination, then either restores a stored calibration for it or
+// auto-calibrates.  Mid-recording or mid-playback, advise instead.
+function handleDeviceChange() {
+    if (deviceChangeDebounce) clearTimeout(deviceChangeDebounce);
+    deviceChangeDebounce = setTimeout(() => {
+        deviceChangeDebounce = null;
+        if (!warmupCompleted || warmupInProgress) return;  // startup churn or already re-running
+        if (currentRecordingPhase !== 'idle' || metronomeSourceNode) {
+            reportJsWarning('Audio device changed. Recalibrate (or reload the page) ' +
+                'before your next recording.');
+            return;
+        }
+        console.log('Audio devices changed -- re-running warmup to re-fingerprint and restore/recalibrate');
+        setStatusMessage('Audio device changed -- rechecking calibration...');
+        warmupCompleted = false;
+        window.recorderControls.triggerPermissionDialog();
+    }, 1500);
 }
 
 try {
@@ -1416,6 +1552,37 @@ try {
 
         triggerPermissionDialog: function () {
             console.log("Triggering permission dialog and starting warmup...");
+
+            // Capability checks first: signal unsupported platforms explicitly
+            // instead of leaving the buttons on "Warming Up..." forever.
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                signalAudioUnavailable('Recording is not supported here. Use a current browser ' +
+                    '(Chrome or Firefox recommended) over HTTPS.');
+                return;
+            }
+            if (!(window.AudioContext || window['webkitAudioContext'])) {
+                signalAudioUnavailable('Web Audio is not supported in this browser. ' +
+                    'Use a current Chrome or Firefox.');
+                return;
+            }
+            const probeCtx = ensureAudioContext();
+            if (!probeCtx.audioWorklet) {
+                signalAudioUnavailable('This browser is too old for accurate recording ' +
+                    '(no AudioWorklet). Use current Chrome, Firefox, or Safari 14.1+.');
+                return;
+            }
+            if (/Android|iPhone|iPad|Mobile/i.test(navigator.userAgent)) {
+                setStatusMessage('Note: mobile browsers often cannot achieve accurate audio ' +
+                    'timing. A desktop browser (Chrome or Firefox) is recommended.');
+            }
+
+            warmupInProgress = true;
+            // Re-runs (device change): put the gated buttons back into the
+            // pending state until warmup-info-store fires again.  No-op on the
+            // initial run, where they already show "Warming Up...".
+            setButtonState('record-btn', 'Warming Up...', true);
+            setButtonState('calibrate-btn', 'Warming Up...', true);
+
             const audioConstraints = {
                 audio: {
                     echoCancellation: false,
@@ -1458,6 +1625,7 @@ try {
                         micSource.disconnect();
                         muteNode.disconnect();
                         warmupCompleted = true;
+                        warmupInProgress = false;
 
                         const outMs = Math.round((ctx.outputLatency || 0) * 1000);
                         const inMs  = Math.round((ctx.inputLatency  || 0) * 1000);
@@ -1484,12 +1652,34 @@ try {
                             output_latency_ms: outMs,
                             input_latency_ms: inMs,
                             base_latency_ms: baseMs,
+                            // seq keeps the store value unique across re-runs
+                            // (device change with an identical fingerprint would
+                            // otherwise not re-fire the Dash callbacks and leave
+                            // the buttons disabled).
+                            seq: ++warmupSeq,
                         });
                         setDashInputValue('warmup-info-store', platformInfo);
+
+                        // Advisory only, and after the store write so it never
+                        // delays enabling the buttons.  Re-runs on device change,
+                        // since warmup re-runs.
+                        warnIfWirelessAudio(ctx, micLabel);
                     }, INITIAL_WARMUP_SECONDS * 1000);
                 })
                 .catch(err => {
-                    console.warn("Permission trigger failed (user may have denied):", err);
+                    const name = err && err.name;
+                    let msg;
+                    if (name === 'NotAllowedError' || name === 'SecurityError') {
+                        msg = 'Microphone access is blocked. Allow microphone access for ' +
+                            'this site in the browser, then reload the page.';
+                    } else if (name === 'NotFoundError' || name === 'OverconstrainedError') {
+                        msg = 'No usable microphone was found. Connect a microphone and ' +
+                            'reload the page.';
+                    } else {
+                        msg = 'Microphone could not be started (' + ((err && err.message) || err) +
+                            '). Reload the page to retry.';
+                    }
+                    signalAudioUnavailable(msg);
                 });
         },
 
@@ -1514,6 +1704,11 @@ try {
             setTimeout(() => {
                 if (window.recorderControls && window.recorderControls.triggerPermissionDialog) {
                     window.recorderControls.triggerPermissionDialog();
+                }
+                // Recheck calibration when the audio device set changes
+                if (navigator.mediaDevices
+                        && typeof navigator.mediaDevices.addEventListener === 'function') {
+                    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
                 }
                 // Clear confidence indicator when user edits the calibration value box
                 const calInput = document.getElementById('calibration-value');
