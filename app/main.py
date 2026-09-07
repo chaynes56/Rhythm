@@ -640,13 +640,23 @@ clientside_callback(
         var info;
         try { info = JSON.parse(warmupInfo); } catch(e) { return [nu, nu, nu]; }
 
-        if (userContext && userContext.platform_key === info.platform_key
-                && userContext.calibration_offset_ms != null) {
-            // Silently restore calibration for this platform
-            return [userContext.calibration_offset_ms, userContext.calibration_offset_ms, ''];
+        // Context shape: {platforms: {platform_key: {calibration_offset_ms,
+        // std_ms, source, timestamp}}}.  The legacy flat single-slot shape
+        // (and MediaRecorder-era offsets stored in it) is treated as a miss.
+        var MAX_AGE_MS = 30 * 864e5;  // 30 days: browser/OS updates can shift latency
+        var entry = (userContext && userContext.platforms)
+            ? userContext.platforms[info.platform_key] : null;
+        if (entry && entry.calibration_offset_ms != null) {
+            var age = Date.now() - Date.parse(entry.timestamp || '');
+            if (isFinite(age) && age >= 0 && age < MAX_AGE_MS) {
+                // Restore calibration for this platform, with a subtle indicator
+                var days = Math.floor(age / 864e5);
+                var label = '(saved ' + (days === 0 ? 'today' : days + 'd ago') + ')';
+                return [entry.calibration_offset_ms, entry.calibration_offset_ms, label];
+            }
         }
 
-        // No stored calibration for this platform -- run auto-calibration after warmup
+        // No fresh stored calibration for this platform -- auto-calibrate after warmup
         if (window.recorderControls && window.recorderControls.startCalibration) {
             window.recorderControls.startCalibration();
         }
@@ -684,6 +694,40 @@ clientside_callback(
 )
 
 
+USER_CONTEXT_MAX_PLATFORMS = 5
+
+
+def updated_user_context(context, warmup_info_str, offset_ms, std_ms=None,
+                         source="calibration"):
+    """Merge a calibration result into the platform-keyed user context.
+
+    Context shape: {"platforms": {platform_key: entry}} so switching between
+    audio devices (e.g. headset vs built-in mic) does not clobber other
+    devices' calibrations. Entries are pruned to the newest
+    USER_CONTEXT_MAX_PLATFORMS. Returns no_update when there is no usable
+    platform key (warmup has not completed).
+    """
+    try:
+        info = json.loads(warmup_info_str) if warmup_info_str else None
+    except json.JSONDecodeError:
+        return no_update
+    key = (info or {}).get("platform_key")
+    if not key:
+        return no_update
+    platforms = dict(context.get("platforms") or {}) if isinstance(context, dict) else {}
+    platforms[key] = {
+        "calibration_offset_ms": offset_ms,
+        "std_ms": std_ms,
+        "source": source,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    if len(platforms) > USER_CONTEXT_MAX_PLATFORMS:
+        oldest_first = sorted(platforms, key=lambda k: platforms[k].get("timestamp") or "")
+        for k in oldest_first[:len(platforms) - USER_CONTEXT_MAX_PLATFORMS]:
+            del platforms[k]
+    return {"platforms": platforms}
+
+
 @app.callback(
     Output("calibration-offset-store", "data"),
     Output("status-msg", "children", allow_duplicate=True),
@@ -696,9 +740,11 @@ clientside_callback(
     Input("calibration-audio-data-store", "data"),
     State("debug-mode-store", "data"),
     State("warmup-info-store", "value"),
+    State("user-context", "data"),
     prevent_initial_call=True,
 )
-def process_calibration(base64_audio, debug_mode_store, warmup_info_str):
+def process_calibration(base64_audio, debug_mode_store, warmup_info_str,
+                        user_context):
     if not base64_audio:
         raise PreventUpdate
     nu8 = (no_update,) * 8
@@ -747,19 +793,11 @@ def process_calibration(base64_audio, debug_mode_store, warmup_info_str):
             confidence_display = f"±{std_ms} ms" if debug else ""
             msg = f"Calibrated: {offset_ms} ms (std {std_ms} ms)" if debug else ""
 
-        # Build user-context update only on success
+        # Persist successful calibrations per platform (store-and-skip flow)
         new_context = no_update
         if not failed:
-            try:
-                if warmup_info_str:
-                    info = json.loads(warmup_info_str)
-                    new_context = {
-                        "platform_key": info.get("platform_key", ""),
-                        "calibration_offset_ms": offset_ms,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                    }
-            except (json.JSONDecodeError, AttributeError):
-                pass
+            new_context = updated_user_context(
+                user_context, warmup_info_str, offset_ms, std_ms=std_ms)
 
         if not failed and not debug:
             return offset_ms, msg, no_update, no_update, no_update, offset_ms, confidence_display, new_context
@@ -799,13 +837,34 @@ def process_calibration(base64_audio, debug_mode_store, warmup_info_str):
 
 @app.callback(
     Output("calibration-offset-store", "data", allow_duplicate=True),
+    Output("user-context", "data", allow_duplicate=True),
     Input("calibration-value", "value"),
+    State("warmup-info-store", "value"),
+    State("user-context", "data"),
     prevent_initial_call=True,
 )
-def calibration_value_edited(value):
+def calibration_value_edited(value, warmup_info_str, user_context):
     if value is None:
         raise PreventUpdate
-    return float(value)
+    value = float(value)
+    # Persist manual overrides per platform. This Input also fires on
+    # programmatic writes (restore and process_calibration both set
+    # calibration-value), so skip the write when the value already matches
+    # the stored entry -- only a genuine change is persisted as "manual".
+    new_context = no_update
+    try:
+        info = json.loads(warmup_info_str) if warmup_info_str else None
+    except json.JSONDecodeError:
+        info = None
+    key = (info or {}).get("platform_key")
+    if key:
+        platforms = (user_context or {}).get("platforms") if isinstance(user_context, dict) else None
+        entry = (platforms or {}).get(key)
+        stored = entry.get("calibration_offset_ms") if isinstance(entry, dict) else None
+        if stored is None or abs(float(stored) - value) >= 0.5:
+            new_context = updated_user_context(
+                user_context, warmup_info_str, value, source="manual")
+    return value, new_context
 
 
 @app.callback(

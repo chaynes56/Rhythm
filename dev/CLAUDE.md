@@ -86,7 +86,38 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-09-06 (audio: sample-indexed AudioWorklet capture)
+## Last session -- 2026-09-06 (2) (store-and-skip calibration wired up)
+
+**Store-and-skip calibration flow completed (main.py, recorder.js).** The
+skeleton (local `user-context` store, warmup-triggered restore-or-auto-cal,
+context write on calibration success) existed but never worked reliably.
+Four defects fixed:
+
+- **Unstable platform key (root cause):** the key included outputLatency /
+  inputLatency readings, which fluctuate between page loads (cold vs warm),
+  so stored keys rarely matched and auto-cal re-ran every load. Key is now
+  stable identifiers only: userAgent + sampleRate + mic device label (read
+  from the warmup stream before tracks stop).
+- **Platform-keyed storage:** `user-context` is now
+  `{platforms: {key: {calibration_offset_ms, std_ms, source, timestamp}}}`,
+  pruned to 5 newest (`updated_user_context()` helper). Switching mics no
+  longer clobbers other devices' calibrations. Legacy flat shape = miss,
+  which also retires MediaRecorder-era offsets automatically.
+- **30-day staleness expiry** in the restore clientside callback; stale ->
+  auto-calibrate.
+- **Restore indicator + manual persistence:** confidence span shows
+  "(saved today / Nd ago)" on restore; manual edits to the ms box persist
+  per-platform as source "manual", with an echo guard (restore and
+  process_calibration write the same input programmatically; only a genuine
+  >=0.5ms change is persisted).
+
+**User-verified:** restore and manual-edit persistence both work across
+reloads in Chrome.
+
+**Follow-ups:** shrink 8s warmup; validate Safari (worklet needs 14.1+) and
+Firefox.
+
+## Previous session -- 2026-09-06 (audio: sample-indexed AudioWorklet capture, 5922821)
 
 **Root cause of persistent record/playback sync errors identified and fixed
 (recorder.js).** User asked to improve on the May 2026 Opus chat advice

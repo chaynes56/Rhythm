@@ -1453,6 +1453,7 @@ try {
                     warmupSrc.start(ctx.currentTime);
 
                     setTimeout(() => {
+                        const micLabel = (stream.getAudioTracks()[0] || {}).label || '';
                         stream.getTracks().forEach(t => t.stop());
                         micSource.disconnect();
                         muteNode.disconnect();
@@ -1466,11 +1467,17 @@ try {
                             `Warmup complete: sampleRate=${sr}Hz` +
                             `, outputLatency=${outMs}ms` +
                             `, inputLatency=${inMs}ms` +
-                            `, baseLatency=${baseMs}ms`
+                            `, baseLatency=${baseMs}ms` +
+                            `, mic="${micLabel}"`
                         );
 
-                        // Signal warmup completion with platform info for Stage 3 context store
-                        const platformKey = [navigator.userAgent, sr, outMs, inMs].join('|');
+                        // Platform key for the stored-calibration flow: STABLE
+                        // identifiers only (browser, sample rate, mic device).
+                        // outputLatency/inputLatency are deliberately excluded --
+                        // they fluctuate between page loads (cold vs warm
+                        // readings), which made keys never match and silently
+                        // defeated stored-calibration restore.
+                        const platformKey = [navigator.userAgent, sr, micLabel].join('|');
                         const platformInfo = JSON.stringify({
                             platform_key: platformKey,
                             sample_rate: sr,
