@@ -31,11 +31,17 @@ analysis. Deployed to Plotly cloud (URL in README.md).
 - Audio processing via `librosa` and `soundfile` (onset detection, waveform building)
 - Load/save of recordings (JSON with embedded base64 WAV + metronome metadata)
 
-**`app/assets/recorder.js`** handles:
-- Microphone access (`MediaRecorder` API)
+**`app/recorder.js`** handles:
+- Microphone capture via an inline AudioWorklet (`CAPTURE_WORKLET_SOURCE`, loaded from a
+  Blob URL). The worklet tags every PCM chunk with its audio-clock frame position;
+  recordings are sliced at the exact frame where beat 1 was scheduled
+  (`recordStartFrame`). MediaRecorder and wall-clock setTimeout are NOT in the sync
+  path -- timers only flip UI phase and schedule stops.
 - Metronome playback via Web Audio API (with HTMLAudio fallback for Safari only — Chrome, including on Plotly cloud, uses the per-tone WebAudio fallback)
-- Recording countdown delay (one measure count-in before capture begins)
-- In-browser WAV encoding (`encodeWAV`) — recorded blobs are decoded and re-encoded as WAV before sending to Python
+- Recording countdown delay (one measure count-in before capture begins; capture starts
+  at the beginning of the count-in so the input pipeline settles before beat 1)
+- In-browser WAV encoding (`encodeWAV`) — captured PCM is downsampled to 4kHz via
+  OfflineAudioContext and encoded as WAV before sending to Python
 
 ### How recorder.js is loaded
 
@@ -45,7 +51,7 @@ analysis. Deployed to Plotly cloud (URL in README.md).
 
 Dash hidden components act as a message bus:
 
-1. Recording stops → JS encodes WAV → `window.recordedAudioData`
+1. Recording stops → capture sliced at beat-1 frame → JS encodes WAV → `window.recordedAudioData`
 2. JS clicks hidden `#audio-process-btn`
 3. `audio-data-store` clientside callback pushes data to Dash store
 4. Python `process_audio` fires, runs librosa analysis → waveform figure + JSON blob → `audio-store`
@@ -66,7 +72,12 @@ The app measures output latency to synchronise recording start with metronome be
 - Calibration plays one measure with `onlyLowTone=true` (speaker → mic) and measures `median(beat_times % seconds_per_beat)`, normalised to `(−spb/2, spb/2]` → `cal_s` (seconds).
 - `cal_s` is saved in every recording's JSON as `calibration_offset_ms`.
 - All analysis (deviation formulas, subdivision assignment, `metronome_times_display`) applies `t − cal_s` to correct for the recording-start offset.
-- `cal_s` varies by system state: ~0ms when API reports latency accurately, ~−164ms when API under-reports (~0ms measured vs ~337ms actual), ~+161ms when API over-reports on cold browser startup. All values produce correct analysis because `cal_s` is measured and saved per session.
+- Since the AudioWorklet capture rewrite (2026-09), playback scheduling and recording
+  slicing share the AudioContext clock, so `cal_s` measures ONLY the physical
+  output+input latency (typically ~10-50ms) and should be stable per
+  device/browser. Historical note: under the old MediaRecorder + setTimeout path,
+  `cal_s` swung between ~−164ms and ~+161ms depending on cold/warm pipeline state,
+  because MediaRecorder's capture-start latency varied per recording.
 
 ### Known timing quirks
 
@@ -75,19 +86,38 @@ The app measures output latency to synchronise recording start with metronome be
 
 ---
 
-## Last session -- 2026-06-06 (760594e)
+## Last session -- 2026-09-06 (audio: sample-indexed AudioWorklet capture)
 
-**Analysis table unified to median:n format (main.py).** Free metronome mode now
-shows `median:n` per cell (was mean only), uses median for color thresholds, and
-adds the same title as exercise mode. Ghost note cells in exercise mode now use black
-highlight (`#000000`) instead of dark red when pulses are detected at a rest position.
+**Root cause of persistent record/playback sync errors identified and fixed
+(recorder.js).** User asked to improve on the May 2026 Opus chat advice
+(dev/AI/Claude/Audio Timing Issues.md), which covered warmup and calibration
+persistence but not the structural flaw: playback was scheduled on the
+AudioContext clock while recording started via wall-clock setTimeout +
+MediaRecorder.start(), whose capture-start latency is unspecified and varies
+PER RECORDING. That per-recording variance is what per-session cal_s could
+not correct -- hence the +/-160ms cold/warm swings and Safari failures.
 
-**Recordings dropdown renames (main.py).** "Save Recording" -> "Save as JSON";
-"Load Recording" -> "Load JSON"; Load JSON moved before Export as WAV.
+**Fix: inline AudioWorklet capture on the same AudioContext.** Every captured
+PCM chunk is tagged with its audio-clock frame; the recording is sliced at
+the exact frame where beat 1 was scheduled (recordStartFrame). MediaRecorder,
+setTimeout, the 200ms pre-roll, and the opus decode round-trip are all gone
+from the sync path. Capture starts at count-in start so the input pipeline
+settles before beat 1. Calibration uses the same path; routing (recording vs
+calibration) is now an explicit parameter, replacing the
+calibrationRecordingEnded flag and orphaned-audio handling. JS/Dash
+interface unchanged; main.py untouched.
 
-**README subdivision table section filled in (docs/README.md).** Describes median:n
-format, dash for empty cells, color coding, and ghost note black highlight. Updated
-to match menu renames.
+**Measured result: calibration repeated within 2ms across three runs**
+(previously swung 100ms+ between cold and warm starts). cal_s now measures
+only physical output+input latency, so it should be stable per
+device/browser -- the store-and-skip-calibration idea from the May chat is
+now sound. Stale saved calibrations from the MediaRecorder era must be
+re-run once.
+
+**Follow-ups worth considering:** shrink the 8s page-load warmup (its main
+job was stabilizing variance the worklet eliminates); enable persistent
+per-platform calibration storage; validate on Safari (worklet needs 14.1+)
+and Firefox.
 
 **To update this stub:** replace the content above with a fresh summary after each commit.
 

@@ -121,11 +121,6 @@ const INITIAL_WARMUP_SECONDS = 8;      // silent warmup duration on page load
 const FIRST_TONE_DELAY_SECONDS = 0.15; // scheduling buffer before first audio tone
 const MIN_COUNT_IN_PERIOD_SEC = 3;     // minimum count-in duration before recording starts
 
-// start recording this many ms before measure end to let audio startup settle
-const RECORDING_PRE_ROLL_MS = 200;
-
-let mediaRecorder;
-let audioChunks = [];
 let audioContext;
 let metronomeInterval;
 let metronomeScheduler = null; // Web Audio scheduler for precise timing
@@ -153,8 +148,6 @@ let recordingStream = null;
 let pendingRecordingRequestId = 0;
 let currentRecordingPhase = 'idle';
 let calibrationMode = false;
-let calibrationWarmupMeasures = 3;  // 3 for auto-cal (cold pipeline), 1 for manual (already warm)
-let calibrationRecordingEnded = false;  // snapshotted synchronously so stop-event handler routes correctly
 let calibrationSafetyNetTimeout = null;  // timer ID for the per-calibration safety net; canceled on new start
 let exerciseSchedule = null;  // null = free mode; set to {schedule, duration, spb} in exercise mode
 let lastExerciseCellId = null;
@@ -168,14 +161,14 @@ let metronomeState = {
     hiToneOn: true,
     onlyLowTone: false
 };
-// Diagnostics: Track recording buffer health
-let recordingDiagnostics = {
-    chunks: [],
-    lastChunkTime: 0,
-    totalDuration: 0,
-    gapDetected: false,
-    largestGap: 0
-};
+// Sample-indexed capture state (see CAPTURE_WORKLET_SOURCE below)
+let captureNode = null;
+let captureSource = null;
+let captureChunks = [];
+let captureActive = false;
+let captureSampleRate = 48000;
+let captureStopResolve = null;
+let recordStartFrame = 0;  // audio-clock frame where the kept recording begins (t=0 after slicing)
 
 function encodeWAV(samples, sampleRate) {
     const buffer = new ArrayBuffer(44 + samples.length * 2);
@@ -209,6 +202,246 @@ function encodeWAV(samples, sampleRate) {
     }
 
     return buffer;
+}
+
+// ---------------------------------------------------------------------------
+// Sample-indexed capture (AudioWorklet)
+//
+// Recording runs on the SAME AudioContext clock as metronome playback.  The
+// worklet tags every captured chunk with its audio-clock frame position, so
+// the recording is later sliced at the exact frame where playback was
+// scheduled (recordStartFrame).  This keeps MediaRecorder and wall-clock
+// setTimeout out of the sync path entirely: the only residual playback/record
+// offset is the physical output+input latency, which the acoustic calibration
+// measures and which is stable for a given device/browser.
+// ---------------------------------------------------------------------------
+const CAPTURE_WORKLET_SOURCE = `
+class RhythmCaptureProcessor extends AudioWorkletProcessor {
+    constructor() {
+        super();
+        this.CHUNK_FRAMES = 16384;
+        this.acc = new Float32Array(this.CHUNK_FRAMES);
+        this.accLen = 0;
+        this.accStartFrame = -1;
+        this.stopped = false;
+        this.port.onmessage = (e) => {
+            if (e.data === 'stop') {
+                this.flush();
+                this.stopped = true;
+                this.port.postMessage({type: 'done'});
+            }
+        };
+    }
+    flush() {
+        if (this.accLen > 0) {
+            const samples = this.acc.slice(0, this.accLen);
+            this.port.postMessage(
+                {type: 'chunk', frameStart: this.accStartFrame, samples: samples},
+                [samples.buffer]
+            );
+            this.accLen = 0;
+            this.accStartFrame = -1;
+        }
+    }
+    process(inputs) {
+        if (this.stopped) return false;
+        const input = inputs[0];
+        if (!input || input.length === 0) return true;  // stream not delivering yet
+        const ch = input[0];
+        // If input delivery had a gap, flush so every chunk stays contiguous.
+        if (this.accLen > 0 && currentFrame !== this.accStartFrame + this.accLen) {
+            this.flush();
+        }
+        let offset = 0;
+        while (offset < ch.length) {
+            if (this.accLen === 0) this.accStartFrame = currentFrame + offset;
+            const n = Math.min(ch.length - offset, this.CHUNK_FRAMES - this.accLen);
+            this.acc.set(ch.subarray(offset, offset + n), this.accLen);
+            this.accLen += n;
+            offset += n;
+            if (this.accLen === this.CHUNK_FRAMES) this.flush();
+        }
+        return true;
+    }
+}
+registerProcessor('rhythm-capture', RhythmCaptureProcessor);
+`;
+
+function ensureCaptureWorklet(ctx) {
+    if (!ctx.audioWorklet) {
+        return Promise.reject(new Error(
+            'AudioWorklet not supported -- please use a current Chrome, Firefox, or Safari'));
+    }
+    if (!ctx._rhythmCaptureModulePromise) {
+        const blobUrl = URL.createObjectURL(
+            new Blob([CAPTURE_WORKLET_SOURCE], {type: 'application/javascript'}));
+        ctx._rhythmCaptureModulePromise = ctx.audioWorklet.addModule(blobUrl)
+            .finally(() => URL.revokeObjectURL(blobUrl));
+    }
+    return ctx._rhythmCaptureModulePromise;
+}
+
+function startCapture(ctx, stream) {
+    return ensureCaptureWorklet(ctx).then(() => {
+        // Each run owns its chunk array via closure, so late messages from a
+        // torn-down worklet can never leak into a subsequent capture.
+        const chunks = [];
+        captureChunks = chunks;
+        captureSampleRate = ctx.sampleRate;
+        captureSource = ctx.createMediaStreamSource(stream);
+        captureNode = new AudioWorkletNode(ctx, 'rhythm-capture', {
+            numberOfInputs: 1,
+            numberOfOutputs: 1,
+            outputChannelCount: [1],
+            channelCount: 1,
+            channelCountMode: 'explicit',
+        });
+        captureNode.port.onmessage = (e) => {
+            const msg = e.data;
+            if (msg && msg.type === 'chunk') {
+                chunks.push(msg);
+            } else if (msg && msg.type === 'done' && captureStopResolve) {
+                const resolve = captureStopResolve;
+                captureStopResolve = null;
+                resolve();
+            }
+        };
+        captureSource.connect(captureNode);
+        // The worklet outputs silence; connecting it to the destination keeps it
+        // pulled by the render graph so process() runs every quantum.
+        captureNode.connect(ctx.destination);
+        captureActive = true;
+        console.log(`startCapture: worklet capture running at ${captureSampleRate}Hz`);
+    });
+}
+
+// Ask the worklet to flush its partial chunk, then tear down the nodes.
+// Resolves with the captured chunks; captureChunks stays populated until the
+// next startCapture so callers can still assemble after teardown.
+function stopCapture() {
+    captureActive = false;
+    const chunks = captureChunks;  // snapshot: a new startCapture reassigns the global
+    if (!captureNode) {
+        return Promise.resolve(chunks);
+    }
+    const node = captureNode;
+    const source = captureSource;
+    captureNode = null;
+    captureSource = null;
+    const done = new Promise((resolve) => {
+        captureStopResolve = resolve;
+        // Fallback in case the worklet never answers (context closed, etc.)
+        setTimeout(() => {
+            if (captureStopResolve) {
+                captureStopResolve = null;
+                resolve();
+            }
+        }, 1000);
+    });
+    node.port.postMessage('stop');
+    return done.then(() => {
+        try { source.disconnect(); } catch (e) {}
+        try { node.disconnect(); } catch (e) {}
+        return chunks;
+    });
+}
+
+function discardCapture() {
+    const chunks = captureChunks;
+    stopCapture().then(() => {
+        // Free memory, but never clobber a capture that started after this call.
+        if (captureChunks === chunks) captureChunks = [];
+    });
+}
+
+// Assemble chunks into one Float32Array starting at startFrame.  Chunks are
+// contiguous runs tagged with their frame position; any input-delivery gaps
+// stay zero-filled (silence) so downstream timing is unaffected.
+function assembleCapture(chunks, startFrame) {
+    if (!chunks.length) return null;
+    let firstFrame = Infinity;
+    let endFrame = 0;
+    for (const c of chunks) {
+        firstFrame = Math.min(firstFrame, c.frameStart);
+        endFrame = Math.max(endFrame, c.frameStart + c.samples.length);
+    }
+    if (endFrame <= startFrame) return null;
+    if (firstFrame > startFrame) {
+        console.warn(`assembleCapture: capture began ${firstFrame - startFrame} frames` +
+            ' after the target start -- padding with silence');
+    }
+    const out = new Float32Array(endFrame - startFrame);
+    let covered = 0;
+    for (const c of chunks) {
+        const to = c.frameStart + c.samples.length;
+        if (to <= startFrame) continue;
+        const from = Math.max(c.frameStart, startFrame);
+        out.set(c.samples.subarray(from - c.frameStart), from - startFrame);
+        covered += to - from;
+    }
+    const gapFrames = (endFrame - Math.max(startFrame, firstFrame)) - covered;
+    if (gapFrames > 0) {
+        console.warn(`assembleCapture: ${gapFrames} frames of input gaps filled with silence`);
+    }
+    return out;
+}
+
+function restoreCalibrateButton() {
+    const btn = document.getElementById('calibrate-btn');
+    if (btn && btn.textContent === 'Calibrating...') {
+        btn.textContent = 'Calibrate';
+        btn.disabled = false;
+        btn.className = btn.className.replace(/\bbtn-secondary\b/g, '').trim() + ' btn-warning';
+    }
+}
+
+// Downsample captured PCM to the analysis rate, encode as WAV, and route to
+// the calibration or normal processing chain in main.py.
+function processCapturedAudio(samples, sourceSampleRate, route) {
+    const RECORD_SAMPLE_RATE = 4000;
+    const RECORD_LPF_HZ = 1800;
+    const targetLength = Math.ceil(samples.length / sourceSampleRate * RECORD_SAMPLE_RATE);
+    let offlineCtx;
+    let srcBuffer;
+    try {
+        offlineCtx = new OfflineAudioContext(1, targetLength, RECORD_SAMPLE_RATE);
+        srcBuffer = new AudioBuffer({
+            length: samples.length, numberOfChannels: 1, sampleRate: sourceSampleRate});
+    } catch (err) {
+        reportJsError('processCapturedAudio setup failed: ' + err);
+        if (route === 'calibration') restoreCalibrateButton();
+        return;
+    }
+    srcBuffer.copyToChannel(samples, 0);
+    const src = offlineCtx.createBufferSource();
+    src.buffer = srcBuffer;
+    const lpf = offlineCtx.createBiquadFilter();
+    lpf.type = 'lowpass';
+    lpf.frequency.value = RECORD_LPF_HZ;
+    src.connect(lpf);
+    lpf.connect(offlineCtx.destination);
+    src.start();
+    offlineCtx.startRendering().then((rendered) => {
+        const wavData = encodeWAV(rendered.getChannelData(0), RECORD_SAMPLE_RATE);
+        const wavBlob = new Blob([wavData], {type: 'audio/wav'});
+        const reader = new FileReader();
+        reader.readAsDataURL(wavBlob);
+        reader.addEventListener('loadend', () => {
+            const dataUrl = /** @type {string} */ (reader.result);
+            console.log(`processCapturedAudio: ${route} WAV ready, length ${dataUrl.length}`);
+            if (route === 'calibration') {
+                window.calibrationRecordedAudio = dataUrl;
+                clickHiddenButton('calibration-process-btn');
+            } else {
+                window.lastRecordedAudio = dataUrl;
+                window.recordedAudioData = dataUrl;
+                clickHiddenButton('audio-process-btn');
+            }
+        });
+    }).catch((err) => {
+        reportJsError('processCapturedAudio render failed: ' + err);
+        if (route === 'calibration') restoreCalibrateButton();
+    });
 }
 
 function clickHiddenButton(buttonId) {
@@ -510,7 +743,7 @@ function startMetronomePlayback(options = {}) {
     const startScheduler = async () => {
         if (!metronomeTrackBuffer) {
             reportJsError('startMetronomePlayback: no track buffer');
-            return {firstBeatDelayMs: 0, secondsPerBeat: 60 / metronomeState.tempo, outputLatencyMs: 0};
+            return {firstBeatDelayMs: 0, secondsPerBeat: 60 / metronomeState.tempo, outputLatencyMs: 0, startTime: null};
         }
 
         const secondsPerBeat = 60.0 / metronomeState.tempo;
@@ -608,7 +841,9 @@ function startMetronomePlayback(options = {}) {
             setMetronomePlayingState(true);
             console.log(`startMetronomePlayback: buffer ${metronomeTrackBuffer.duration.toFixed(1)}s, offset=${bufferOffset.toFixed(3)}s`);
 
-            return {firstBeatDelayMs: FIRST_TONE_DELAY_SECONDS * 1000, secondsPerBeat, outputLatencyMs: outputLatencySeconds * 1000};
+            // startTime is the exact audio-clock time the buffer begins playing;
+            // recording start frames are computed from it (see startRecordingWithCountIn).
+            return {firstBeatDelayMs: FIRST_TONE_DELAY_SECONDS * 1000, secondsPerBeat, outputLatencyMs: outputLatencySeconds * 1000, startTime};
     };
 
     if (ctx.state === 'suspended') {
@@ -617,149 +852,11 @@ function startMetronomePlayback(options = {}) {
             return startScheduler();
         }).catch(err => {
             reportJsError('Failed to resume AudioContext: ' + err);
-            return {firstBeatDelayMs: 0, secondsPerBeat: 60.0 / metronomeState.tempo};
+            return {firstBeatDelayMs: 0, secondsPerBeat: 60.0 / metronomeState.tempo, startTime: null};
         });
     }
 
     return Promise.resolve(startScheduler());
-}
-
-function buildRecorderOptions() {
-    const types = [
-        'audio/wav',
-        'audio/webm',
-        'audio/webm;codecs=opus',
-        'audio/ogg;codecs=opus',
-        'audio/ogg',
-        'audio/mp4'
-    ];
-
-    const options = {
-        audioBitsPerSecond: 128000
-    };
-
-    for (const type of types) {
-        if (MediaRecorder.isTypeSupported(type)) {
-            console.log('Using supported MIME type:', type);
-            options.mimeType = type;
-            break;
-        }
-    }
-
-    if (!options.mimeType) {
-        console.warn('No supported MIME type found, using default');
-    }
-
-    return options;
-}
-
-function configureMediaRecorder(stream) {
-    mediaRecorder = new MediaRecorder(stream, buildRecorderOptions());
-    audioChunks = [];
-    const wasCalibration = calibrationMode;  // captured so orphaned cal chains don't pollute audio-store
-    recordingDiagnostics = {
-        chunks: [],
-        lastChunkTime: Date.now(),
-        totalDuration: 0,
-        gapDetected: false,
-        largestGap: 0
-    };
-
-    mediaRecorder.addEventListener('dataavailable', event => {
-        audioChunks.push(event.data);
-
-        const now = Date.now();
-        const timeSinceLastChunk = now - recordingDiagnostics.lastChunkTime;
-        recordingDiagnostics.chunks.push({
-            size: event.data.size,
-            timeSinceLastChunk: timeSinceLastChunk,
-            timestamp: now
-        });
-        recordingDiagnostics.lastChunkTime = now;
-        recordingDiagnostics.totalDuration += timeSinceLastChunk;
-
-        if (timeSinceLastChunk > 250) {
-            recordingDiagnostics.gapDetected = true;
-            recordingDiagnostics.largestGap = Math.max(recordingDiagnostics.largestGap, timeSinceLastChunk);
-            console.warn(`Recording gap detected: ${timeSinceLastChunk}ms (chunk size: ${event.data.size} bytes)`);
-        }
-    });
-
-    mediaRecorder.addEventListener('stop', () => {
-        clearRecordingTimers();
-        console.log('Recording stopped. Processing audio...');
-        console.log('=== RECORDING BUFFER DIAGNOSTICS ===');
-        console.log(`Total chunks: ${audioChunks.length}`);
-        console.log(`Total duration: ${recordingDiagnostics.totalDuration}ms`);
-        console.log(`Gap detected: ${recordingDiagnostics.gapDetected}`);
-        console.log(`Largest gap: ${recordingDiagnostics.largestGap}ms`);
-        console.log('Chunk sizes:', recordingDiagnostics.chunks.map(c => c.size).join(', '));
-        console.log('====================================');
-
-        const reader = new FileReader();
-        const audioBlob = new Blob(audioChunks, {type: mediaRecorder.mimeType});
-        const decodeCtx = new (window.AudioContext || window['webkitAudioContext'])();
-        reader.readAsArrayBuffer(audioBlob);
-        reader.addEventListener('loadend', () => {
-            const RECORD_SAMPLE_RATE = 4000;
-            const RECORD_LPF_HZ = 1800;
-            const arrayBuffer = /** @type {ArrayBuffer} */ (reader.result);
-            decodeCtx.decodeAudioData(arrayBuffer).then((audioBuffer) => {
-                const targetLength = Math.ceil(audioBuffer.duration * RECORD_SAMPLE_RATE);
-                const offlineCtx = new OfflineAudioContext(1, targetLength, RECORD_SAMPLE_RATE);
-                const source = offlineCtx.createBufferSource();
-                source.buffer = audioBuffer;
-                const lpf = offlineCtx.createBiquadFilter();
-                lpf.type = 'lowpass';
-                lpf.frequency.value = RECORD_LPF_HZ;
-                source.connect(lpf);
-                lpf.connect(offlineCtx.destination);
-                source.start();
-                return offlineCtx.startRendering();
-            }).then((renderedBuffer) => {
-                const rawData = renderedBuffer.getChannelData(0);
-                const preRollSamples = Math.round(RECORD_SAMPLE_RATE * RECORDING_PRE_ROLL_MS / 1000);
-                const trimmedData = rawData.slice(preRollSamples);
-                const wavData = encodeWAV(trimmedData, RECORD_SAMPLE_RATE);
-                const wavBlob = new Blob([wavData], {type: 'audio/wav'});
-
-                const wavReader = new FileReader();
-                wavReader.readAsDataURL(wavBlob);
-                wavReader.addEventListener('loadend', () => {
-                    const dataUrl = /** @type {string} */ (wavReader.result);
-                    console.log('Converted to WAV, trimmed pre-roll, length:', dataUrl.length);
-                    if (calibrationRecordingEnded) {
-                        calibrationRecordingEnded = false;
-                        window.calibrationRecordedAudio = dataUrl;
-                        clickHiddenButton('calibration-process-btn');
-                    } else if (wasCalibration) {
-                        // Orphaned calibration chain -- this recording was superseded by a new
-                        // calibration start before its async chain completed. Discard rather than
-                        // sending calibration audio through the normal recording processor.
-                        console.log('Discarding orphaned calibration audio');
-                    } else {
-                        window.lastRecordedAudio = dataUrl;
-                        window.recordedAudioData = dataUrl;
-                        clickHiddenButton('audio-process-btn');
-                    }
-                });
-            }).catch((err) => {
-                reportJsError('decodeAudioData failed: ' + err);
-                // Restore calibrate button if audio processing failed mid-calibration.
-                const btn = document.getElementById('calibrate-btn');
-                if (btn && btn.textContent === 'Calibrating...') {
-                    btn.textContent = 'Calibrate';
-                    btn.disabled = false;
-                    btn.className = btn.className.replace(/\bbtn-secondary\b/g, '').trim() + ' btn-warning';
-                }
-            }).finally(() => {
-                if (decodeCtx && decodeCtx.state !== 'closed') {
-                    decodeCtx.close().catch(() => {
-                    });
-                }
-            });
-        });
-    });
 }
 
 function cancelPendingRecording() {
@@ -769,97 +866,80 @@ function cancelPendingRecording() {
         clearTimeout(calibrationSafetyNetTimeout);
         calibrationSafetyNetTimeout = null;
     }
+    discardCapture();
     cleanupRecordingStream();
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-        try {
-            mediaRecorder.stop();
-        } catch (err) {
-            console.warn('Error stopping inactive recorder:', err);
-        }
-    }
-    mediaRecorder = null;
-
     if (metronomeAutoStartedByRecording) {
         stopMetronomePlayback();
         metronomeAutoStartedByRecording = false;
     }
     calibrationMode = false;
-    calibrationRecordingEnded = false;
     setRecordingPhase('idle');
 }
 
 function beginActiveRecording(requestId) {
-    if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay' || !mediaRecorder) {
+    if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay' || !captureActive) {
         return;
     }
-
-    try {
-        recordingDiagnostics.lastChunkTime = Date.now();
-        mediaRecorder.start(100);
-        console.log('MediaRecorder started with timeslice=100ms after measure delay');
-        setRecordingPhase('recording');
-
-        // For calibration: stop after exactly 2 measurement measures + 1s buffer,
-        // regardless of how long getUserMedia or startMetronomePlayback took.
-        // For normal recording: 10-minute safety limit.
-        const isCalibration = calibrationMode;
-        let maxRecordingTime;
-        if (isCalibration) {
-            const secondsPerBeat = 60.0 / metronomeState.tempo;
-            maxRecordingTime = Math.round((2 * metronomeState.beatsPerMeasure * secondsPerBeat + 1.0) * 1000);
-            console.log(`Calibration recording: scheduled stop in ${maxRecordingTime}ms`);
-        } else {
-            maxRecordingTime = 600000;
+    // Capture alignment is frame-indexed on the audio clock; this timer only
+    // flips the UI phase and schedules the 10-minute safety stop.
+    setRecordingPhase('recording');
+    console.log('Recording window open (frame-indexed capture)');
+    recordingTimeout = setTimeout(() => {
+        if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'recording') {
+            return;
         }
-
-        recordingTimeout = setTimeout(() => {
-            if (mediaRecorder && mediaRecorder.state === 'recording') {
-                if (isCalibration) {
-                    console.log('Calibration recording: scheduled stop reached');
-                    // Reset calibrationMode synchronously before stop() so that any
-                    // immediate metronome start (user clicking the button while the
-                    // stop-event chain is still async) does not apply the silent
-                    // warmup gain schedule.
-                    calibrationRecordingEnded = true;
-                    calibrationMode = false;
-                } else {
-                    console.log('Automatic stop: Recording reached maximum time limit (10 minutes)');
-                    window.recorderControls.playEndAlarm();
-                    window.recorderControls.showAutoStopMessage();
-                }
-                mediaRecorder.stop();
-                cleanupRecordingStream();
-                if (metronomeAutoStartedByRecording) {
-                    stopMetronomePlayback();
-                    metronomeAutoStartedByRecording = false;
-                }
-                setRecordingPhase('idle');
-            }
-        }, maxRecordingTime);
-    } catch (err) {
-        reportJsError('Error starting delayed recording: ' + err);
-        cancelPendingRecording();
-    }
+        console.log('Automatic stop: Recording reached maximum time limit (10 minutes)');
+        window.recorderControls.playEndAlarm();
+        window.recorderControls.showAutoStopMessage();
+        finishActiveRecording('recording');
+    }, 600000);
 }
 
-function stopActiveRecording() {
-    console.log('Stopping recording...');
+// Stop capture, slice at recordStartFrame, and hand off for processing.
+function finishActiveRecording(route) {
     clearRecordingTimers();
-
-    if (mediaRecorder && mediaRecorder.state === 'recording') {
-        mediaRecorder.stop();
-    }
-
+    const startFrame = recordStartFrame;
+    const sampleRate = captureSampleRate;
+    stopCapture().then((chunks) => {
+        const samples = assembleCapture(chunks, startFrame);
+        if (captureChunks === chunks) captureChunks = [];
+        if (!samples) {
+            reportJsError('Recording produced no audio (no mic input captured)');
+            if (route === 'calibration') restoreCalibrateButton();
+            return;
+        }
+        console.log(`finishActiveRecording: ${route}, ${samples.length} samples` +
+            ` (${(samples.length / sampleRate).toFixed(2)}s) from frame ${startFrame}`);
+        processCapturedAudio(samples, sampleRate, route);
+    });
     cleanupRecordingStream();
     if (metronomeAutoStartedByRecording) {
         stopMetronomePlayback();
         metronomeAutoStartedByRecording = false;
     }
-    // Manual stop: calibration is incomplete, clear both flags so stop-event handler
-    // routes to the normal recording path and calibrationMode does not linger.
     calibrationMode = false;
-    calibrationRecordingEnded = false;
     setRecordingPhase('idle');
+}
+
+function stopActiveRecording() {
+    console.log('Stopping recording...');
+    if (calibrationMode) {
+        // Manual stop mid-calibration: a partial calibration track is useless,
+        // so discard rather than processing it (matches the old MediaRecorder
+        // path, which also discarded incomplete calibrations).
+        clearRecordingTimers();
+        discardCapture();
+        cleanupRecordingStream();
+        if (metronomeAutoStartedByRecording) {
+            stopMetronomePlayback();
+            metronomeAutoStartedByRecording = false;
+        }
+        calibrationMode = false;
+        setRecordingPhase('idle');
+        restoreCalibrateButton();
+        return;
+    }
+    finishActiveRecording('recording');
 }
 
 function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, volume, hiToneOn, onlyLowTone) {
@@ -887,6 +967,11 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
         }
     };
 
+    const ctx = ensureAudioContext();
+    if (ctx.state === 'suspended') {
+        ctx.resume().catch(err => console.warn('startRecordingWithCountIn: resume failed:', err));
+    }
+
     navigator.mediaDevices.getUserMedia(audioConstraints)
         .then(stream => {
             if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay') {
@@ -895,56 +980,63 @@ function startRecordingWithCountIn(tempo, beatsPerMeasure, measuresPerPattern, v
             }
 
             recordingStream = stream;
-            configureMediaRecorder(stream);
 
-            stopMetronomePlayback();
-            metronomeAutoStartedByRecording = true;
-
-            const patternMeasures = metronomeState.measuresPerPattern || 1;
-
-            // Compute count-in and buffer offset before starting the metronome,
-            // so the buffer always starts at the measure that is countInMeasures
-            // before beat 0, guaranteeing the recording starts at the beginning of the pattern.
-            const _spb = 60.0 / metronomeState.tempo;
-            const _measureDuration = metronomeState.beatsPerMeasure * _spb;
-            let countInMeasures;
-            if (calibrationMode) {
-                countInMeasures = calibrationWarmupMeasures;
-            } else {
-                countInMeasures = Math.max(1, Math.ceil(MIN_COUNT_IN_PERIOD_SEC / _measureDuration));
-            }
-            // Buffer starts countInMeasures before beat 0, wrapping within the pattern.
-            const bufferStartMeasure = patternMeasures > 1
-                ? ((patternMeasures - (countInMeasures % patternMeasures)) % patternMeasures)
-                : 0;
-            const recordingBufferOffset = bufferStartMeasure * _measureDuration;
-
-            metronomeState.beatCount = bufferStartMeasure * metronomeState.beatsPerMeasure;
-            metronomeState.measureCount = bufferStartMeasure;
-            preserveMetronomeStartOffset = false;
-            console.log(`Count-in: ${countInMeasures} measures, buffer starts at measure ${bufferStartMeasure + 1} of ${patternMeasures}`);
-
-            startMetronomePlayback({bufferOffsetOverride: recordingBufferOffset}).then(({
-                                                                                    firstBeatDelayMs,
-                                                                                    secondsPerBeat,
-                                                                                    outputLatencyMs = 0
-                                                                                }) => {
+            // Capture starts now, during the count-in, so the input pipeline has
+            // the full count-in (>= 3s) to reach steady state before beat 1.
+            return startCapture(ctx, stream).then(() => {
                 if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay') {
+                    discardCapture();
                     return;
                 }
 
-                // outputLatencyMs intentionally excluded: cold-start AudioContext measures
-                // near-zero latency while warm recordings measure the true ~50ms value,
-                // causing a systematic offset in cal_s. By anchoring both calibration and
-                // normal recordings to the scheduled beat (not the heard beat), cal_s
-                // captures the full acoustic offset consistently regardless of context state.
-                const measureDelayMs = firstBeatDelayMs + (countInMeasures * metronomeState.beatsPerMeasure * secondsPerBeat * 1000) - RECORDING_PRE_ROLL_MS;
-                console.log(`startRecordingWithCountIn: measureDelayMs=${measureDelayMs.toFixed(1)}ms (outputLatencyMs=${outputLatencyMs.toFixed(1)}ms excluded from delay)`);
-                recordingDelayTimeout = setTimeout(() => beginActiveRecording(requestId), measureDelayMs);
+                stopMetronomePlayback();
+                metronomeAutoStartedByRecording = true;
+
+                const patternMeasures = metronomeState.measuresPerPattern || 1;
+
+                // Compute count-in and buffer offset before starting the metronome,
+                // so the buffer always starts at the measure that is countInMeasures
+                // before beat 0, guaranteeing the recording starts at the beginning of the pattern.
+                const _spb = 60.0 / metronomeState.tempo;
+                const _measureDuration = metronomeState.beatsPerMeasure * _spb;
+                const countInMeasures = Math.max(1, Math.ceil(MIN_COUNT_IN_PERIOD_SEC / _measureDuration));
+                // Buffer starts countInMeasures before beat 0, wrapping within the pattern.
+                const bufferStartMeasure = patternMeasures > 1
+                    ? ((patternMeasures - (countInMeasures % patternMeasures)) % patternMeasures)
+                    : 0;
+                const recordingBufferOffset = bufferStartMeasure * _measureDuration;
+
+                metronomeState.beatCount = bufferStartMeasure * metronomeState.beatsPerMeasure;
+                metronomeState.measureCount = bufferStartMeasure;
+                preserveMetronomeStartOffset = false;
+                console.log(`Count-in: ${countInMeasures} measures, buffer starts at measure ${bufferStartMeasure + 1} of ${patternMeasures}`);
+
+                return startMetronomePlayback({bufferOffsetOverride: recordingBufferOffset}).then(({startTime, secondsPerBeat}) => {
+                    if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay') {
+                        return;
+                    }
+                    if (startTime == null) {
+                        reportJsError('startRecordingWithCountIn: metronome failed to start');
+                        cancelPendingRecording();
+                        return;
+                    }
+
+                    // Beat 1 of the pattern, on the audio clock.  The capture is
+                    // sliced at exactly this frame -- no wall-clock timing is in
+                    // the sync path, so the scheduled-playback/recording alignment
+                    // is sample-accurate.  The remaining physical output+input
+                    // latency is what cal_s measures.
+                    const recordStartTime = startTime + countInMeasures * metronomeState.beatsPerMeasure * secondsPerBeat;
+                    recordStartFrame = Math.round(recordStartTime * ctx.sampleRate);
+                    const uiDelayMs = Math.max(0, (recordStartTime - ctx.currentTime) * 1000);
+                    console.log(`startRecordingWithCountIn: beat 1 at t=${recordStartTime.toFixed(3)}s` +
+                        ` (frame ${recordStartFrame}), UI phase flips in ${uiDelayMs.toFixed(0)}ms`);
+                    recordingDelayTimeout = setTimeout(() => beginActiveRecording(requestId), uiDelayMs);
+                });
             });
         })
         .catch(err => {
-            reportJsError('Microphone access denied: ' + (err.message || err));
+            reportJsError('Recording setup failed: ' + (err.message || err));
             cancelPendingRecording();
         });
 }
@@ -1158,7 +1250,7 @@ try {
             try {
                 const statusMsg = document.getElementById('status-msg');
                 if (statusMsg) {
-                    statusMsg.textContent = 'Auto-stop: Recording reached 60-second limit. Processing audio...';
+                    statusMsg.textContent = 'Auto-stop: Recording reached 10-minute limit. Processing audio...';
                     console.log("Displayed auto-stop message");
                 }
             } catch (err) {
@@ -1187,7 +1279,6 @@ try {
             }
 
             calibrationMode = true;
-            calibrationRecordingEnded = false;
             pendingRecordingRequestId += 1;
             const requestId = pendingRecordingRequestId;
             setRecordingPhase('delay');
@@ -1211,18 +1302,19 @@ try {
                     return Promise.resolve();
                 }
                 recordingStream = stream;
-                configureMediaRecorder(stream);
 
                 stopMetronomePlayback();
                 metronomeAutoStartedByRecording = true;
 
                 // Await resume so ctx.currentTime is live before scheduling audio.
-                // If ctx was auto-suspended by the browser, source.start() with a
-                // stale frozen ctx.currentTime causes the track to fire late relative
-                // to the wall-clock recording setTimeout, producing a ~100ms cal_s error.
-                return ctx.resume();
+                // With a suspended context, source.start() against a stale frozen
+                // ctx.currentTime would fire the track at the wrong audio-clock time.
+                return ctx.resume().then(() => startCapture(ctx, stream));
             }).then(() => {
-                if (requestId !== pendingRecordingRequestId) return;
+                if (requestId !== pendingRecordingRequestId || !captureActive) {
+                    discardCapture();
+                    return;
+                }
 
                 // Play calibration track (one-shot, no loop)
                 const gainNode = ctx.createGain();
@@ -1231,77 +1323,53 @@ try {
                 source.buffer = calibrationTrackBuffer;
                 source.connect(gainNode);
                 gainNode.connect(ctx.destination);
-                source.start(ctx.currentTime + FIRST_TONE_DELAY_SECONDS);
+                const trackStartTime = ctx.currentTime + FIRST_TONE_DELAY_SECONDS;
+                source.start(trackStartTime);
                 metronomeSourceNode = source;
                 metronomeGainNode = gainNode;
 
-                // Delay recording so that after PRE_ROLL trim, beat 1 aligns with t=0
-                const recordDelayMs = Math.max(0,
-                    FIRST_TONE_DELAY_SECONDS * 1000 + calibrationFirstBeatMs - RECORDING_PRE_ROLL_MS
-                );
-                recordingDelayTimeout = setTimeout(() => {
-                    if (requestId !== pendingRecordingRequestId) return;
-                    recordingDiagnostics.lastChunkTime = Date.now();
-                    mediaRecorder.start(100);
-                    setRecordingPhase('recording');
+                // Slice the capture so t=0 is nominal beat 1 of the track,
+                // exact on the audio clock.
+                const beatOneTime = trackStartTime + calibrationFirstBeatMs / 1000;
+                recordStartFrame = Math.round(beatOneTime * ctx.sampleRate);
 
-                    const calDurationMs = calibrationTrackBuffer.duration * 1000 + 500;
-                    recordingTimeout = setTimeout(() => {
-                        if (mediaRecorder && mediaRecorder.state === 'recording') {
-                            // Normal completion -- cancel safety net before flipping the flag
-                            // so no stale timer can race with the stop event.
-                            if (calibrationSafetyNetTimeout !== null) {
-                                clearTimeout(calibrationSafetyNetTimeout);
-                                calibrationSafetyNetTimeout = null;
-                            }
-                            calibrationRecordingEnded = true;
-                            calibrationMode = false;
-                            mediaRecorder.stop();
-                            cleanupRecordingStream();
-                            stopMetronomePlayback();
-                            metronomeAutoStartedByRecording = false;
-                            setRecordingPhase('idle');
-                        }
-                    }, calDurationMs);
-                }, recordDelayMs);
+                // UI phase flip at beat 1 (cosmetic; capture is frame-indexed)
+                recordingDelayTimeout = setTimeout(() => {
+                    if (requestId !== pendingRecordingRequestId || currentRecordingPhase !== 'delay') return;
+                    setRecordingPhase('recording');
+                }, Math.max(0, (beatOneTime - ctx.currentTime) * 1000));
+
+                // Stop shortly after the track ends
+                const stopDelayMs = (trackStartTime + calibrationTrackBuffer.duration + 0.5 - ctx.currentTime) * 1000;
+                recordingTimeout = setTimeout(() => {
+                    if (requestId !== pendingRecordingRequestId) return;
+                    // Normal completion -- cancel the safety net before finishing
+                    // so no stale timer can race with the async processing chain.
+                    if (calibrationSafetyNetTimeout !== null) {
+                        clearTimeout(calibrationSafetyNetTimeout);
+                        calibrationSafetyNetTimeout = null;
+                    }
+                    console.log('Calibration recording: scheduled stop reached');
+                    finishActiveRecording('calibration');
+                }, stopDelayMs);
 
             }).catch(err => {
                 reportJsError('startCalibration failed: ' + err);
-                if (calibrationSafetyNetTimeout !== null) {
-                    clearTimeout(calibrationSafetyNetTimeout);
-                    calibrationSafetyNetTimeout = null;
-                }
-                calibrationMode = false;
-                calibrationRecordingEnded = false;
-                setRecordingPhase('idle');
-                const btn = document.getElementById('calibrate-btn');
-                if (btn) {
-                    btn.textContent = 'Calibrate';
-                    btn.disabled = false;
-                    btn.className = btn.className.replace(/\bbtn-secondary\b/g, '').trim() + ' btn-warning';
-                }
+                cancelPendingRecording();
+                restoreCalibrateButton();
             });
 
             // Safety net: stored so the NEXT startCalibration call can cancel it.
             // Without this, stale timers from earlier calibrations fire during later
-            // ones and corrupt the calibrationRecordingEnded flag (the primary hang bug).
+            // ones and interfere (the historic hang bug).
             calibrationSafetyNetTimeout = setTimeout(() => {
                 calibrationSafetyNetTimeout = null;
-                const btn = document.getElementById('calibrate-btn');
-                const btnText = btn ? btn.textContent : '(no btn)';
                 console.log('[CAL-DIAG] safety-net fired: calibrationMode=' + calibrationMode
-                    + ' phase=' + currentRecordingPhase + ' btnText=' + btnText);
+                    + ' phase=' + currentRecordingPhase);
                 if (calibrationMode || currentRecordingPhase !== 'idle') {
-                    console.log('[CAL-DIAG] safety-net stopping active recording');
-                    calibrationMode = false;
-                    calibrationRecordingEnded = false;
-                    stopActiveRecording();
-                    // Restore button -- normal completion path doesn't run in a genuine hang.
-                    if (btn && btn.textContent === 'Calibrating...') {
-                        btn.textContent = 'Calibrate';
-                        btn.disabled = false;
-                        btn.className = btn.className.replace(/\bbtn-secondary\b/g, '').trim() + ' btn-warning';
-                    }
+                    console.log('[CAL-DIAG] safety-net discarding stuck calibration');
+                    cancelPendingRecording();
+                    restoreCalibrateButton();
                 }
             }, 20000);
         },
@@ -1364,6 +1432,10 @@ try {
                     if (ctx.state === 'suspended') {
                         ctx.resume().catch(err => console.warn('warmup: resume failed:', err));
                     }
+
+                    // Preload the capture worklet module so the first recording
+                    // doesn't pay the addModule latency.
+                    ensureCaptureWorklet(ctx).catch(err => console.warn('warmup: worklet preload failed:', err));
 
                     // Route mic through a muted node to keep the input pipeline active
                     const micSource = ctx.createMediaStreamSource(stream);
