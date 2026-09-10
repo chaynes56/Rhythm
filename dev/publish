@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Usage: ./dev/publish
+# Run after ./dev/bump
 set -e  # exit when any command fails
 
 cd app
