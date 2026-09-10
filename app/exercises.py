@@ -1,8 +1,8 @@
 #!python3
 # Copyright 2026 Christopher T   Haynes   See the project LICENSE file.
 
-# Thanks to Julian Douglas for the exercises
-# at https://rhythmarise.com/rhythm-vocabulary/. Julio Llerena shared the Afro-Peruvian
+# Thanks to Julian Douglas for the exercises, mostly from
+# https://rhythmarise.com/rhythm-vocabulary/. Julio Llerena shared the Afro-Peruvian
 # groove with the Earthfolk Drum and Dance clinic in 2024.
 
 from pprint import pprint
@@ -221,6 +221,18 @@ Afro-Peruvian groove
 1e&a2e&a3e&a
 FBB.t.BB.tB.
 t.B.Btt.B.Bt
+----
+Binary Bmt
+1e&a2e&a
+B.t.m.t.
+BBt.m.t.
+Btt.m.t.
+B.tBm.t.
+B.ttm.t.
+B.t.mBt.
+B.t.mtt.
+B.t.m.tB
+B.t.m.tt
 """
 
 

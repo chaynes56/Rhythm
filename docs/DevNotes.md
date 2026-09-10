@@ -46,7 +46,7 @@ Python version that it supports, and update the local environment as needed to m
    features are to have a new minor version. `dev/bump` does the following:
     - `bump-my-version bump [--dry-run --verbose] [major | minor | patch]`
         - [documentation](https://pypi.org/project/bump-my-version/)
-        - It correctly finds and updates both the [project] version
+        - It correctly finds and updates both the `pyproject.toml` [project] version
           and [tool.bumpversion] current_version, stages the file, commits, and tags.
         - It prints a `* [new tag]` line indicating the local -> remote tag push, not
           old -> new version tags.
